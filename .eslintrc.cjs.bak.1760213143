@@ -1,0 +1,15 @@
+module.exports = {
+  env: {
+    browser: true,
+    es2022: true,
+  },
+  parserOptions: {
+    ecmaVersion: 2022,
+    sourceType: "script"
+  },
+  rules: {
+    // minimal: warn about obvious problems, don't enforce style
+    "no-undef": "warn",
+    "no-unused-vars": ["warn", { "args": "none", "ignoreRestSiblings": true }]
+  }
+};

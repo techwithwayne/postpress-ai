@@ -1,0 +1,270 @@
+/* -------------------------------------------------------
+   PostPress AI — Two-Column Dark Composer Layout
+   ------------------------------------------------------- */
+
+.ppa-composer-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;   /* 50/50 columns */
+  gap: 24px;
+  color: #f5f5f5;
+  background-color: #121212;
+  padding: 24px;
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+
+/* === Left panel === */
+.ppa-form-panel {
+  background: #1c1c1c;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Right panel === */
+.ppa-preview-panel {
+  background: #1c1c1c;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  overflow-y: auto;
+  max-height: 80vh;
+}
+
+/* === Form fields === */
+.ppa-form-panel h1 { color: #ff6c00; margin-top: 0; }
+.ppa-form-panel label {
+  display: block;
+  margin-top: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+.ppa-form-panel input,
+.ppa-form-panel select,
+.ppa-form-panel textarea {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #2b2b2b;
+  color: #fff;
+  font-size: 14px;
+}
+.ppa-form-panel input:focus,
+.ppa-form-panel select:focus,
+.ppa-form-panel textarea:focus {
+  outline: none;
+  border-color: #ff6c00;
+  box-shadow: 0 0 0 1px #ff6c00;
+}
+.ppa-subhead { margin-bottom: 12px; font-size: 14px; color: #ccc; }
+
+/* === Buttons === */
+.ppa-buttons {
+  margin-top: 24px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ppa-btn {
+  padding: 10px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  border: none;
+  transition: background .2s ease;
+}
+.ppa-btn-primary { background: #ff6c00; color: #fff; }
+.ppa-btn-primary:hover { background: #ff8126; }
+.ppa-btn-secondary {
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #333;
+}
+.ppa-btn-secondary:hover { background: #3a3a3a; }
+
+/* === Preview area === */
+.ppa-preview-panel h2 { margin-top: 0; color: #ff6c00; }
+#ppa-preview-meta { font-size: 14px; color: #ccc; margin-bottom: 12px; }
+.ppa-preview-panel .tone,
+.ppa-preview-panel .genre { color: #ff6c00; font-weight: 600; }
+.ppa-preview-panel ul { list-style: disc; margin-left: 24px; }
+.ppa-preview-panel li { margin-bottom: 6px; }
+
+/* === Messages === */
+.ppa-success {
+  background: #143f1b; border: 1px solid #26a649; color: #b8f1c4;
+  padding: 8px 12px; border-radius: 6px;
+}
+.ppa-error {
+  background: #3f1414; border: 1px solid #c43d3d; color: #f4b8b8;
+  padding: 8px 12px; border-radius: 6px;
+}
+
+/* === Responsive === */
+@media (max-width: 900px) {
+  .ppa-composer-wrap { grid-template-columns: 1fr; }
+}
+
+/* -------------------------------------------------------
+   Preview readability & brand styling enhancements
+   ------------------------------------------------------- */
+
+/* subtle vertical divider between form and preview */
+@media (min-width: 901px) {
+  .ppa-form-panel {
+    border-right: 1px solid #2a2a2a;
+    margin-right: 12px;
+  }
+}
+
+/* Typography inside preview */
+.ppa-preview-panel {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #e0e0e0;
+}
+
+.ppa-preview-panel p {
+  margin-bottom: 1em;
+}
+
+.ppa-preview-panel h2,
+.ppa-preview-panel h3,
+.ppa-preview-panel h4 {
+  color: #ff6c00;
+  margin-top: 1.2em;
+  margin-bottom: 0.4em;
+  font-weight: 700;
+}
+
+.ppa-preview-panel strong {
+  color: #fff;
+  font-weight: 700;
+}
+
+.ppa-preview-panel em {
+  color: #f5f5f5;
+  font-style: italic;
+}
+
+.ppa-preview-panel ul,
+.ppa-preview-panel ol {
+  margin-left: 24px;
+  padding-left: 0;
+  color: #d0d0d0;
+}
+
+.ppa-preview-panel li {
+  margin-bottom: 6px;
+}
+
+.ppa-preview-panel a {
+  color: #ff8126;
+  text-decoration: underline;
+}
+
+.ppa-preview-panel a:hover {
+  color: #ffa45b;
+}
+
+/* divider line between content sections */
+.ppa-preview-panel hr {
+  border: 0;
+  border-top: 1px solid #333;
+  margin: 1.5em 0;
+}
+
+/* make scrollbars subtle */
+.ppa-preview-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.ppa-preview-panel::-webkit-scrollbar-thumb {
+  background-color: #2b2b2b;
+  border-radius: 8px;
+}
+.ppa-preview-panel::-webkit-scrollbar-thumb:hover {
+  background-color: #3a3a3a;
+}
+
+/* -------------------------------------------------------
+   UX Polish: fade transitions + dropdown readability
+   ------------------------------------------------------- */
+
+/* Fade-in animation for preview updates */
+@keyframes ppaFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#ppa-preview-body {
+  animation: ppaFadeIn 0.3s ease-in-out;
+}
+
+/* Highlight live meta change */
+#ppa-preview-meta {
+  transition: color 0.3s ease, opacity 0.3s ease;
+}
+
+/* Dropdown (select) appearance fix for dark theme */
+.ppa-form-panel select {
+  color: #f5f5f5;
+  background-color: #2b2b2b;
+  border: 1px solid #444;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff6c00' height='12' viewBox='0 0 24 24' width='12' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  padding-right: 28px;
+}
+
+/* When focused */
+.ppa-form-panel select:focus {
+  border-color: #ff6c00;
+  outline: none;
+  box-shadow: 0 0 0 1px #ff6c00;
+}
+
+/* Options dropdown colors (for Chromium + Firefox) */
+.ppa-form-panel select option {
+  color: #fff;
+  background-color: #1c1c1c;
+}
+
+/* Improve scrollbar contrast for option lists */
+select::-webkit-scrollbar {
+  width: 8px;
+}
+select::-webkit-scrollbar-thumb {
+  background-color: #444;
+  border-radius: 4px;
+}
+select::-webkit-scrollbar-thumb:hover {
+  background-color: #555;
+}
+
+/* -------------------------------------------------------
+   Animated feedback for success / error messages
+   ------------------------------------------------------- */
+
+.ppa-success,
+.ppa-error {
+  opacity: 0;
+  transform: translateY(4px);
+  animation: ppaFadeIn 0.35s ease-in-out forwards;
+}
+
+/* Optional: subtle glow outline matching their colors */
+.ppa-success {
+  box-shadow: 0 0 10px rgba(38,166,73,0.3);
+}
+
+.ppa-error {
+  box-shadow: 0 0 10px rgba(196,61,61,0.3);
+}
