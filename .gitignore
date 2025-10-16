@@ -1,20 +1,23 @@
+# Composer / npm lock if you want to ignore (optional)
+# IDE / OS
+# Keys / certs
 # Local env / secrets
+# Node / PHP deps
+# composer.lock
+# uploads and build artifacts
+*.bak
+*.crt
+*.key
+*.log
+*.orig
+*.pem
+*.zip
+.DS_Store
 .env
 .env.* 
-# Node / PHP deps
-node_modules/
-vendor/
-# IDE / OS
-.DS_Store
 .idea/
 .vscode/
-# Keys / certs
-*.pem
-*.key
-*.crt
-# uploads and build artifacts
+node_modules/
 uploads/
+vendor/
 wp-content/uploads/
-*.log
-# Composer / npm lock if you want to ignore (optional)
-# composer.lock
