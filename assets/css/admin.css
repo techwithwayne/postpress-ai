@@ -268,3 +268,151 @@ select::-webkit-scrollbar-thumb:hover {
 .ppa-error {
   box-shadow: 0 0 10px rgba(196,61,61,0.3);
 }
+/* ==========================================================================
+   PostPress AI — Admin CSS (append)
+   ======= CHANGE LOG =======
+   2025-10-19: Added toolbar notice styles (.ppa-notice + variants) and busy-state button styling. // CHANGED:
+   ========================================================================== */
+
+/* Toolbar notice container (shown near composer controls) */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
+  margin-top: 10px; /* CHANGED: */
+  padding: 10px 12px; /* CHANGED: */
+  border-radius: 6px; /* CHANGED: */
+  line-height: 1.35; /* CHANGED: */
+  font-size: 13px; /* CHANGED: */
+  background: rgba(255, 255, 255, 0.06); /* CHANGED: */
+  color: #ffffff; /* CHANGED: */
+  border: 1px solid rgba(255, 255, 255, 0.12); /* CHANGED: */
+}
+
+/* Default/cleared state */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
+  opacity: 0.95; /* CHANGED: */
+}
+
+/* Success / Error / Warn / Info variants (dark UI with brand accent) */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice-success { /* CHANGED: */
+  background: rgba(16, 185, 129, 0.15); /* teal-ish */ /* CHANGED: */
+  border-color: rgba(16, 185, 129, 0.35); /* CHANGED: */
+  color: #d1fae5; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-error { /* CHANGED: */
+  background: rgba(239, 68, 68, 0.18); /* red-ish */ /* CHANGED: */
+  border-color: rgba(239, 68, 68, 0.40); /* CHANGED: */
+  color: #fee2e2; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-warn { /* CHANGED: */
+  background: rgba(255, 108, 0, 0.20); /* brand accent #ff6c00 */ /* CHANGED: */
+  border-color: rgba(255, 108, 0, 0.40); /* CHANGED: */
+  color: #fff7ed; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-info { /* CHANGED: */
+  background: rgba(59, 130, 246, 0.18); /* blue-ish */ /* CHANGED: */
+  border-color: rgba(59, 130, 246, 0.40); /* CHANGED: */
+  color: #dbeafe; /* CHANGED: */
+}
+
+/* Buttons disabled/busy state */ /* CHANGED: */
+#ppa-composer .button[disabled],
+#ppa-composer .button[aria-busy="true"] { /* CHANGED: */
+  opacity: 0.6; /* CHANGED: */
+  cursor: not-allowed; /* CHANGED: */
+  pointer-events: none; /* CHANGED: */
+  position: relative; /* CHANGED: */
+}
+
+/* Optional subtle busy indicator dot on primary buttons */ /* CHANGED: */
+#ppa-composer .button-primary[aria-busy="true"]::after { /* CHANGED: */
+  content: '…'; /* CHANGED: */
+  position: absolute; /* CHANGED: */
+  right: 10px; /* CHANGED: */
+  top: 50%; /* CHANGED: */
+  transform: translateY(-50%); /* CHANGED: */
+  font-weight: 700; /* CHANGED: */
+}
+
+/* Keep the preview pane readable over dark bg */ /* CHANGED: */
+#ppa-preview-pane { /* CHANGED: */
+  background: rgba(255, 255, 255, 0.02); /* CHANGED: */
+  border: 1px solid rgba(255, 255, 255, 0.08); /* CHANGED: */
+  border-radius: 6px; /* CHANGED: */
+  padding: 14px; /* CHANGED: */
+}
+/* ==========================================================================
+   PostPress AI — Admin CSS (append)
+   ======= CHANGE LOG =======
+   2025-10-19: Added toolbar notice styles (.ppa-notice + variants) and busy-state button styling. // CHANGED:
+   ========================================================================== */
+
+/* Toolbar notice container (shown near composer controls) */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
+  margin-top: 10px; /* CHANGED: */
+  padding: 10px 12px; /* CHANGED: */
+  border-radius: 6px; /* CHANGED: */
+  line-height: 1.35; /* CHANGED: */
+  font-size: 13px; /* CHANGED: */
+  background: rgba(255, 255, 255, 0.06); /* CHANGED: */
+  color: #ffffff; /* CHANGED: */
+  border: 1px solid rgba(255, 255, 255, 0.12); /* CHANGED: */
+}
+
+/* Default/cleared state */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
+  opacity: 0.95; /* CHANGED: */
+}
+
+/* Success / Error / Warn / Info variants (dark UI with brand accent) */ /* CHANGED: */
+#ppa-toolbar-msg.ppa-notice-success { /* CHANGED: */
+  background: rgba(16, 185, 129, 0.15); /* teal-ish */ /* CHANGED: */
+  border-color: rgba(16, 185, 129, 0.35); /* CHANGED: */
+  color: #d1fae5; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-error { /* CHANGED: */
+  background: rgba(239, 68, 68, 0.18); /* red-ish */ /* CHANGED: */
+  border-color: rgba(239, 68, 68, 0.40); /* CHANGED: */
+  color: #fee2e2; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-warn { /* CHANGED: */
+  background: rgba(255, 108, 0, 0.20); /* brand accent #ff6c00 */ /* CHANGED: */
+  border-color: rgba(255, 108, 0, 0.40); /* CHANGED: */
+  color: #fff7ed; /* CHANGED: */
+}
+
+#ppa-toolbar-msg.ppa-notice-info { /* CHANGED: */
+  background: rgba(59, 130, 246, 0.18); /* blue-ish */ /* CHANGED: */
+  border-color: rgba(59, 130, 246, 0.40); /* CHANGED: */
+  color: #dbeafe; /* CHANGED: */
+}
+
+/* Buttons disabled/busy state */ /* CHANGED: */
+#ppa-composer .button[disabled],
+#ppa-composer .button[aria-busy="true"] { /* CHANGED: */
+  opacity: 0.6; /* CHANGED: */
+  cursor: not-allowed; /* CHANGED: */
+  pointer-events: none; /* CHANGED: */
+  position: relative; /* CHANGED: */
+}
+
+/* Optional subtle busy indicator dot on primary buttons */ /* CHANGED: */
+#ppa-composer .button-primary[aria-busy="true"]::after { /* CHANGED: */
+  content: '…'; /* CHANGED: */
+  position: absolute; /* CHANGED: */
+  right: 10px; /* CHANGED: */
+  top: 50%; /* CHANGED: */
+  transform: translateY(-50%); /* CHANGED: */
+  font-weight: 700; /* CHANGED: */
+}
+
+/* Keep the preview pane readable over dark bg */ /* CHANGED: */
+#ppa-preview-pane { /* CHANGED: */
+  background: rgba(255, 255, 255, 0.02); /* CHANGED: */
+  border: 1px solid rgba(255, 255, 255, 0.08); /* CHANGED: */
+  border-radius: 6px; /* CHANGED: */
+  padding: 14px; /* CHANGED: */
+}
