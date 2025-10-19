@@ -1,15 +1,24 @@
 <?php
 /**
- * Plugin Name: PostPress AI
- * Plugin URI:  https://techwithwayne.com/
- * Description: Minimal PostPress AI skeleton (rebuild). Add features file-by-file.
- * Version:     0.1.0
- * Author:      Tech With Wayne
+ * PostPress AI — Plugin Bootstrap
+ *
+ * CHANGE LOG
+ * 2025-10-19 — Restore proper admin page registration + access for Admin/Editor/Author. # CHANGED
+ * - Registers a top-level menu with capability 'edit_posts' (covers admin/editor/author). # CHANGED
+ * - Uses render callback ppa_render_composer() to include inc/admin/composer.php at the right time. # CHANGED
+ * - Defers admin assets to admin_enqueue_scripts and scopes to our screen only. # CHANGED
+ * - Loads AJAX handlers on 'init' so admin-ajax.php works. # CHANGED
+ * - Adds detailed debug logs (error_log('PPA: ...')). # CHANGED
+ *
+ * Notes:
+ * - Do not echo output here; only register hooks. The UI is rendered by composer.php.
  */
 
-defined( 'ABSPATH' ) || exit;
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
-// Constants
+// Paths
 if ( ! defined( 'PPA_PLUGIN_DIR' ) ) {
     define( 'PPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 }
@@ -17,120 +26,81 @@ if ( ! defined( 'PPA_PLUGIN_URL' ) ) {
     define( 'PPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 
-// Light debug
-if ( function_exists( 'error_log' ) ) {
-    error_log( 'PPA: postpress-ai plugin loaded' );
-}
+// Debug: bootstrap loaded
+error_log( 'PPA: bootstrap loaded; dir=' . PPA_PLUGIN_DIR ); // CHANGED
 
-// Include helpers and ajax stubs (if present)
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/helpers.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/helpers.php';
-}
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/marker.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/ajax/marker.php';
-}
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/preview.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/ajax/preview.php';
-}
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/store.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/ajax/store.php';
-}
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/admin/composer.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/admin/composer.php';
-}
-// Load admin enqueue helpers
-if ( file_exists( PPA_PLUGIN_DIR . 'inc/admin/enqueue.php' ) ) {
-    require_once PPA_PLUGIN_DIR . 'inc/admin/enqueue.php';
-}
+/**
+ * Register admin menu (visible to admins, editors, authors).
+ * Capability 'edit_posts' intentionally chosen to include those roles.
+ */
+add_action( 'admin_menu', function () {
+    $capability = 'edit_posts'; // admin/editor/author
+    $menu_slug  = 'postpress-ai'; // keep slug stable + predictable
 
-
-// Admin menu
-add_action( 'admin_menu', function() {
     add_menu_page(
-        'PostPress AI',
-        'PostPress AI',
-        'manage_options',
-        'postpress-ai',
-        'ppa_render_composer_page'
+        __( 'PostPress AI', 'postpress-ai' ),
+        __( 'PostPress AI', 'postpress-ai' ),
+        $capability,
+        $menu_slug,
+        'ppa_render_composer',
+        'dashicons-welcome-widgets-menus',
+        65
     );
-} );
 
-// Enqueue admin assets and localize AJAX
-add_action( 'admin_enqueue_scripts', function( $hook ) {
-    if ( strpos( $hook, 'postpress-ai' ) === false ) {
-        return;
-    }
-    // --- Version rotators for JS & CSS (use filemtime fallback to time) ---
-$ppa_js_file  = PPA_PLUGIN_DIR . 'assets/js/admin.js';
-$ppa_css_file = PPA_PLUGIN_DIR . 'assets/css/admin.css';
+    error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ', cap=' . $capability . ')' ); // CHANGED
+}, 9 );
 
-$ppa_js_ver  = file_exists( $ppa_js_file )  ? filemtime( $ppa_js_file )  : time();
-$ppa_css_ver = file_exists( $ppa_css_file ) ? filemtime( $ppa_css_file ) : time();
-
-wp_enqueue_script( 'ppa-admin-js', PPA_PLUGIN_URL . 'assets/js/admin.js', array( 'jquery' ), $ppa_js_ver, true );
-
-wp_localize_script(
-    'ppa-admin-js',
-    'PPA_AJAX',
-    array(
-        'ajax_url' => admin_url( 'admin-ajax.php' ),
-        'nonce'    => wp_create_nonce( 'ppa_admin_nonce' ),
-    )
-);
-
-wp_enqueue_style( 'ppa-admin-css', PPA_PLUGIN_URL . 'assets/css/admin.css', array(), $ppa_css_ver );
-
-    wp_localize_script(
-    'ppa-admin-js',
-    'PPA_AJAX',
-    array(
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce'    => wp_create_nonce('ppa_admin_nonce'),
-    )
-);
-    wp_localize_script( 'ppa-admin-js', 'PPA_AJAX', array(
-        'ajax_url' => admin_url( 'admin-ajax.php' ),
-        'nonce'    => wp_create_nonce( 'ppa_admin_nonce' ),
-    ) );
-} );
-
-// AJAX endpoint
-add_action( 'wp_ajax_ppa_preview', function() {
-    if ( ! check_ajax_referer( 'ppa_admin_nonce', '_ajax_nonce', false ) ) {
-        wp_send_json( array( 'ok' => false, 'error' => 'invalid-nonce' ) );
-    }
-
-    if ( function_exists( 'PPA\\Ajax\\generate_preview' ) ) {
-        $res = call_user_func( 'PPA\\Ajax\\generate_preview', $_POST );
-        if ( is_wp_error( $res ) ) {
-            wp_send_json( array( 'ok' => false, 'error' => $res->get_error_code(), 'message' => $res->get_error_message() ) );
+/**
+ * Render callback — includes the composer UI (no capability checks here;
+ * WP has already enforced 'edit_posts' for us).
+ */
+if ( ! function_exists( 'ppa_render_composer' ) ) {
+    function ppa_render_composer() {
+        if ( ! is_admin() ) {
+            return;
         }
-        wp_send_json( $res );
-    } else {
-        wp_send_json( array( 'ok' => false, 'error' => 'missing-handler-generate_preview' ) );
+        $composer = PPA_PLUGIN_DIR . 'inc/admin/composer.php';
+        if ( file_exists( $composer ) ) {
+            error_log( 'PPA: including composer.php' ); // CHANGED
+            require $composer;
+        } else {
+            error_log( 'PPA: composer.php missing at ' . $composer ); // CHANGED
+            echo '<div class="wrap"><h1>PostPress AI</h1><p>Composer UI not found.</p></div>';
+        }
     }
-} );
-
-add_action( 'wp_ajax_ppa_save_draft', function() {
-    if ( ! check_ajax_referer( 'ppa_admin_nonce', '_ajax_nonce', false ) ) {
-        wp_send_json( array( 'ok' => false, 'error' => 'invalid-nonce' ) );
-    }
-
-    if ( function_exists( 'PPA\\Ajax\\save_draft' ) ) {
-        $res = call_user_func( 'PPA\\Ajax\\save_draft', $_POST );
-        wp_send_json( $res );
-    } else {
-        wp_send_json( array( 'ok' => false, 'error' => 'missing-handler-save_draft' ) );
-    }
-});
-
-// Composer page callback
-
-// Health check for WP-CLI
-function ppa_health_check() {
-    return array(
-        'ok'      => true,
-        'plugin'  => 'postpress-ai',
-        'message' => 'skeleton loaded',
-    );
 }
+
+/**
+ * Enqueue admin assets (only on our screen).
+ */
+add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
+    // Only load on our page to keep admin clean
+    $screen = get_current_screen();
+    $is_our_screen = $screen && ( $screen->id === 'toplevel_page_postpress-ai' );
+
+    $enqueue = PPA_PLUGIN_DIR . 'inc/admin/enqueue.php';
+    if ( file_exists( $enqueue ) ) {
+        require_once $enqueue; // expected to define ppa_admin_enqueue()
+        if ( function_exists( 'ppa_admin_enqueue' ) && $is_our_screen ) {
+            error_log( 'PPA: enqueue assets for ' . $hook_suffix ); // CHANGED
+            ppa_admin_enqueue();
+        }
+    } else {
+        error_log( 'PPA: enqueue.php not found; skipping assets' ); // CHANGED
+    }
+}, 10 );
+
+/**
+ * AJAX handlers — load early so admin-ajax.php can find them.
+ */
+add_action( 'init', function () {
+    $ajax_dir = PPA_PLUGIN_DIR . 'inc/ajax/';
+
+    foreach ( array( 'preview.php', 'store.php', 'marker.php' ) as $file ) {
+        $path = $ajax_dir . $file;
+        if ( file_exists( $path ) ) {
+            require_once $path;
+            error_log( 'PPA: ajax loaded ' . $file ); // CHANGED
+        }
+    }
+}, 11 );
