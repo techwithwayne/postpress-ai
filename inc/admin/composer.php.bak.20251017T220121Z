@@ -1,0 +1,240 @@
+<?php
+/**
+ * Composer admin UI for PostPress AI
+ *
+ * CHANGE LOG
+ * 2025-10-17 — Rebuilt composer.php to match the earlier dark composer layout (two-column).
+ * 2025-10-18 — CHANGED: updated markup to use uploaded CSS class names (.ppa-composer-wrap, .ppa-form-panel, .ppa-preview-panel, .ppa-btn-*)
+ *
+ * Purpose:
+ * - Use class names that match the provided admin (1).css so the composer renders with the exact dark theme.
+ * - Keep capability filterable: apply_filters('ppa_admin_capability','edit_posts')
+ * - Create standardized nonce 'ppa_admin_nonce'
+ * - Include server-side debug logs and minimal inline JS bootstrap for immediate interactivity.
+ *
+ * Notes:
+ * - Styling resides in assets/css/admin.css (use the uploaded admin (1).css content placed there).
+ * - Behavioral JS should be in assets/js/admin.js (we keep a small inline fallback).
+ */
+
+// Prevent direct access
+defined( 'ABSPATH' ) || exit;
+
+// CHANGED: ensure we don't redeclare functions during iterative dev
+if ( ! function_exists( 'ppa_register_admin_menu_if_missing' ) ) {
+	/**
+	 * Register the admin menu using the same filterable capability.
+	 */
+	function ppa_register_admin_menu_if_missing() {
+		$cap = apply_filters( 'ppa_admin_capability', 'edit_posts' ); // CHANGED:
+		add_menu_page(
+			'PostPress AI',
+			'PostPress AI',
+			$cap,
+			'postpress-ai',
+			'ppa_render_composer_page',
+			'dashicons-edit',
+			56
+		);
+		error_log( 'PPA: admin menu registration invoked (cap:' . $cap . ')' ); // CHANGED:
+	}
+	add_action( 'admin_menu', 'ppa_register_admin_menu_if_missing', 20 );
+}
+
+/**
+ * Render the composer page. Uses CSS classes matching the uploaded stylesheet.
+ */
+function ppa_render_composer_page() { // CHANGED:
+	$required_cap = apply_filters( 'ppa_admin_capability', 'edit_posts' ); // CHANGED:
+
+	// CHANGED: friendly access-denied UI and logging
+	if ( ! current_user_can( $required_cap ) ) {
+		$user = wp_get_current_user();
+		error_log( 'PPA: access denied composer page. user_id=' . intval( $user->ID ) . ' login=' . esc_html( $user->user_login ) . ' required_cap=' . $required_cap ); // CHANGED:
+		?>
+		<div class="wrap">
+			<h1>PostPress AI — Composer</h1>
+			<div class="notice notice-error">
+				<p><strong>Access denied:</strong> You need the <code><?php echo esc_html( $required_cap ); ?></code> capability to view this page.</p>
+				<p>Owner action: add this to a mu-plugin or theme functions.php to change the capability:
+				<pre>add_filter('ppa_admin_capability', fn() =&gt; 'edit_posts');</pre>
+				</p>
+			</div>
+		</div>
+		<?php
+		return;
+	}
+
+	// CHANGED: standard nonce for JS/PHP flows
+	$nonce = wp_create_nonce( 'ppa_admin_nonce' ); // CHANGED:
+	$ajax_url = admin_url( 'admin-ajax.php' );
+
+	// CHANGED: render composer using class names expected by uploaded CSS
+	?>
+	<div class="wrap ppa-composer-wrap" id="ppa-composer-root" data-ajax="<?php echo esc_url( $ajax_url ); ?>" data-nonce="<?php echo esc_attr( $nonce ); ?>">
+		<header class="ppa-header">
+			<h1 class="ppa-title">PostPress AI</h1>
+			<p class="ppa-subhead">Compose a preview and save to WordPress. The preview appears on the right.</p>
+		</header>
+
+		<nav class="ppa-tabs">
+			<button class="ppa-tab ppa-tab-active" data-tab="compose">Compose</button>
+			<button class="ppa-tab" data-tab="history">History</button>
+		</nav>
+
+		<main class="ppa-grid">
+			<!-- left: form -->
+			<section class="ppa-form-panel">
+				<div class="ppa-card">
+					<h2 class="ppa-card-title">Compose</h2>
+
+					<form id="ppa-composer-form" method="post" action="#" onsubmit="return false;">
+						<input type="hidden" name="_wpnonce" value="<?php echo esc_attr( $nonce ); ?>" />
+						<input type="hidden" name="ppa_action" value="compose" />
+
+						<div class="ppa-field">
+							<label for="ppa-subject">Subject</label>
+							<input id="ppa-subject" name="subject" type="text" class="ppa-input" placeholder="e.g., Improve website speed" />
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-genre">Content Type</label>
+							<select id="ppa-genre" name="genre" class="ppa-select">
+								<option value="howto">How-to</option>
+								<option value="blog">Blog post</option>
+								<option value="faq">FAQ</option>
+								<option value="listicle">Listicle</option>
+								<option value="product">Product description</option>
+							</select>
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-tone">Tone</label>
+							<select id="ppa-tone" name="tone" class="ppa-select">
+								<option value="friendly">Friendly</option>
+								<option value="casual">Casual</option>
+								<option value="formal">Formal</option>
+								<option value="sales">Persuasive</option>
+								<option value="technical">Technical</option>
+							</select>
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-audience">Target Audience</label>
+							<input id="ppa-audience" name="audience" type="text" class="ppa-input" placeholder="e.g., small business owners in Iowa" />
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-keywords">Keywords</label>
+							<input id="ppa-keywords" name="keywords" type="text" class="ppa-input" placeholder="AI, automation, seo" />
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-wordcount">Word Count</label>
+							<input id="ppa-wordcount" name="word_count" type="number" min="50" max="5000" value="1200" class="ppa-input" />
+						</div>
+
+						<div class="ppa-field">
+							<label for="ppa-cta">Call to Action (optional)</label>
+							<input id="ppa-cta" name="cta" type="text" class="ppa-input" placeholder="e.g., Grab a free consultation today" />
+						</div>
+
+						<div class="ppa-actions">
+							<button id="ppa-preview-btn" class="ppa-btn ppa-btn-primary">Preview</button>
+							<button id="ppa-save-btn" class="ppa-btn ppa-btn-secondary">Save as Draft</button>
+							<?php if ( current_user_can( 'publish_posts' ) ) : // CHANGED: show Publish if allowed ?>
+								<button id="ppa-publish-btn" class="ppa-btn ppa-btn-accent">Publish</button>
+							<?php else : ?>
+								<button id="ppa-publish-btn" class="ppa-btn ppa-btn-secondary" disabled title="Requires publish_posts capability">Publish</button>
+							<?php endif; ?>
+							<span id="ppa-status" class="ppa-status" aria-live="polite"></span>
+						</div>
+					</form>
+				</div>
+
+				<!-- history panel hidden by default -->
+				<div id="ppa-history-panel" class="ppa-card ppa-hidden" aria-hidden="true" style="margin-top:14px;">
+					<h3 class="ppa-card-title">History</h3>
+					<div id="ppa-history-list">
+						<p class="ppa-note">No history yet.</p>
+					</div>
+				</div>
+			</section>
+
+			<!-- right: preview -->
+			<aside class="ppa-preview-panel">
+				<div class="ppa-card ppa-preview-card">
+					<h2 class="ppa-card-title">Preview</h2>
+					<div id="ppa-preview-area" class="ppa-preview-area" aria-live="polite">
+						<div class="ppa-preview-empty ppa-note">Preview will appear here after generating.</div>
+					</div>
+				</div>
+
+				<div class="ppa-card ppa-keypoints" style="margin-top:14px;">
+					<h4>Key Points</h4>
+					<ul>
+						<li>Introduce the topic clearly</li>
+						<li>Explain benefits or insights</li>
+						<li>Provide actionable steps</li>
+					</ul>
+				</div>
+			</aside>
+		</main>
+	</div>
+
+	<script type="text/javascript">
+	/* Inline bootstrap: minimal tab switching + expose PPA config. Full behavior belongs in assets/js/admin.js */
+	(function () {
+		console.info('PPA: composer DOM rendered (class-aligned)'); // CHANGED:
+
+		// expose runtime config if admin.js not loaded
+		window.PPA = window.PPA || {};
+		var root = document.getElementById('ppa-composer-root');
+		if (root) {
+			window.PPA.ajax_url = root.getAttribute('data-ajax');
+			window.PPA.nonce = root.getAttribute('data-nonce');
+			console.info('PPA: inline-config', window.PPA);
+		}
+
+		// simple tabs
+		var tabs = document.querySelectorAll('.ppa-tabs .ppa-tab');
+		tabs.forEach(function (tab) {
+			tab.addEventListener('click', function (e) {
+				e.preventDefault();
+				document.querySelectorAll('.ppa-tabs .ppa-tab').forEach(function (t) { t.classList.remove('ppa-tab-active'); });
+				this.classList.add('ppa-tab-active');
+				var selected = this.getAttribute('data-tab');
+				if ( selected === 'history' ) {
+					document.querySelector('.ppa-form-panel .ppa-card').style.display = 'none';
+					document.getElementById('ppa-history-panel').classList.remove('ppa-hidden');
+					document.getElementById('ppa-history-panel').setAttribute('aria-hidden','false');
+				} else {
+					document.querySelector('.ppa-form-panel .ppa-card').style.display = '';
+					document.getElementById('ppa-history-panel').classList.add('ppa-hidden');
+					document.getElementById('ppa-history-panel').setAttribute('aria-hidden','true');
+				}
+			});
+		});
+
+		// preview button fallback (local)
+		var previewBtn = document.getElementById('ppa-preview-btn');
+		if (previewBtn) {
+			previewBtn.addEventListener('click', function (e) {
+				e.preventDefault();
+				var subject = document.getElementById('ppa-subject').value || 'Untitled';
+				var area = document.getElementById('ppa-preview-area');
+				if (area) {
+					area.innerHTML = '<article class="ppa-generated"><h1>' + subject + '</h1><p class="ppa-note">Local preview (stub).</p></article>';
+				}
+			});
+		}
+	})();
+	</script>
+	<?php
+	// CHANGED: server-side render end
+} // end function ppa_render_composer_page
+
+// CHANGED: debug that file loaded
+if ( function_exists( 'error_log' ) ) {
+	error_log( 'PPA: composer.php loaded' ); // CHANGED:
+}

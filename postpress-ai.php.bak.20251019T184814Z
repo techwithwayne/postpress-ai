@@ -1,0 +1,142 @@
+<?php
+/**
+ * PostPress AI - plugin bootstrap
+ *
+ * CHANGE LOG
+ * 2025-10-19T -- CHANGED: Restore safe admin-menu registration & render callback so the composer page
+ *  is rendered only when WordPress admin is ready and capability checks are delegated to WP.
+ *  - Register admin menu with callback `ppa_render_composer()` instead of including composer.php at load.
+ *  - Load admin enqueue helpers on admin_enqueue_scripts (deferred).
+ *  - Include AJAX handlers on init (deferred).
+ *  - Keep defensive file_exists guards and debug logs.
+ *
+ * Rationale:
+ * Previously composer.php was included too early or incorrectly which caused bootstrap issues
+ * and accidental output. This file now registers the admin page properly and will render the
+ * composer UI via callback only when the admin UI requests it. This will restore the proper
+ * admin page rendering and avoid calling pluggable functions too early.
+ *
+ * NOTE: This file intentionally avoids printing or echoing UI during plugin load.
+ */
+
+/** Exit if accessed directly. */
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+// CHANGED: plugin path constants
+if ( ! defined( 'PPA_PLUGIN_DIR' ) ) {
+    define( 'PPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+}
+if ( ! defined( 'PPA_PLUGIN_URL' ) ) {
+    define( 'PPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+}
+
+// CHANGED: debug entry log
+error_log( 'PPA: postpress-ai bootstrap loaded at ' . date( 'c' ) . ' (PPA_PLUGIN_DIR=' . PPA_PLUGIN_DIR . ')' ); // CHANGED:
+
+/**
+ * Load helpers if present (non-fatal).
+ */
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/helpers.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/helpers.php'; // CHANGED:
+    error_log( 'PPA: inc/helpers.php loaded' ); // CHANGED:
+} else {
+    error_log( 'PPA: inc/helpers.php not found; continuing' ); // CHANGED:
+}
+
+/**
+ * Register admin menu and render callback.
+ *
+ * We register the menu (capability: edit_posts) and provide a dedicated render callback
+ * that includes the composer UI file when the admin requests the page.
+ * This prevents composer.php from being executed at plugin-load time.
+ */
+add_action( 'admin_menu', function() {
+    // CHANGED: add top-level menu page for PostPress AI
+    $capability = 'edit_posts'; // CHANGED: choose capability required to view composer
+    $menu_slug  = 'ppa-composer';
+    // Title, menu title, capability, slug, callback
+    add_menu_page(
+        'PostPress AI',         // page title
+        'PostPress AI',         // menu title
+        $capability,            // capability
+        $menu_slug,             // menu slug
+        'ppa_render_composer',  // callback (defined below)
+        'dashicons-welcome-widgets-menus', // icon
+        65                      // position
+    );
+    error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ', capability=' . $capability . ')' ); // CHANGED:
+}, 9 ); // CHANGED: run early in admin menu ordering
+
+/**
+ * Render callback for the admin menu page.
+ * This will include the composer.php file only when WP calls the callback (safe time).
+ */
+if ( ! function_exists( 'ppa_render_composer' ) ) {
+    function ppa_render_composer() {
+        // CHANGED: guard - ensure this runs in admin context and user has capability
+        if ( ! is_admin() ) {
+            return;
+        }
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            // Let WP handle capability errors — but also log for debugging.
+            error_log( 'PPA: ppa_render_composer: insufficient capability for current user' ); // CHANGED:
+            // WordPress will display the standard "Sorry, you are not allowed to access this page."
+            return;
+        }
+
+        $composer = PPA_PLUGIN_DIR . 'inc/admin/composer.php';
+        if ( file_exists( $composer ) ) {
+            require_once $composer; // CHANGED:
+            error_log( 'PPA: ppa_render_composer included composer.php' ); // CHANGED:
+        } else {
+            // CHANGED: show minimal fallback UI to prevent blank admin screen
+            error_log( 'PPA: ppa_render_composer could not find composer.php; showing fallback message' ); // CHANGED:
+            echo '<div class="wrap"><h1>PostPress AI</h1><p>Composer UI is temporarily unavailable. Check plugin files.</p></div>';
+        }
+    }
+}
+
+/**
+ * Defer admin asset registration to admin_enqueue_scripts.
+ * If inc/admin/enqueue.php exists, require it inside the hook so it runs at the correct time.
+ */
+add_action( 'admin_enqueue_scripts', function( $hook_suffix ) {
+    $enqueue = PPA_PLUGIN_DIR . 'inc/admin/enqueue.php';
+    if ( file_exists( $enqueue ) ) {
+        require_once $enqueue; // CHANGED:
+        error_log( 'PPA: inc/admin/enqueue.php required on admin_enqueue_scripts (' . $hook_suffix . ')' ); // CHANGED:
+    } else {
+        error_log( 'PPA: inc/admin/enqueue.php not found; skipping admin assets' ); // CHANGED:
+    }
+}, 10 );
+
+/**
+ * Include AJAX handlers on init (ensures WP environment is available).
+ * AJAX endpoints must be registered early enough for admin-ajax.php to call them.
+ */
+add_action( 'init', function() {
+    $base = PPA_PLUGIN_DIR . 'inc/ajax/';
+
+    if ( file_exists( $base . 'preview.php' ) ) {
+        require_once $base . 'preview.php'; // CHANGED:
+        error_log( 'PPA: inc/ajax/preview.php loaded' ); // CHANGED:
+    } else {
+        error_log( 'PPA: inc/ajax/preview.php not found' ); // CHANGED:
+    }
+
+    if ( file_exists( $base . 'store.php' ) ) {
+        require_once $base . 'store.php'; // CHANGED:
+        error_log( 'PPA: inc/ajax/store.php loaded' ); // CHANGED:
+    } else {
+        error_log( 'PPA: inc/ajax/store.php not found' ); // CHANGED:
+    }
+
+    if ( file_exists( $base . 'marker.php' ) ) {
+        require_once $base . 'marker.php'; // CHANGED:
+        error_log( 'PPA: inc/ajax/marker.php loaded' ); // CHANGED:
+    } else {
+        error_log( 'PPA: inc/ajax/marker.php not found' ); // CHANGED:
+    }
+}, 11 ); // CHANGED: after core init

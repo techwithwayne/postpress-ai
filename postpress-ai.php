@@ -1,5 +1,17 @@
 <?php
 /**
+ * Plugin Name: PostPress AI
+ * Description: Secure server-to-server AI content preview & store via Django (PostPress AI). Adds a Composer screen and server-side AJAX proxy to your Django backend.
+ * Author: Tech With Wayne
+ * Version: 2.1.0
+ * Requires at least: 6.1
+ * Requires PHP: 7.4
+ * Text Domain: postpress-ai
+ *
+ * @package PostPressAI
+ */
+
+/**
  * PostPress AI — Plugin Bootstrap
  *
  * CHANGE LOG

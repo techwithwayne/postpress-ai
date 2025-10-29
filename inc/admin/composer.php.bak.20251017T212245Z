@@ -1,0 +1,158 @@
+<?php
+/**
+ * Admin Composer UI — PostPress AI
+ *
+ * CHANGE LOG
+ * 2025-10-16 — created composer admin page include
+ * 2025-10-16 — CHANGED: normalized capability to 'edit_posts' (configurable via filter) to avoid "You do not have permissions" for editors
+ * 2025-10-16 — CHANGED: added clear permission check and helpful message + debug logging
+ *
+ * Responsibilities:
+ * - register top-level admin menu page 'postpress-ai'
+ * - render composer UI when user has capability
+ * - show clear message (and an admin-only diagnostic) when capability missing
+ *
+ * Notes:
+ * - This file is intentionally minimal and safe. Move heavier UI into separate JS/CSS assets.
+ * - Nonce used across plugin: 'ppa_admin_nonce' (standardized).
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	// CHANGED: prevent direct access
+	exit;
+}
+
+// CHANGED: ensure we don't redeclare hooks during iterative development
+if ( ! function_exists( 'ppa_admin_register_menu' ) ) {
+
+	/**
+	 * Register plugin admin menu.
+	 *
+	 * Capability is filterable so repo maintainers can change it in a mu-plugin or theme.
+	 *
+	 * @return void
+	 */
+	function ppa_admin_register_menu() {
+		// CHANGED: default capability lowered to 'edit_posts' to allow editors to access composer UI.
+		$capability = apply_filters( 'ppa_admin_capability', 'edit_posts' ); // CHANGED:
+		add_menu_page(
+			/* page_title */  'PostPress AI',
+			/* menu_title */  'PostPress AI',
+			/* capability */  $capability,
+			/* menu_slug */   'postpress-ai',
+			/* callback */    'ppa_admin_render_composer_page',
+			/* icon_url */    'dashicons-edit',
+			/* position */    56
+		);
+		error_log( 'PPA: admin menu registered (cap:' . $capability . ')' ); // CHANGED:
+	}
+	add_action( 'admin_menu', 'ppa_admin_register_menu', 20 );
+}
+
+/**
+ * Render the composer admin page.
+ *
+ * @return void
+ */
+function ppa_admin_render_composer_page() {
+	// CHANGED: ensure user has capability and fail gracefully with clear message
+	if ( ! current_user_can( apply_filters( 'ppa_admin_capability', 'edit_posts' ) ) ) {
+		// Show WP's standard "You do not have permissions to view this page." message is thrown earlier by WP if capability fails.
+		// We render a friendly message with guidance and a debug note for admins.
+		?>
+		<div class="wrap">
+			<h1>PostPress AI</h1>
+			<div style="background:#fff6f0;border-left:4px solid #ff6c00;padding:12px;margin-top:12px;">
+				<p><strong>Access denied.</strong> You do not have permission to view this page.</p>
+				<p>If you believe this is an error, ask a site administrator to grant the <code><?php echo esc_html( apply_filters( 'ppa_admin_capability', 'edit_posts' ) ); ?></code> capability to your role.</p>
+			</div>
+		</div>
+		<?php
+
+		// Additionally log the user and capability check for admins (no secrets)
+		$user = wp_get_current_user();
+		error_log( 'PPA: access denied to composer page. user_id=' . intval( $user->ID ) . ' user_login=' . esc_html( $user->user_login ) . ' capability=' . apply_filters( 'ppa_admin_capability', 'edit_posts' ) ); // CHANGED:
+
+		return;
+	}
+
+	// CHANGED: at this point user has capability — render composer UI skeleton that JS will enhance
+	$nonce = wp_create_nonce( 'ppa_admin_nonce' ); // CHANGED: use standardized nonce
+	?>
+	<div class="wrap ppa-admin-wrapper" style="max-width:1100px;">
+		<h1 style="display:flex;align-items:center;gap:.6rem;">
+			<span class="ppa-logo" aria-hidden="true" style="width:40px;height:40px;background:#121212;color:#fff;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;">P</span>
+			<span>PostPress AI — Composer</span>
+		</h1>
+
+		<p class="ppa-lead">Quickly draft posts using the AI composer. Use the preview and save flows to generate content.</p>
+
+		<!-- Minimal UI: JS will hijack and replace with richer composer -->
+		<div id="ppa-composer-root" data-nonce="<?php echo esc_attr( $nonce ); ?>" data-ajax-url="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>">
+			<!-- Fallback UI for no-JS users -->
+			<noscript>
+				<div style="background:#fff6f0;border-left:4px solid #ff6c00;padding:12px;">
+					<p><strong>JavaScript is required</strong> to use the composer. Please enable JavaScript in your browser.</p>
+				</div>
+			</noscript>
+
+			<!-- Simple form (enhanced by admin.js) -->
+			<form id="ppa-composer-form" method="post" action="" style="margin-top:16px;">
+				<input type="hidden" name="_wpnonce" value="<?php echo esc_attr( $nonce ); ?>">
+				<table class="form-table">
+					<tr>
+						<th scope="row"><label for="ppa-subject">Subject</label></th>
+						<td><input id="ppa-subject" name="subject" type="text" class="regular-text" placeholder="Enter subject or headline" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ppa-tone">Tone</label></th>
+						<td>
+							<select id="ppa-tone" name="tone">
+								<option value="">Default</option>
+								<option value="casual">Casual</option>
+								<option value="formal">Formal</option>
+								<option value="persuasive">Persuasive</option>
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ppa-wordcount">Word count</label></th>
+						<td><input id="ppa-wordcount" name="word_count" type="number" min="50" max="2000" value="300" /></td>
+					</tr>
+				</table>
+
+				<p class="submit">
+					<button id="ppa-preview-btn" type="button" class="button button-primary">Preview</button>
+					<button id="ppa-save-btn" type="button" class="button">Save Draft</button>
+					<span id="ppa-status" style="margin-left:1rem;"></span>
+				</p>
+			</form>
+
+			<hr />
+
+			<div id="ppa-preview-area" style="background:#fff;border:1px solid #e5e5e5;padding:12px;border-radius:6px;min-height:120px;">
+				<p style="color:#777;margin:0;">Preview will appear here after generating.</p>
+			</div>
+		</div>
+
+	</div>
+
+	<script type="text/javascript">
+		/* CHANGED: small inline bootstrap to help debug and ensure JS has initial hooks.
+		   admin.js will replace/attach its own handlers when present. */
+		( function () {
+			console.info( 'PPA: composer UI loaded (inline bootstrap)' );
+			window.PPA = window.PPA || {};
+			// expose minimal config for non-registered JS or for debugging quickly
+			if ( ! window.PPA.ajax_url ) {
+				var root = document.getElementById( 'ppa-composer-root' );
+				if ( root ) {
+					window.PPA.ajax_url = root.getAttribute( 'data-ajax-url' );
+					window.PPA.nonce = root.getAttribute( 'data-nonce' );
+					console.info( 'PPA: inline-config', window.PPA );
+				}
+			}
+		} )();
+	</script>
+	<?php
+}
