@@ -4,7 +4,6 @@
  *
  * CHANGE LOG
  * 2025-10-16 — created enqueue include: registers/enqueues admin JS + CSS, exposes PPA config to JS.
- * 2025-10-16 — CHANGED: standardized nonce name to 'ppa_admin_nonce' to match AJAX handlers.
  *
  * Notes:
  * - Uses PPA_PLUGIN_DIR constant for safe absolute path resolution.
@@ -78,16 +77,15 @@ if ( ! function_exists( 'ppa_admin_enqueue_assets' ) ) {
 				wp_enqueue_script( 'ppa-admin-js' );
 
 				// CHANGED: expose minimal runtime config to admin JS
-				// NOTE: nonce name standardized to 'ppa_admin_nonce' to match handlers
 				$ppa_config = array(
 					'ajax_url' => admin_url( 'admin-ajax.php' ),
-					'nonce'    => wp_create_nonce( 'ppa_admin_nonce' ), // CHANGED: standardized nonce name
+					'nonce'    => wp_create_nonce( 'ppa_admin' ),
 					'plugin'   => 'postpress-ai',
 					'version'  => $js_version ? (string) $js_version : '0',
 				);
 
 				wp_localize_script( 'ppa-admin-js', 'PPA', $ppa_config );
-				error_log( 'PPA: enqueued admin JS and localized PPA config (nonce set as ppa_admin_nonce)' );
+				error_log( 'PPA: enqueued admin JS and localized PPA config' );
 			}
 		}
 	}

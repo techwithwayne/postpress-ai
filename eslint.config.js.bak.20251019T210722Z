@@ -1,0 +1,54 @@
+/**
+ * CHANGE LOG
+ * 2025-10-19 — Add ESLint v9 flat config for the plugin (targets admin JS). // CHANGED:
+ * - Scopes linting to assets/js/**/*.js only.                               // CHANGED:
+ * - Uses modern JS (ECMAScript 2023) in script mode (IIFE, no modules).     // CHANGED:
+ * - Defines safe browser globals; allows console for debug instrumentation.  // CHANGED:
+ * - Ignores backups and vendor directories.                                  // CHANGED:
+ */
+
+// Flat config for ESLint v9+
+export default [
+  // Ignore patterns (lowest precedence block)
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/vendor/**',
+      'assets/backup/**',
+      '**/*.min.js',
+    ],
+  },
+
+  // Main ruleset for our admin scripts
+  {
+    files: ['assets/js/**/*.js'],
+
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'script', // we use IIFE, not ESM
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        alert: 'readonly',
+      },
+    },
+
+    rules: {
+      // Core hygiene
+      'no-undef': 'error',
+      'no-unused-vars': ['warn', { args: 'after-used', ignoreRestSiblings: true }],
+      'no-redeclare': 'error',
+
+      // Allow logging for debug instrumentation (required by our workflow)
+      'no-console': 'off',
+
+      // Stylistic (sane defaults without being strict)
+      'prefer-const': 'warn',
+      'eqeqeq': ['warn', 'smart'],
+      'curly': ['warn', 'multi-line'],
+    },
+  },
+];

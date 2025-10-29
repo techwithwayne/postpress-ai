@@ -1,0 +1,164 @@
+<?php
+/**
+ * Composer admin UI for PostPress AI
+ *
+ * CHANGE LOG
+ * 2025-10-16 — Recreated composer.php to match original composer layout (top subject input, compose button, form-table fields, preview card).
+ * 2025-10-17 — CHANGED: standardized capability via apply_filters('ppa_admin_capability','edit_posts') and replaced wp_die() with friendly in-page access-denied UI.
+ * 2025-10-17 — CHANGED: added admin menu registration (ppa_admin_register_menu) to ensure the admin page is properly registered and reachable.
+ */
+
+// Prevent direct access
+defined( 'ABSPATH' ) || exit;
+
+// Simple debug at load time
+if ( function_exists( 'error_log' ) ) {
+    error_log( 'PPA: composer include loaded' ); // CHANGED: debug entry
+}
+
+/**
+ * Register plugin admin menu.
+ *
+ * Uses the same filterable capability as the page rendering function so menu visibility
+ * and page access remain consistent.
+ */
+if ( ! function_exists( 'ppa_admin_register_menu' ) ) {
+	function ppa_admin_register_menu() {
+		$capability = apply_filters( 'ppa_admin_capability', 'edit_posts' ); // CHANGED: capability is filterable & consistent
+		add_menu_page(
+			/* page_title */ 'PostPress AI',
+			/* menu_title */ 'PostPress AI',
+			/* capability */ $capability,
+			/* menu_slug  */ 'postpress-ai',
+			/* function   */ 'ppa_render_composer_page',
+			/* icon_url   */ 'dashicons-edit',
+			/* position   */ 56
+		);
+		error_log( 'PPA: admin menu registered (cap:' . $capability . ')' ); // CHANGED: debug
+	}
+	add_action( 'admin_menu', 'ppa_admin_register_menu', 20 ); // CHANGED: register menu on admin_menu
+}
+
+/**
+ * Render the composer admin page.
+ *
+ * Callback expected by plugin bootstrap (add_menu_page or similar).
+ */
+function ppa_render_composer_page() { // CHANGED:
+	// CHANGED: capability now filterable and defaults to 'edit_posts' so editors can use the composer
+	$required_cap = apply_filters( 'ppa_admin_capability', 'edit_posts' ); // CHANGED:
+
+	if ( ! current_user_can( $required_cap ) ) {
+		// CHANGED: render a friendly access denied message rather than wp_die()
+		$user = wp_get_current_user();
+		error_log( 'PPA: access denied to composer page. user_id=' . intval( $user->ID ) . ' user_login=' . esc_html( $user->user_login ) . ' required_cap=' . $required_cap ); // CHANGED:
+		?>
+		<div class="wrap ppa-admin-wrapper" style="max-width:1100px;">
+			<h1>PostPress AI — Composer</h1>
+			<div style="background:#fff6f0;border-left:4px solid #ff6c00;padding:12px;margin-top:12px;">
+				<p><strong>Access denied.</strong> You do not have permission to view this page.</p>
+				<p>Required capability: <code><?php echo esc_html( $required_cap ); ?></code></p>
+				<p>If you think this is an error, contact a site administrator and ask them to either:</p>
+				<ul>
+					<li>Grant your role the <code><?php echo esc_html( $required_cap ); ?></code> capability, or</li>
+					<li>Change the plugin's required capability by adding this in a mu-plugin or theme functions.php:
+						<pre>add_filter('ppa_admin_capability', fn() =&gt; 'edit_posts');</pre>
+					</li>
+				</ul>
+			</div>
+		</div>
+		<?php
+		return;
+	}
+
+	// Basic variables
+	$nonce_field = wp_create_nonce( 'ppa_admin_nonce' ); // CHANGED: consistent nonce
+	// Inline debug (server-side)
+	if ( function_exists( 'error_log' ) ) {
+		error_log( 'PPA: rendering composer page for user=' . get_current_user_id() . ' (cap:' . $required_cap . ')' ); // CHANGED:
+	}
+	?>
+	<div class="wrap ppa-admin-wrapper" id="ppa-admin-root">
+		<h1 class="ppa-title">PostPress AI — Composer</h1>
+		<p class="ppa-lead">Quickly draft posts using the AI composer. Use the preview and save flows to generate content.</p>
+
+		<!-- Top large composer row (subject + compose preview) -->
+		<div id="ppa-composer-top" class="ppa-top-input" style="margin-bottom: 18px;">
+			<input id="ppa-top-subject" class="regular-text" type="text" placeholder="Subject (e.g. Improve website speed)" aria-label="composer subject" />
+			<button id="ppa-compose-preview" class="button">Compose (Preview)</button>
+		</div>
+
+		<!-- Settings table (mirrors previous UI) -->
+		<form id="ppa-composer-form" method="post" action="#" onsubmit="return false;">
+			<input type="hidden" name="_ppa_nonce" value="<?php echo esc_attr( $nonce_field ); ?>" />
+			<table class="form-table">
+				<tbody>
+					<tr>
+						<th scope="row"><label for="ppa-subject">Subject</label></th>
+						<td>
+							<input id="ppa-subject" name="subject" type="text" class="regular-text" placeholder="Enter subject or headline" />
+							<p class="description">Enter a short subject or headline for the generated content.</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ppa-tone">Tone</label></th>
+						<td>
+							<select id="ppa-tone" name="tone">
+								<option value="default">Default</option>
+								<option value="casual">Casual</option>
+								<option value="professional">Professional</option>
+								<option value="sales">Sales / Persuasive</option>
+								<option value="friendly">Friendly</option>
+							</select>
+							<p class="description">Select the tone for the AI output.</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ppa-word-count">Word count</label></th>
+						<td>
+							<input id="ppa-word-count" name="word_count" type="number" min="50" max="2000" value="300" />
+							<p class="description">Approximate target word count for the draft.</p>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+
+			<p class="ppa-actions">
+				<button id="ppa-preview-btn" class="button">Preview</button>
+				<button id="ppa-save-draft-btn" class="button secondary">Save Draft</button>
+				<span id="ppa-status" style="margin-left:12px;"></span>
+			</p>
+		</form>
+
+		<!-- Preview card -->
+		<div id="ppa-preview-area" aria-live="polite">
+			<div class="ppa-note">Preview will appear here after generating.</div>
+		</div>
+
+		<!-- Small composer footer / controls -->
+		<div style="margin-top:14px;" class="ppa-footer-note">
+			<p class="ppa-note">Generated drafts are saved as drafts on your WordPress site when you press <strong>Save Draft</strong>. Use the top Compose (Preview) button for a quick single-click preview.</p>
+		</div>
+	</div>
+
+	<script type="text/javascript">
+	/* Minimal inline debug to ensure developers see when composer renders.
+	   Real event wiring belongs in assets/js/admin.js (this file should add listeners to the IDs above).
+	*/
+	(function(){
+		try {
+			console.info('PPA: composer DOM rendered'); // CHANGED:
+			// expose minimal config for quick debugging if admin.js isn't loaded
+			window.PPA = window.PPA || {};
+			if (!window.PPA.nonce) {
+				var root = document.getElementById('ppa-admin-root');
+				if (root) {
+					window.PPA.nonce = '<?php echo esc_js( $nonce_field ); ?>';
+					console.info('PPA: inline-config', window.PPA);
+				}
+			}
+		} catch(e) {}
+	})();
+	</script>
+	<?php
+} // end function ppa_render_composer_page

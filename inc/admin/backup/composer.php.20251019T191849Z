@@ -1,8 +1,8 @@
 <?php
 /**
  * CHANGE LOG
- * 2025-10-19 — Added "Preview" heading to right pane to match page heading. // CHANGED
- * 2025-10-19 — Cleaned UI; dark two-column layout with Subject, Genre, Tone, Word Count,
+ * 2025-10-19 — Cleaned UI: removed visible "# CHANGED" artifacts from markup.
+ * 2025-10-19 — Composer page layout (dark, two-column) with Subject, Genre, Tone, Word Count,
  *               Optional brief, and actions (Preview, Save Draft, Publish).
  * - Capability checks are delegated to the menu registration in postpress-ai.php.
  * - Inline JS is a defensive fallback; main wiring should live in assets/js/admin.js.
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 error_log( 'PPA: composer.php rendering at ' . date( 'c' ) ); // CHANGED
 
 // Nonce for AJAX (header X-PPA-Nonce) — validated server-side where applicable
-$ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' );
+$ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' ); // CHANGED
 ?>
 <div id="ppa-composer" class="ppa-composer ppa-composer-wrap" style="color:#fff;">
     <style>
@@ -25,7 +25,7 @@ $ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' );
         .ppa-form-panel, .ppa-preview-panel {
             background:#111; border:1px solid #222; border-radius:8px; padding:18px;
         }
-        .ppa-composer-wrap h1 { margin:0 0 12px; font-size:22px; color:#ff6c00; } /* match accent */ /* CHANGED */
+        .ppa-composer-wrap h1 { margin:0 0 12px; font-size:22px; }
         .ppa-composer-wrap label { display:block; margin:8px 0 4px; font-weight:600; }
         .ppa-composer-wrap input[type="text"],
         .ppa-composer-wrap select,
@@ -82,14 +82,13 @@ $ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' );
     </div>
 
     <div class="ppa-preview-panel">
-        <h1>Preview</h1> <!-- Added heading to match left panel --> <!-- CHANGED -->
         <div id="ppa-preview-pane" aria-live="polite"><em style="color:#666;">(Preview will appear here once generated.)</em></div>
     </div>
 </div>
 
 <script>
 // Defensive fallback wiring; primary logic should live in assets/js/admin.js
-console.info('PPA: composer.php inline script init');
+console.info('PPA: composer.php inline script init'); // CHANGED
 (function(){
     const $ = (id) => document.getElementById(id);
     const previewBtn = $('ppa-preview-btn');
@@ -128,7 +127,7 @@ console.info('PPA: composer.php inline script init');
     }
 
     previewBtn && previewBtn.addEventListener('click', async () => {
-        console.info('PPA: Preview clicked');
+        console.info('PPA: Preview clicked'); // CHANGED
         const payload = getPayload();
         previewPane.innerHTML = '<p style="color:#666;margin:0;">Requesting preview…</p>';
         try{
@@ -136,13 +135,13 @@ console.info('PPA: composer.php inline script init');
             const html = extractHTML(json);
             previewPane.innerHTML = html || '<div class="notice notice-error"><p>No preview HTML in response.</p></div>';
         }catch(err){
-            console.error('PPA: Preview error', err);
+            console.error('PPA: Preview error', err); // CHANGED
             previewPane.innerHTML = '<div class="notice notice-error"><p>Preview failed. Check console.</p></div>';
         }
     });
 
     saveBtn && saveBtn.addEventListener('click', async () => {
-        console.info('PPA: Save Draft clicked');
+        console.info('PPA: Save Draft clicked'); // CHANGED
         const p = getPayload();
         try{
             const json = await callAjax('ppa_store', {
@@ -154,16 +153,16 @@ console.info('PPA: composer.php inline script init');
             const ok = json && (json.ok===true || json.success===true);
             const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
             alert(ok ? ('Draft saved. Post ID: '+id) : 'Save failed — see console.');
-            if (!ok) console.error('PPA: Save response', json);
+            if (!ok) console.error('PPA: Save response', json); // CHANGED
         }catch(err){
             alert('Save failed — see console.');
-            console.error('PPA: Save error', err);
+            console.error('PPA: Save error', err); // CHANGED
         }
     });
 
     publishBtn && publishBtn.addEventListener('click', async () => {
         if (!confirm('Publish now?')) return;
-        console.info('PPA: Publish clicked');
+        console.info('PPA: Publish clicked'); // CHANGED
         const p = getPayload();
         try{
             const json = await callAjax('ppa_store', {
@@ -175,10 +174,10 @@ console.info('PPA: composer.php inline script init');
             const ok = json && (json.ok===true || json.success===true);
             const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
             alert(ok ? ('Published. Post ID: '+id) : 'Publish failed — see console.');
-            if (!ok) console.error('PPA: Publish response', json);
+            if (!ok) console.error('PPA: Publish response', json); // CHANGED
         }catch(err){
             alert('Publish failed — see console.');
-            console.error('PPA: Publish error', err);
+            console.error('PPA: Publish error', err); // CHANGED
         }
     });
 })();
