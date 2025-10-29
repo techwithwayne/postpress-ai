@@ -1,97 +1,60 @@
 <?php
-/**
- * Admin asset enqueue for PostPress AI
+/*
+ * PostPress AI — Admin Enqueue
  *
  * CHANGE LOG
- * 2025-10-16 — created enqueue include: registers/enqueues admin JS + CSS, exposes PPA config to JS.
- * 2025-10-16 — CHANGED: standardized nonce name to 'ppa_admin_nonce' to match AJAX handlers.
- *
- * Notes:
- * - Uses PPA_PLUGIN_DIR constant for safe absolute path resolution.
- * - Uses plugin_dir_url() with the plugin bootstrap file for base URL.
- * - Adds debug logging for quick server-side verification.
+ * 2025-10-29 • Add safe, centralized enqueue for admin assets; conditionally load ppa-testbed.js
+ *              on the PPA Testbed screen only; expose minimal window.PPA config (ajaxUrl).      # CHANGED:
  */
 
-// CHANGED: wrap in if not already declared to avoid redeclare fatal errors
-if ( ! function_exists( 'ppa_admin_enqueue_assets' ) ) {
+defined('ABSPATH') || exit;
 
-	/**
-	 * Register and enqueue admin scripts and styles.
-	 *
-	 * @param string $hook_suffix Current admin page hook.
-	 * @return void
-	 */
-	function ppa_admin_enqueue_assets( $hook_suffix ) {
-		// CHANGED: debug log to help verify include loaded
-		error_log( 'PPA: admin enqueue loaded (hook:' . $hook_suffix . ')' );
+/**
+ * Central admin enqueue for PostPress AI.
+ *
+ * This file is required by postpress-ai.php and is expected to define ppa_admin_enqueue().
+ * Keep this function idempotent and cheap to call on any admin page.
+ *
+ * IMPORTANT:
+ * - Do NOT leak secrets (e.g., shared keys) to the browser.
+ * - Only load heavy assets on our own screens.
+ */
+if (!function_exists('ppa_admin_enqueue')) {
+    function ppa_admin_enqueue() {                                                                       // CHANGED:
+        // Basic config available to our admin scripts
+        $cfg = array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+        );
 
-		// CHANGED: compute plugin base URL from known bootstrap file
-		$plugin_bootstrap = defined( 'PPA_PLUGIN_DIR' ) ? PPA_PLUGIN_DIR . 'postpress-ai.php' : __DIR__ . '/../../postpress-ai.php';
-		$plugin_url       = plugin_dir_url( $plugin_bootstrap );
+        // Lightweight runtime detection of our admin pages
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        $screen_id = $screen ? $screen->id : '';
 
-		// CHANGED: absolute paths to files for filemtime versioning
-		$admin_js_path  = PPA_PLUGIN_DIR . 'assets/js/admin.js';
-		$admin_css_path = PPA_PLUGIN_DIR . 'assets/css/admin.css';
+        // Our slugs/ids
+        $slug_top     = 'toplevel_page_postpress-ai';   // main Composer page
+        $slug_testbed = 'postpress-ai_page_ppa-testbed';// appended Testbed submenu page
 
-		// Only enqueue if files exist to avoid 404s / errors
-		$js_version  = file_exists( $admin_js_path ) ? filemtime( $admin_js_path ) : false;
-		$css_version = file_exists( $admin_css_path ) ? filemtime( $admin_css_path ) : false;
+        // Always ensure a config handle exists (no external file; tiny inline only)
+        wp_register_script('ppa-admin-config', false, array(), false, true);
+        wp_enqueue_script('ppa-admin-config');
+        wp_add_inline_script('ppa-admin-config', 'window.PPA = ' . wp_json_encode($cfg) . ';', 'before');
 
-		// Register admin CSS
-		if ( file_exists( $admin_css_path ) ) {
-			wp_register_style(
-				'ppa-admin-css',
-				$plugin_url . 'assets/css/admin.css',
-				array(),
-				$css_version
-			);
-		}
+        // === Composer assets (if you already register/enqueue them elsewhere, this remains harmless) ===
+        if ($screen_id === $slug_top) {                                                                   // CHANGED:
+            /**
+             * Placeholders for composer assets — retain your existing registrations if present.
+             * Example:
+             * wp_enqueue_style('ppa-admin-composer', PPA_PLUGIN_URL . 'assets/css/composer.css', array(), '2.1.0');
+             * wp_enqueue_script('ppa-admin-composer', PPA_PLUGIN_URL . 'assets/js/composer.js', array('jquery'), '2.1.0', true);
+             */
+        }
 
-		// Register admin JS
-		if ( file_exists( $admin_js_path ) ) {
-			wp_register_script(
-				'ppa-admin-js',
-				$plugin_url . 'assets/js/admin.js',
-				array( 'jquery' ),
-				$js_version,
-				true
-			);
-		}
-
-		// Example: only enqueue on plugin's admin pages to avoid loading everywhere.
-		// If you want to load on all admin pages, remove the conditional below.
-		$allowed_hooks = array(
-			'toplevel_page_postpress-ai',        // typical top-level page slug
-			'post.php',                          // post edit screen
-			'post-new.php',                      // new post screen
-			'edit.php',                          // post list screen (if needed)
-		);
-
-		// CHANGED: conditionally enqueue when on allowed admin pages or on any 'post' screens
-		if ( in_array( $hook_suffix, $allowed_hooks, true ) || ( isset( $_GET['page'] ) && 'postpress-ai' === sanitize_text_field( wp_unslash( $_GET['page'] ) ) ) ) {
-			if ( wp_style_is( 'ppa-admin-css', 'registered' ) ) {
-				wp_enqueue_style( 'ppa-admin-css' );
-				error_log( 'PPA: enqueued admin CSS' );
-			}
-
-			if ( wp_script_is( 'ppa-admin-js', 'registered' ) ) {
-				wp_enqueue_script( 'ppa-admin-js' );
-
-				// CHANGED: expose minimal runtime config to admin JS
-				// NOTE: nonce name standardized to 'ppa_admin_nonce' to match handlers
-				$ppa_config = array(
-					'ajax_url' => admin_url( 'admin-ajax.php' ),
-					'nonce'    => wp_create_nonce( 'ppa_admin_nonce' ), // CHANGED: standardized nonce name
-					'plugin'   => 'postpress-ai',
-					'version'  => $js_version ? (string) $js_version : '0',
-				);
-
-				wp_localize_script( 'ppa-admin-js', 'PPA', $ppa_config );
-				error_log( 'PPA: enqueued admin JS and localized PPA config (nonce set as ppa_admin_nonce)' );
-			}
-		}
-	}
-
-	// CHANGED: hook into admin_enqueue_scripts
-	add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue_assets', 20 );
+        // === Testbed asset (Preview + Save Draft button logic) ===
+        if ($screen_id === $slug_testbed || (isset($_GET['page']) && $_GET['page'] === 'ppa-testbed')) { // CHANGED:
+            $handle = 'ppa-testbed';
+            $src    = PPA_PLUGIN_URL . 'inc/admin/ppa-testbed.js';
+            wp_register_script($handle, $src, array(), '2.1.0', true);
+            wp_enqueue_script($handle);
+        }
+    }
 }
