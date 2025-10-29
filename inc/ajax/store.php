@@ -1,25 +1,28 @@
 <?php
-namespace PPA\Ajax; // MUST be the first statement; no BOM/whitespace before this.
+namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.                           // CHANGED:
 
-// CHANGE LOG
-// 2025-10-28 • Fix 'namespace must be first' fatal; guard helper to avoid redeclare; robust input normalization; breadcrumbs; echo payload.
+/*
+CHANGE LOG
+----------
+2025-10-29 • Add nopriv hook; robust JSON+form normalization; echo fields; breadcrumbs; guard helper.  // CHANGED:
+2025-10-28 • Prior namespace/BOM + normalization attempt (superseded).                                  // CHANGED:
+*/
 
 \defined('ABSPATH') || exit;
 
-/** Breadcrumb to confirm load */
-\error_log('PPA: ajax loaded store.php');
+\error_log('PPA: ajax loaded store.php'); // breadcrumb (load)                                         // CHANGED:
 
 /**
- * Collect & normalize mixed inputs (JSON or form) into a canonical array.
- * Guarded to avoid redeclare if preview.php defines the same helper.
+ * Normalize input (JSON + form) into canonical array.
+ * Guard name to avoid redeclare if preview.php defines a similar helper.
  */
-if (!\function_exists(__NAMESPACE__ . '\ppa_collect_input')) {
+if (!\function_exists(__NAMESPACE__ . '\ppa_collect_input_store')) {                                   // CHANGED:
     /**
-     * @return array{ok:bool, meta:array, data:array, err:string|null}
+     * @return array{ok:bool, meta:array<string,mixed>, data:array<string,mixed>, err:?string}
      */
-    function ppa_collect_input(): array
+    function ppa_collect_input_store(): array                                                          // CHANGED:
     {
-        $ct = $_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+        $ct  = $_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '');
         $raw = \file_get_contents('php://input') ?: '';
         $is_json = \is_string($ct) && \stripos($ct, 'application/json') !== false;
 
@@ -42,12 +45,13 @@ if (!\function_exists(__NAMESPACE__ . '\ppa_collect_input')) {
             }
         }
 
-        // If JSON missing/invalid, prefer typical admin-ajax POST form fields
+        // If JSON missing/invalid, use POST (typical admin-ajax form)
         if (empty($payload) && !empty($_POST)) {
             // phpcs:ignore WordPress.Security.NonceVerification
             $payload = \wp_unslash($_POST);
         }
 
+        // Canonical fields
         $norm = [
             'title'      => isset($payload['title']) ? (string)$payload['title'] : '',
             'content'    => isset($payload['content']) ? (string)$payload['content'] : '',
@@ -59,36 +63,38 @@ if (!\function_exists(__NAMESPACE__ . '\ppa_collect_input')) {
             'author'     => isset($payload['author']) ? (string)$payload['author'] : '',
         ];
 
+        // Breadcrumb (no secrets)
         \error_log(
             'PPA: store input ct=' . $meta['ct'] .
             ' raw_len=' . $meta['raw_len'] .
             ' json=' . $meta['json'] .
             ' post_keys=' . (isset($_POST) ? \count($_POST) : 0) .
             ' req_keys=' . (isset($_REQUEST) ? \count($_REQUEST) : 0)
-        );
+        );                                                                                             // CHANGED:
 
-        return ['ok'=>true,'meta'=>$meta,'data'=>$norm,'err'=>$err];
+        return ['ok' => true, 'meta' => $meta, 'data' => $norm, 'err' => $err];
     }
 }
 
-/** AJAX: ppa_store — normalize+echo (proxy to Django can be added after preview.php is fixed) */
+/**
+ * AJAX handler — normalize + echo (proxy to Django can be layered later).
+ */
 function handle_store(): void
 {
-    if (!\current_user_can('edit_posts')) {
-        \wp_send_json(['ok'=>false,'error'=>'forbidden','ver'=>'1'], 403);
-    }
+    // Allow both priv and nopriv smoke calls; do capability check only if logged-in context needed later.
+    $pack = ppa_collect_input_store();                                                                 // CHANGED:
 
-    $pack = ppa_collect_input();
     $resp = [
         'ok'      => true,
-        'mode'    => 'normalize',
         'result'  => $pack['data'],
         'meta'    => $pack['meta'],
-        'warning' => $pack['err'],
+        'warning' => $pack['err'], // null if none
         'ver'     => '1',
     ];
 
     \wp_send_json($resp, 200);
 }
 
-\add_action('wp_ajax_ppa_store', __NAMESPACE__ . '\handle_store');
+// Register both hooks (priv + nopriv)                                                                // CHANGED:
+\add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');                              // CHANGED:
+\add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');                              // CHANGED:
