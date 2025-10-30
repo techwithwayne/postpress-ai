@@ -15,12 +15,14 @@
  * PostPress AI — Plugin Bootstrap
  *
  * CHANGE LOG
- * 2025-10-19 — Restore proper admin page registration + access for Admin/Editor/Author. # CHANGED
- * - Registers a top-level menu with capability 'edit_posts' (covers admin/editor/author). # CHANGED
- * - Uses render callback ppa_render_composer() to include inc/admin/composer.php at the right time. # CHANGED
- * - Defers admin assets to admin_enqueue_scripts and scopes to our screen only. # CHANGED
- * - Loads AJAX handlers on 'init' so admin-ajax.php works. # CHANGED
- * - Adds detailed debug logs (error_log('PPA: ...')). # CHANGED
+ * 2025-10-30 — Enqueue fix: also load admin assets on Testbed screen (tools_page_ppa-testbed)
+ *              and when ?page=ppa-testbed; previously only Composer screen was recognized.   # CHANGED:
+ * 2025-10-19 — Restore proper admin page registration + access for Admin/Editor/Author.      # CHANGED
+ * - Registers a top-level menu with capability 'edit_posts' (covers admin/editor/author).    # CHANGED
+ * - Uses render callback ppa_render_composer() to include inc/admin/composer.php.            # CHANGED
+ * - Defers admin assets to admin_enqueue_scripts and scopes to our screen only.              # CHANGED
+ * - Loads AJAX handlers on 'init' so admin-ajax.php works.                                   # CHANGED
+ * - Adds detailed debug logs (error_log('PPA: ...')).                                        # CHANGED
  *
  * Notes:
  * - Do not echo output here; only register hooks. The UI is rendered by composer.php.
@@ -83,22 +85,31 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
 }
 
 /**
- * Enqueue admin assets (only on our screen).
+ * Enqueue admin assets (Composer + Testbed screens).
  */
 add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
-    // Only load on our page to keep admin clean
-    $screen = get_current_screen();
-    $is_our_screen = $screen && ( $screen->id === 'toplevel_page_postpress-ai' );
+    // Resolve current screen safely
+    $screen     = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+    $screen_id  = $screen ? $screen->id : '';
+    $page_param = isset( $_GET['page'] ) ? (string) $_GET['page'] : '';
+
+    // Our known screens:
+    $composer_id = 'toplevel_page_postpress-ai';
+    $testbed_id  = 'tools_page_ppa-testbed';                          // CHANGED
+
+    // Recognize both Composer and Testbed (with querystring fallback)            // CHANGED
+    $is_composer = ( $screen_id === $composer_id ) || ( $page_param === 'postpress-ai' );
+    $is_testbed  = ( $screen_id === $testbed_id )  || ( $page_param === 'ppa-testbed' );
 
     $enqueue = PPA_PLUGIN_DIR . 'inc/admin/enqueue.php';
     if ( file_exists( $enqueue ) ) {
         require_once $enqueue; // expected to define ppa_admin_enqueue()
-        if ( function_exists( 'ppa_admin_enqueue' ) && $is_our_screen ) {
-            error_log( 'PPA: enqueue assets for ' . $hook_suffix ); // CHANGED
+        if ( function_exists( 'ppa_admin_enqueue' ) && ( $is_composer || $is_testbed ) ) {   // CHANGED
+            error_log( 'PPA: enqueue assets for ' . $hook_suffix . ' (composer=' . (int) $is_composer . ', testbed=' . (int) $is_testbed . ')' ); // CHANGED
             ppa_admin_enqueue();
         }
     } else {
-        error_log( 'PPA: enqueue.php not found; skipping assets' ); // CHANGED
+        error_log( 'PPA: enqueue.php not found; skipping assets' );
     }
 }, 10 );
 
@@ -116,3 +127,115 @@ add_action( 'init', function () {
         }
     }
 }, 11 );
+
+/**
+ * ===== PPA TESTBED SUBMENU BLOCK (non-invasive; appended) =====
+ * - Adds submenu under the existing top-level "PostPress AI" menu.
+ * - Capability: 'edit_posts' (Admin/Editor/Author).
+ * - Renders a tiny UI with Preview (no write) + Save Draft (creates WP draft).
+ * - Uses admin-ajax actions: ppa_preview / ppa_store (JSON body).
+ * - Safe guards to avoid re-definition on repeated loads.
+ */
+if ( function_exists('add_action') && ! function_exists('ppa_render_testbed') ) {
+
+    add_action('admin_menu', function () {
+        $parent_slug = 'postpress-ai';   // Your existing top-level slug
+        $capability  = 'edit_posts';
+        $menu_slug   = 'ppa-testbed';
+
+        // Register as a submenu under "PostPress AI"
+        add_submenu_page(
+            $parent_slug,
+            __('PPA Testbed', 'postpress-ai'),
+            __('PPA Testbed', 'postpress-ai'),
+            $capability,
+            $menu_slug,
+            'ppa_render_testbed'
+        );
+
+        error_log('PPA: admin_menu submenu registered (slug=' . $menu_slug . ')'); // breadcrumb
+    }, 20);
+
+    /**
+     * Render the Testbed screen. Minimal inline JS (temporary) for immediate testing.
+     * We can move this JS into an admin asset in a later one-file turn.
+     */
+    function ppa_render_testbed() {
+        if ( ! current_user_can('edit_posts') ) {
+            wp_die(__('You do not have permission to access this page.', 'postpress-ai'));
+        }
+
+        $ajax_url = admin_url('admin-ajax.php');
+        ?>
+        <div class="wrap">
+            <h1>PostPress AI — Testbed</h1>
+            <p>This panel calls the same AJAX actions the plugin uses:
+               <code>ppa_preview</code> (no write) and <code>ppa_store</code> (Save Draft).</p>
+
+            <table class="form-table" role="presentation">
+                <tbody>
+                    <tr>
+                        <th scope="row"><label for="ppaTbTitle">Title</label></th>
+                        <td><input id="ppaTbTitle" type="text" class="regular-text" value="Hello from Testbed"></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ppaTbContent">Content</label></th>
+                        <td><textarea id="ppaTbContent" class="large-text" rows="6">Body generated via Testbed.</textarea></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>
+                <button class="button button-secondary" id="ppaTbPreview">Preview (no write)</button>
+                <button class="button button-primary" id="ppaTbDraft">Save Draft (creates post)</button>
+            </p>
+
+            <h2>Response</h2>
+            <div id="ppaTbLog" style="background:#fff;border:1px solid #ddd;padding:12px;min-height:120px;white-space:pre-wrap;"></div>
+        </div>
+
+        <script>
+        (function(){
+            const ajaxUrl = <?php echo wp_json_encode( $ajax_url ); ?>;
+            const logBox  = document.getElementById('ppaTbLog');
+            const tIn     = document.getElementById('ppaTbTitle');
+            const cIn     = document.getElementById('ppaTbContent');
+
+            function log(msg){ logBox.textContent = (typeof msg === 'string') ? msg : JSON.stringify(msg, null, 2); }
+
+            async function postJSON(action, payload){
+                const res = await fetch(ajaxUrl + '?action=' + encodeURIComponent(action), {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(payload || {})
+                });
+                const txt = await res.text();
+                try { return JSON.parse(txt); } catch(e){ return {ok:false, raw:txt}; }
+            }
+
+            document.getElementById('ppaTbPreview').addEventListener('click', async function(){
+                log('Working...');
+                const data = await postJSON('ppa_preview', {
+                    title: tIn.value,
+                    content: cIn.value,
+                    status: 'draft'
+                });
+                log(data);
+            });
+
+            document.getElementById('ppaTbDraft').addEventListener('click', async function(){
+                log('Working...');
+                const data = await postJSON('ppa_store', {
+                    title: tIn.value,
+                    content: cIn.value,
+                    status: 'draft',
+                    mode: 'draft'
+                });
+                log(data);
+            });
+        })();
+        </script>
+        <?php
+    }
+}
+/* ===== end PPA TESTBED SUBMENU BLOCK ===== */
