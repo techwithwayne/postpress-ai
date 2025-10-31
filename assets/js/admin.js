@@ -1,16 +1,24 @@
+// /var/www/html/wp-content/plugins/postpress-ai/assets/js/admin.js
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-10-19: Added provider tracing for preview via <!-- provider: X --> sniff. // CHANGED:
- * 2025-10-19: Added double-submit guard: disables buttons during async ops and re-enables on settle. // CHANGED:
- * 2025-10-19: Expanded tolerant parsing: also reads id/message at body.level and body.result.level. // CHANGED:
- * 2025-10-19: Replaced most alert() errors with inline toolbar notices (fallback to alert if no container). // CHANGED:
+ * 2025-10-30: Add full “Save to Draft” wiring:
+ *             - Robust store payload (title, content, excerpt, status, slug, tags, categories).
+ *             - TinyMCE/Classic editor content detection with graceful fallback.          // CHANGED:
+ *             - Tolerant field selectors for various admin screens.                       // CHANGED:
+ *             - Unified notices, double-submit guard kept.                                // CHANGED:
+ * 2025-10-30: Keep Preview flow intact; provider sniff retained.                          // CHANGED:
+ *
+ * 2025-10-19: Added provider tracing for preview via <!-- provider: X --> sniff.
+ * 2025-10-19: Added double-submit guard: disables buttons during async ops and re-enables on settle.
+ * 2025-10-19: Expanded tolerant parsing: also reads id/message at body.level and body.result.level.
+ * 2025-10-19: Replaced most alert() errors with inline toolbar notices (fallback to alert if no container).
  * =================================
  *
  * Notes:
- * - Logs are namespaced with "PPA:" as per P1.
+ * - Logs are namespaced with "PPA:".
  * - Nonce header: X-PPA-Nonce when #ppa-nonce is present.
  * - JSON shape tolerance:
  *     html: body.html | body.result.html | body.data.html | body.content | body.preview | body.raw
@@ -40,10 +48,10 @@
   }
 
   function getAjaxUrl() {
-    // Primary from localized script, fallback to window.ajaxurl, then default path. // CHANGED:
-    if (window.ppaAdmin && window.ppaAdmin.ajaxurl) return window.ppaAdmin.ajaxurl; // CHANGED:
-    if (window.ajaxurl) return window.ajaxurl; // CHANGED:
-    return '/wp-admin/admin-ajax.php'; // CHANGED:
+    // Primary from localized script, fallback to window.ajaxurl, then default path.
+    if (window.ppaAdmin && window.ppaAdmin.ajaxurl) return window.ppaAdmin.ajaxurl;
+    if (window.ajaxurl) return window.ajaxurl;
+    return '/wp-admin/admin-ajax.php';
   }
 
   function getNonce() {
@@ -55,7 +63,7 @@
     try {
       return JSON.parse(text);
     } catch (e) {
-      console.info('PPA: JSON parse failed, returning raw text'); // CHANGED:
+      console.info('PPA: JSON parse failed, returning raw text');
       return { raw: String(text || '') };
     }
   }
@@ -66,42 +74,136 @@
     pane.innerHTML = html;
   }
 
-  // Extract `provider` from an HTML comment like: <!-- provider: local-fallback --> // CHANGED:
-  function extractProviderFromHtml(html) { // CHANGED:
-    if (typeof html !== 'string') return ''; // CHANGED:
-    var m = html.match(/<!--\s*provider:\s*([a-z0-9._-]+)\s*-->/i); // CHANGED:
-    return m ? m[1] : ''; // CHANGED:
+  // Extract `provider` from an HTML comment like: <!-- provider: local-fallback -->
+  function extractProviderFromHtml(html) {
+    if (typeof html !== 'string') return '';
+    var m = html.match(/<!--\s*provider:\s*([a-z0-9._-]+)\s*-->/i);
+    return m ? m[1] : '';
   }
 
-  function buildPayload() {
+  // --- Rich text helpers (Classic/TinyMCE/Gutenberg-compatible) ------------- // CHANGED:
+
+  function getTinyMCEContentById(id) { // CHANGED:
+    try {
+      if (!window.tinyMCE || !tinyMCE.get) return '';
+      var ed = tinyMCE.get(id);
+      return ed && !ed.isHidden() ? String(ed.getContent() || '') : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getEditorContent() { // CHANGED:
+    // Try common WordPress editor fields, in order.
+    // 1) Custom composer textarea
+    var txt = $('#ppa-content');
+    if (txt && String(txt.value || '').trim()) return String(txt.value || '').trim();
+
+    // 2) TinyMCE (classic editor)
+    var mce = getTinyMCEContentById('content');
+    if (mce) return mce;
+
+    // 3) Fallback to the raw textarea #content (classic editor fallback)
+    var raw = $('#content');
+    if (raw && String(raw.value || '').trim()) return String(raw.value || '').trim();
+
+    // 4) Gutenberg note: we don't programmatically read blocks here; server will normalize if needed.
+    return '';
+  }
+
+  // ---- Payload builders ----------------------------------------------------
+
+  function buildPreviewPayload() {
+    // Lightweight preview fields (prompting inputs)
     var subject = $('#ppa-subject');
     var brief = $('#ppa-brief');
     var genre = $('#ppa-genre');
     var tone = $('#ppa-tone');
     var wc = $('#ppa-word-count');
 
-    var payload = {
+    return {
       subject: subject ? subject.value : '',
       brief: brief ? brief.value : '',
       genre: genre ? genre.value : '',
       tone: tone ? tone.value : '',
       word_count: wc ? Number(wc.value || 0) : 0
     };
+  }
+
+  function readCsvValues(el) { // CHANGED:
+    if (!el) return [];
+    var raw = String(el.value || '').trim();
+    if (!raw) return [];
+    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  function buildStorePayload(target) { // CHANGED:
+    // Build a tolerant payload for /ppa_store: include core post fields when present.
+    // Field ids are tolerant and optional; server normalizes.
+    var title = $('#ppa-title') || $('#title'); // custom or core
+    var excerpt = $('#ppa-excerpt') || $('#excerpt');
+    var slug = $('#ppa-slug') || $('#post_name');
+
+    // Tags/Cats (comma-separated text inputs or multi-selects)
+    var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
+    var catsEl = $('#ppa-categories') || $('#post_category');
+
+    // Status (explicit if provided; otherwise server may decide based on target)
+    var statusEl = $('#ppa-status');
+
+    var payload = {
+      // Core post fields
+      title: title ? String(title.value || '') : '',
+      content: getEditorContent(),
+      excerpt: excerpt ? String(excerpt.value || '') : '',
+      slug: slug ? String(slug.value || '') : '',
+
+      // Taxonomy (tolerant)
+      tags: (function () {
+        if (tagsEl && tagsEl.tagName === 'SELECT') {
+          return $all('option:checked', tagsEl).map(function (o) { return o.value; });
+        }
+        return readCsvValues(tagsEl);
+      })(),
+      categories: (function () {
+        if (catsEl && catsEl.tagName === 'SELECT') {
+          return $all('option:checked', catsEl).map(function (o) { return o.value; });
+        }
+        // Comma-separated fallback if using text
+        return readCsvValues(catsEl);
+      })(),
+
+      // Status/Target
+      status: statusEl ? String(statusEl.value || '') : '',
+
+      // Metadata
+      target_sites: [String(target || 'draft')], // 'draft' | 'publish'
+      source: 'admin',
+      ver: '1'
+    };
+
+    // Also include preview prompt fields if present (server may use them for context)
+    var prev = buildPreviewPayload();
+    for (var k in prev) {
+      if (Object.prototype.hasOwnProperty.call(prev, k) && !Object.prototype.hasOwnProperty.call(payload, k)) {
+        payload[k] = prev[k];
+      }
+    }
     return payload;
   }
 
-  // ---- Toolbar Notices & Busy State --------------------------------------- // CHANGED:
+  // ---- Toolbar Notices & Busy State ---------------------------------------
 
-  var btnPreview = $('#ppa-preview'); // CHANGED:
-  var btnDraft = $('#ppa-draft');     // CHANGED:
-  var btnPublish = $('#ppa-publish'); // CHANGED:
+  var btnPreview = $('#ppa-preview');
+  var btnDraft = $('#ppa-draft');
+  var btnPublish = $('#ppa-publish');
 
-  function noticeContainer() { // CHANGED:
+  function noticeContainer() {
     // Preferred container for inline notices; optional in DOM.
     return $('#ppa-toolbar-msg') || null;
   }
 
-  function renderNotice(type, message) { // CHANGED:
+  function renderNotice(type, message) {
     // type: 'info' | 'success' | 'error' | 'warn'
     var el = noticeContainer();
     var text = String(message == null ? '' : message);
@@ -121,7 +223,7 @@
     el.textContent = text;
   }
 
-  function clearNotice() { // CHANGED:
+  function clearNotice() {
     var el = noticeContainer();
     if (el) {
       el.className = 'ppa-notice';
@@ -129,7 +231,7 @@
     }
   }
 
-  function setButtonsDisabled(disabled) { // CHANGED:
+  function setButtonsDisabled(disabled) {
     [btnPreview, btnDraft, btnPublish].forEach(function (b) {
       if (b) {
         b.disabled = !!disabled;
@@ -142,7 +244,7 @@
     });
   }
 
-  function withBusy(promiseFactory, label) { // CHANGED:
+  function withBusy(promiseFactory, label) {
     setButtonsDisabled(true);
     clearNotice();
     var tag = label || 'request';
@@ -213,14 +315,14 @@
     return '';
   }
 
-  function pickMessage(body) { // CHANGED:
+  function pickMessage(body) {
     if (!body || typeof body !== 'object') return '';
     if (typeof body.message === 'string') return body.message;
     if (body.result && typeof body.result.message === 'string') return body.result.message;
     return '';
   }
 
-  function pickId(body) { // CHANGED:
+  function pickId(body) {
     if (!body || typeof body !== 'object') return '';
     if (typeof body.id === 'string' || typeof body.id === 'number') return String(body.id);
     if (body.result && (typeof body.result.id === 'string' || typeof body.result.id === 'number')) return String(body.result.id);
@@ -235,27 +337,27 @@
       console.info('PPA: Preview clicked');
 
       withBusy(function () {
-        var payload = buildPayload();
+        var payload = buildPreviewPayload();
         return apiPost('ppa_preview', payload).then(function (res) {
           var html = pickHtmlFromResponseBody(res.body);
 
-          // Provider tracing (Improvement #1) — sniff provider marker and log it. // CHANGED:
-          var provider = extractProviderFromHtml(html); // CHANGED:
-          if (provider) { // CHANGED:
-            console.info('PPA: provider=' + provider); // CHANGED:
-          } else { // CHANGED:
-            console.info('PPA: provider=(unknown)'); // CHANGED:
-          } // CHANGED:
+          // Provider tracing — sniff provider marker and log it.
+          var provider = extractProviderFromHtml(html);
+          if (provider) {
+            console.info('PPA: provider=' + provider);
+          } else {
+            console.info('PPA: provider=(unknown)');
+          }
 
           if (html) {
             setPreview(html);
-            clearNotice(); // CHANGED:
+            clearNotice();
             return;
           }
 
           // If no HTML, surface a friendly message in the pane
           setPreview('<p><em>Preview did not return HTML content. Check logs.</em></p>');
-          renderNotice('warn', 'Preview completed, but no HTML was returned.'); // CHANGED:
+          renderNotice('warn', 'Preview completed, but no HTML was returned.');
           console.info('PPA: preview response lacked HTML', res);
         });
       }, 'preview');
@@ -268,19 +370,17 @@
       console.info('PPA: Save Draft clicked');
 
       withBusy(function () {
-        var payload = buildPayload();
-        payload.target_sites = ['draft'];
-
+        var payload = buildStorePayload('draft');
         return apiPost('ppa_store', payload).then(function (res) {
-          var msg = pickMessage(res.body) || 'Draft request sent.'; // CHANGED:
-          var pid = pickId(res.body); // CHANGED:
+          var msg = pickMessage(res.body) || 'Draft request sent.';
+          var pid = pickId(res.body);
           if (!res.ok) {
-            renderNotice('error', 'Draft failed (' + res.status + '): ' + msg); // CHANGED:
+            renderNotice('error', 'Draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
             return;
           }
-          var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : ''); // CHANGED:
-          renderNotice('success', okMsg); // CHANGED:
+          var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
+          renderNotice('success', okMsg);
           console.info('PPA: draft success', res);
         });
       }, 'draft');
@@ -300,19 +400,17 @@
       /* eslint-enable no-alert */
 
       withBusy(function () {
-        var payload = buildPayload();
-        payload.target_sites = ['publish'];
-
+        var payload = buildStorePayload('publish');
         return apiPost('ppa_store', payload).then(function (res) {
-          var msg = pickMessage(res.body) || 'Publish request sent.'; // CHANGED:
-          var pid = pickId(res.body); // CHANGED:
+          var msg = pickMessage(res.body) || 'Publish request sent.';
+          var pid = pickId(res.body);
           if (!res.ok) {
-            renderNotice('error', 'Publish failed (' + res.status + '): ' + msg); // CHANGED:
+            renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
             console.info('PPA: publish failed', res);
             return;
           }
-          var okMsg = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : ''); // CHANGED:
-          renderNotice('success', okMsg); // CHANGED:
+          var okMsg = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
+          renderNotice('success', okMsg);
           console.info('PPA: publish success', res);
         });
       }, 'publish');
