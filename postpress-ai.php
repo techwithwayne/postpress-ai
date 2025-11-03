@@ -15,6 +15,9 @@
  * PostPress AI — Plugin Bootstrap
  *
  * CHANGE LOG
+ * 2025-11-03 — Frontend shortcode [postpress_ai_preview] + public asset registration.                 # CHANGED:
+ *              - No inline JS/CSS; registers/enqueues assets/js/shortcode-preview.js.               # CHANGED:
+ *              - Shortcode renders a minimal, accessible form + preview pane (no keys client-side). # CHANGED:
  * 2025-10-30 — Enqueue fix: also load admin assets on Testbed screen (tools_page_ppa-testbed)
  *              and when ?page=ppa-testbed; previously only Composer screen was recognized.   # CHANGED:
  * 2025-10-19 — Restore proper admin page registration + access for Admin/Editor/Author.      # CHANGED
@@ -239,3 +242,90 @@ if ( function_exists('add_action') && ! function_exists('ppa_render_testbed') ) 
     }
 }
 /* ===== end PPA TESTBED SUBMENU BLOCK ===== */
+
+
+/**
+ * ===== FRONTEND SHORTCODE: [postpress_ai_preview] ===============================================  # CHANGED:
+ * Public, no inline JS/CSS. Renders a minimal form + preview pane.                                 # CHANGED:
+ * The external JS (assets/js/shortcode-preview.js) will POST to admin-ajax.php?action=ppa_preview. # CHANGED:
+ * No PPA_SHARED_KEY is exposed; the server-side proxy handles credentials.                         # CHANGED:
+ */
+
+add_action( 'wp_enqueue_scripts', function () {                                                     // CHANGED:
+    // Register the public script; enqueue happens inside the shortcode callback.                    // CHANGED:
+    $handle   = 'ppa-shortcode-preview';                                                             // CHANGED:
+    $src      = PPA_PLUGIN_URL . 'assets/js/shortcode-preview.js';                                   // CHANGED:
+    $deps     = array();                                                                             // CHANGED:
+    $ver      = '2.1.0';                                                                             // CHANGED:
+    $in_footer = true;                                                                               // CHANGED:
+    wp_register_script( $handle, $src, $deps, $ver, $in_footer );                                    // CHANGED:
+
+    // Provide ajaxurl + simple i18n strings to the public script (no secrets).                      // CHANGED:
+    wp_localize_script(                                                                              // CHANGED:
+        $handle,
+        'ppaShortcode',                                                                              // CHANGED:
+        array(
+            'ajaxurl' => admin_url( 'admin-ajax.php' ),
+            'i18n'    => array(
+                'working' => __( 'Working…', 'postpress-ai' ),
+                'failed'  => __( 'Preview failed. Please try again.', 'postpress-ai' ),
+            ),
+        )
+    );
+}, 10 );                                                                                             // CHANGED:
+
+if ( ! function_exists( 'ppa_render_public_preview' ) ) {                                            // CHANGED:
+    function ppa_render_public_preview( $atts = array(), $content = '' ) {                           // CHANGED:
+        // Minimal markup; no inline script/styles. External JS attaches by IDs below.               // CHANGED:
+        // IDs/classes chosen to mirror the admin conventions where sensible.                        // CHANGED:
+        wp_enqueue_script( 'ppa-shortcode-preview' );                                                // CHANGED:
+
+        $a = shortcode_atts(                                                                         // CHANGED:
+            array(
+                'show_fields' => 'subject,brief,genre,tone,word_count',                              // CHANGED:
+                'button_text' => __( 'Preview', 'postpress-ai' ),                                    // CHANGED:
+            ),
+            $atts,
+            'postpress_ai_preview'
+        );
+
+        // Build fields map (kept simple for now; JS will read these by ID).                         // CHANGED:
+        $fields = array_map( 'trim', explode( ',', strtolower( (string) $a['show_fields'] ) ) );     // CHANGED:
+        $want   = array_flip( $fields );                                                             // CHANGED:
+
+        ob_start();                                                                                  // CHANGED:
+        ?>
+        <div id="ppa-public-preview" class="ppa-public">                                             <!-- CHANGED: -->
+            <div class="ppa-public-form">                                                            <!-- CHANGED: -->
+                <?php if ( isset( $want['subject'] ) ) : ?>                                          <!-- CHANGED: -->
+                    <label for="ppaPubSubject"><?php esc_html_e( 'Subject', 'postpress-ai' ); ?></label>
+                    <input type="text" id="ppaPubSubject" />
+                <?php endif; ?>
+                <?php if ( isset( $want['brief'] ) ) : ?>                                            <!-- CHANGED: -->
+                    <label for="ppaPubBrief"><?php esc_html_e( 'Brief', 'postpress-ai' ); ?></label>
+                    <textarea id="ppaPubBrief" rows="3"></textarea>
+                <?php endif; ?>
+                <?php if ( isset( $want['genre'] ) ) : ?>                                            <!-- CHANGED: -->
+                    <label for="ppaPubGenre"><?php esc_html_e( 'Genre', 'postpress-ai' ); ?></label>
+                    <input type="text" id="ppaPubGenre" />
+                <?php endif; ?>
+                <?php if ( isset( $want['tone'] ) ) : ?>                                             <!-- CHANGED: -->
+                    <label for="ppaPubTone"><?php esc_html_e( 'Tone', 'postpress-ai' ); ?></label>
+                    <input type="text" id="ppaPubTone" />
+                <?php endif; ?>
+                <?php if ( isset( $want['word_count'] ) ) : ?>                                       <!-- CHANGED: -->
+                    <label for="ppaPubWC"><?php esc_html_e( 'Word Count', 'postpress-ai' ); ?></label>
+                    <input type="number" id="ppaPubWC" min="0" step="50" />
+                <?php endif; ?>
+
+                <button type="button" id="ppaPubPreviewBtn"><?php echo esc_html( $a['button_text'] ); ?></button> <!-- CHANGED: -->
+                <div role="status" aria-live="polite" id="ppaPubMsg" class="ppa-msg"></div>          <!-- CHANGED: -->
+            </div>
+
+            <div id="ppaPubPreviewPane" class="ppa-preview-pane"></div>                              <!-- CHANGED: -->
+        </div>
+        <?php
+        return ob_get_clean();                                                                        // CHANGED:
+    }
+    add_shortcode( 'postpress_ai_preview', 'ppa_render_public_preview' );                             // CHANGED:
+}
