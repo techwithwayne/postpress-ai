@@ -4,6 +4,10 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-03: Add auto-fill (Title/Excerpt/Slug) after successful Preview response.     // CHANGED:
+ *             - Tolerant JSON extraction (body.*, body.result.*, body.data.*).         // CHANGED:
+ *             - HTML fallback: <h1> for title, first <p> text for excerpt.             // CHANGED:
+ *             - Safe slug sanitizer; only fills empty fields (never overwrites).       // CHANGED:
  * 2025-10-30: Add full “Save to Draft” wiring:
  *             - Robust store payload (title, content, excerpt, status, slug, tags, categories).
  *             - TinyMCE/Classic editor content detection with graceful fallback.          // CHANGED:
@@ -329,6 +333,90 @@
     return '';
   }
 
+  // ---- Auto-fill helpers (Title/Excerpt/Slug) ------------------------------ // CHANGED:
+
+  function getElTitle() { return $('#ppa-title') || $('#title'); }          // CHANGED:
+  function getElExcerpt() { return $('#ppa-excerpt') || $('#excerpt'); }    // CHANGED:
+  function getElSlug() { return $('#ppa-slug') || $('#post_name'); }        // CHANGED:
+
+  function setIfEmpty(el, val) {                                            // CHANGED:
+    if (!el) return;
+    var cur = String(el.value || '').trim();
+    if (!cur && val) el.value = String(val);
+  }
+
+  function sanitizeSlug(s) {                                                // CHANGED:
+    if (!s) return '';
+    // Lowercase, strip HTML, remove non-url chars, collapse dashes.
+    var t = String(s).toLowerCase();
+    t = t.replace(/<[^>]*>/g, '');                 // strip any tags if present
+    t = t.normalize ? t.normalize('NFKD') : t;     // unicode normalize when available
+    t = t.replace(/[^\w\s-]+/g, '');               // remove punctuation except dash/underscore
+    t = t.replace(/\s+/g, '-');                    // spaces → dashes
+    t = t.replace(/-+/g, '-');                     // collapse multiples
+    t = t.replace(/^-+|-+$/g, '');                 // trim leading/trailing dashes
+    return t;
+  }
+
+  function textFromFirstMatch(html, selector) {                              // CHANGED:
+    try {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html || '';
+      var el = tmp.querySelector(selector);
+      if (!el) return '';
+      var text = (el.textContent || '').trim();
+      return text;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function extractTitleFromHtml(html) {                                     // CHANGED:
+    // Priority: <h1>, fallback first heading in order h1..h3.
+    var t = textFromFirstMatch(html, 'h1');
+    if (t) return t;
+    t = textFromFirstMatch(html, 'h2');
+    if (t) return t;
+    t = textFromFirstMatch(html, 'h3');
+    return t || '';
+  }
+
+  function extractExcerptFromHtml(html) {                                   // CHANGED:
+    // First non-empty <p> text; trimmed, single line.
+    var p = textFromFirstMatch(html, 'p');
+    if (!p) return '';
+    // Make it short-ish; WordPress excerpt is typically brief.
+    return p.replace(/\s+/g, ' ').trim().slice(0, 300);
+  }
+
+  function pickField(body, key) {                                           // CHANGED:
+    if (!body || typeof body !== 'object') return '';
+    if (typeof body[key] === 'string') return body[key];
+    if (body.result && typeof body.result[key] === 'string') return body.result[key];
+    if (body.data && typeof body.data[key] === 'string') return body.data[key];
+    return '';
+  }
+
+  function autoFillAfterPreview(body, html) {                               // CHANGED:
+    // 1) Attempt JSON-sourced values.
+    var title = pickField(body, 'title');
+    var excerpt = pickField(body, 'excerpt');
+    var slug = pickField(body, 'slug');
+
+    // 2) Fallback from HTML if still missing.
+    if (!title) title = extractTitleFromHtml(html);
+    if (!excerpt) excerpt = extractExcerptFromHtml(html);
+    if (!slug && title) slug = sanitizeSlug(title);
+
+    // 3) Set fields only if currently empty (do not overwrite user input).
+    setIfEmpty(getElTitle(), title);
+    setIfEmpty(getElExcerpt(), excerpt);
+    setIfEmpty(getElSlug(), slug);
+
+    // 4) Console trace for observability.
+    console.info('PPA: autofill candidates →', { title: !!title, excerpt: !!excerpt, slug: !!slug });
+  }
+
   // ---- Events --------------------------------------------------------------
 
   if (btnPreview) {
@@ -352,6 +440,7 @@
           if (html) {
             setPreview(html);
             clearNotice();
+            autoFillAfterPreview(res.body, html); // CHANGED: perform tolerant auto-fill after preview
             return;
           }
 
@@ -404,7 +493,7 @@
         return apiPost('ppa_store', payload).then(function (res) {
           var msg = pickMessage(res.body) || 'Publish request sent.';
           var pid = pickId(res.body);
-          if (!res.ok) {
+        if (!res.ok) {
             renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
             console.info('PPA: publish failed', res);
             return;
