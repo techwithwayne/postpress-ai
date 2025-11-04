@@ -4,13 +4,12 @@
  * PostPress AI — Logging / History (CPT)
  *
  * ========= CHANGE LOG =========
- * 2025-11-04: Hardening + polish.                                                                 # CHANGED:
- *             - Ensure show_in_rest=false, rewrite=false (not publicly exposed).                  # CHANGED:
- *             - Minor docblocks/escaping tweaks.                                                  # CHANGED:
- * 2025-11-03: New file. Introduces CPT `ppa_generation` + admin columns + logging helpers.        # CHANGED:
- *             - PPALogging::init() registers CPT + list table columns.                            # CHANGED:
- *             - PPALogging::log_event($args) for simple inserts from preview/store.               # CHANGED:
- *             - No UI styles or inline scripts; pure server logic.                                # CHANGED:
+ * 2025-11-04: Admin list niceties + CLI-safe row action.                                            # CHANGED:
+ *             - Toolbar filters (Type/Status/Provider).                                             # CHANGED:
+ *             - Query parsing to apply filters.                                                     # CHANGED:
+ *             - Row action "View details" with fallback link when get_edit_post_link() is empty.    # CHANGED:
+ * 2025-11-04: Hardening + polish (no REST, no rewrite).                                             # CHANGED:
+ * 2025-11-03: New file: CPT `ppa_generation` + admin columns + log_event() helper.                  # CHANGED:
  * ================================================================================================
  */
 
@@ -22,25 +21,27 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * Central logging utilities + CPT registration.
- *
- * Usage after wiring in bootstrap:
- *   \PPA\Logging\PPALogging::init();
- *   \PPA\Logging\PPALogging::log_event([ 'type' => 'preview', 'subject' => 'Hello', ... ]);
  */
 class PPALogging { // CHANGED:
 
-	/**
-	 * Wire hooks (to be called from plugin bootstrap).                                        # CHANGED:
-	 */
+	/** Wire hooks (to be called from plugin bootstrap). */
 	public static function init() { // CHANGED:
 		add_action( 'init', [ __CLASS__, 'register_cpt' ] );                                   // CHANGED:
 		add_filter( 'manage_edit-ppa_generation_columns', [ __CLASS__, 'admin_columns' ] );    // CHANGED:
-		add_action( 'manage_ppa_generation_posts_custom_column', [ __CLASS__, 'admin_column_render' ], 10, 2 ); // CHANGED:
+		add_action(
+			'manage_ppa_generation_posts_custom_column',
+			[ __CLASS__, 'admin_column_render' ],
+			10,
+			2
+		);                                                                                     // CHANGED:
+
+		// Admin list niceties                                                                 // CHANGED:
+		add_action( 'restrict_manage_posts', [ __CLASS__, 'render_filters' ] );                // CHANGED:
+		add_action( 'parse_query', [ __CLASS__, 'apply_filters_to_query' ] );                  // CHANGED:
+		add_filter( 'post_row_actions', [ __CLASS__, 'row_actions' ], 10, 2 );                 // CHANGED:
 	} // CHANGED:
 
-	/**
-	 * Register the `ppa_generation` CPT to store history rows.                                # CHANGED:
-	 */
+	/** Register the `ppa_generation` CPT to store history rows. */
 	public static function register_cpt() { // CHANGED:
 		$labels = [
 			'name'               => __( 'PPA Generations', 'postpress-ai' ),
@@ -77,11 +78,7 @@ class PPALogging { // CHANGED:
 		);
 	} // CHANGED:
 
-	/**
-	 * Define admin list columns.                                                               # CHANGED:
-	 * @param array $cols
-	 * @return array
-	 */
+	/** Define admin list columns. */
 	public static function admin_columns( $cols ) { // CHANGED:
 		// Keep checkbox/title/date but add quick info columns.
 		$out = [];
@@ -99,9 +96,7 @@ class PPALogging { // CHANGED:
 		return $out;
 	} // CHANGED:
 
-	/**
-	 * Render custom column values.                                                              # CHANGED:
-	 */
+	/** Render custom column values. */
 	public static function admin_column_render( $column, $post_id ) { // CHANGED:
 		switch ( $column ) {
 			case 'ppa_type':
@@ -125,21 +120,92 @@ class PPALogging { // CHANGED:
 		}
 	} // CHANGED:
 
+	/** Toolbar filters above the list table (Type/Status/Provider). */
+	public static function render_filters() { // CHANGED:
+		global $typenow;
+		if ( 'ppa_generation' !== ( $typenow ?? '' ) ) {
+			return;
+		}
+
+		$type     = isset( $_GET['ppa_type'] ) ? sanitize_text_field( (string) $_GET['ppa_type'] ) : '';        // CHANGED:
+		$status   = isset( $_GET['ppa_status'] ) ? sanitize_text_field( (string) $_GET['ppa_status'] ) : '';    // CHANGED:
+		$provider = isset( $_GET['ppa_provider'] ) ? sanitize_text_field( (string) $_GET['ppa_provider'] ) : ''; // CHANGED:
+
+		$types     = [ '' => __( 'All Types', 'postpress-ai' ), 'preview' => 'preview', 'store' => 'store', 'error' => 'error' ];
+		$statuses  = [ '' => __( 'All Statuses', 'postpress-ai' ), 'ok' => 'ok', 'fail' => 'fail' ];
+		$providers = [ '' => __( 'All Providers', 'postpress-ai' ), 'django' => 'django', 'local-fallback' => 'local-fallback' ];
+
+		echo '<select name="ppa_type" id="filter-by-ppa-type">';
+		foreach ( $types as $val => $label ) {
+			echo '<option value="' . esc_attr( $val ) . '"' . selected( $type, $val, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+		echo '</select>';
+
+		echo '<select name="ppa_status" id="filter-by-ppa-status" style="margin-left:6px">';
+		foreach ( $statuses as $val => $label ) {
+			echo '<option value="' . esc_attr( $val ) . '"' . selected( $status, $val, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+		echo '</select>';
+
+		echo '<select name="ppa_provider" id="filter-by-ppa-provider" style="margin-left:6px">';
+		foreach ( $providers as $val => $label ) {
+			echo '<option value="' . esc_attr( $val ) . '"' . selected( $provider, $val, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+		echo '</select>';
+	} // CHANGED:
+
 	/**
-	 * Insert a generation log row.                                                              # CHANGED:
-	 *
-	 * @param array $args {
-	 *   @type string $type      'preview'|'store'|'error'
-	 *   @type string $subject   Optional subject/topic
-	 *   @type string $provider  e.g. 'django' or 'local-fallback'
-	 *   @type string $status    'ok'|'fail'
-	 *   @type string $message   Short status message (optional)
-	 *   @type string $excerpt   Short preview of content (optional)
-	 *   @type string $content   Long content/body to store in post_content (optional)
-	 *   @type array  $meta      Additional key=>value pairs to persist as post meta (optional)
-	 * }
-	 * @return int|\WP_Error Post ID on success.
+	 * Apply toolbar filters to the list table query.
+	 * @param \WP_Query $q
 	 */
+	public static function apply_filters_to_query( $q ) { // CHANGED:
+		if ( ! is_admin() || ! $q instanceof \WP_Query ) {
+			return;
+		}
+		$post_type = isset( $_GET['post_type'] ) ? (string) $_GET['post_type'] : ( $q->get( 'post_type' ) ?: '' );
+		if ( 'ppa_generation' !== $post_type ) {
+			return;
+		}
+
+		$type     = isset( $_GET['ppa_type'] ) ? sanitize_text_field( (string) $_GET['ppa_type'] ) : '';
+		$status   = isset( $_GET['ppa_status'] ) ? sanitize_text_field( (string) $_GET['ppa_status'] ) : '';
+		$provider = isset( $_GET['ppa_provider'] ) ? sanitize_text_field( (string) $_GET['ppa_provider'] ) : '';
+
+		$meta_query = (array) $q->get( 'meta_query' );
+		if ( $type !== '' ) {
+			$meta_query[] = [ 'key' => '_ppa_type', 'value' => $type, 'compare' => '=' ];
+		}
+		if ( $status !== '' ) {
+			$meta_query[] = [ 'key' => '_ppa_status', 'value' => $status, 'compare' => '=' ];
+		}
+		if ( $provider !== '' ) {
+			$meta_query[] = [ 'key' => '_ppa_provider', 'value' => $provider, 'compare' => '=' ];
+		}
+		if ( ! empty( $meta_query ) ) {
+			$q->set( 'meta_query', $meta_query );
+		}
+	} // CHANGED:
+
+	/**
+	 * Row actions: add "View details". Uses direct admin_url fallback for CLI/non-admin contexts.  # CHANGED:
+	 * @param array   $actions
+	 * @param \WP_Post $post
+	 * @return array
+	 */
+	public static function row_actions( $actions, $post ) { // CHANGED:
+		if ( $post instanceof \WP_Post && $post->post_type === 'ppa_generation' ) {
+			$link = get_edit_post_link( $post->ID, '' );
+			if ( empty( $link ) ) {                                                                 // CHANGED:
+				$link = admin_url( 'post.php?post=' . (int) $post->ID . '&action=edit' );          // CHANGED:
+			}
+			if ( $link ) {
+				$actions['ppa_view'] = '<a href="' . esc_url( $link ) . '">' . esc_html__( 'View details', 'postpress-ai' ) . '</a>';
+			}
+		}
+		return $actions;
+	} // CHANGED:
+
+	/** Insert a generation log row. */
 	public static function log_event( array $args ) { // CHANGED:
 		$defaults = [
 			'type'     => 'preview',
@@ -160,13 +226,16 @@ class PPALogging { // CHANGED:
 			( $a['status'] ? '[' . $a['status'] . ']' : '' )
 		) );
 
-		$post_id = wp_insert_post( [
-			'post_type'   => 'ppa_generation',
-			'post_status' => 'publish', // history rows are immediately visible in admin
-			'post_title'  => $title,
-			// Allow rich content (already server-side); store as-is.                                # CHANGED:
-			'post_content'=> (string) $a['content'],                                                 // CHANGED:
-		], true );
+		$post_id = wp_insert_post(
+			[
+				'post_type'   => 'ppa_generation',
+				'post_status' => 'publish', // history rows are immediately visible in admin
+				'post_title'  => $title,
+				// Allow rich content (already server-side); store as-is.
+				'post_content'=> (string) $a['content'],
+			],
+			true
+		);
 
 		if ( is_wp_error( $post_id ) ) {
 			return $post_id;
