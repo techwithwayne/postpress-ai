@@ -4,11 +4,14 @@
  * PostPress AI — Logging / History (CPT)
  *
  * ========= CHANGE LOG =========
- * 2025-11-03: New file. Introduces CPT `ppa_generation` + admin columns + logging helpers.   # CHANGED:
- *             - PPALogging::init() registers CPT + list table columns.                       # CHANGED:
- *             - PPALogging::log_event($args) for simple inserts from preview/store.          # CHANGED:
- *             - No UI styles or inline scripts; pure server logic.                           # CHANGED:
- * ==========================================================================================
+ * 2025-11-04: Hardening + polish.                                                                 # CHANGED:
+ *             - Ensure show_in_rest=false, rewrite=false (not publicly exposed).                  # CHANGED:
+ *             - Minor docblocks/escaping tweaks.                                                  # CHANGED:
+ * 2025-11-03: New file. Introduces CPT `ppa_generation` + admin columns + logging helpers.        # CHANGED:
+ *             - PPALogging::init() registers CPT + list table columns.                            # CHANGED:
+ *             - PPALogging::log_event($args) for simple inserts from preview/store.               # CHANGED:
+ *             - No UI styles or inline scripts; pure server logic.                                # CHANGED:
+ * ================================================================================================
  */
 
 namespace PPA\Logging; // CHANGED:
@@ -56,9 +59,9 @@ class PPALogging { // CHANGED:
 			'ppa_generation',
 			[
 				'labels'              => $labels,
-				'public'              => false,   // not publicly queryable
-				'show_ui'             => true,    // visible in admin
-				'show_in_menu'        => 'postpress-ai', // groups under our menu if available
+				'public'              => false,                   // not publicly queryable
+				'show_ui'             => true,                    // visible in admin
+				'show_in_menu'        => 'postpress-ai',          // group under our menu
 				'show_in_admin_bar'   => false,
 				'exclude_from_search' => true,
 				'publicly_queryable'  => false,
@@ -68,6 +71,8 @@ class PPALogging { // CHANGED:
 				'menu_icon'           => 'dashicons-media-text',
 				'capability_type'     => 'post',
 				'map_meta_cap'        => true,
+				'show_in_rest'        => false,                   // CHANGED: not in REST
+				'rewrite'             => false,                   // CHANGED: no permalinks
 			]
 		);
 	} // CHANGED:
@@ -86,7 +91,7 @@ class PPALogging { // CHANGED:
 			}
 		}
 		$out['ppa_type']     = __( 'Type', 'postpress-ai' );           // preview|store|error
-		$out['ppa_provider'] = __( 'Provider', 'postpress-ai' );       // django/local-fallback
+		$out['ppa_provider'] = __( 'Provider', 'postpress-ai' );       // django|local-fallback
 		$out['ppa_status']   = __( 'Status', 'postpress-ai' );         // ok|fail
 		$out['ppa_excerpt']  = __( 'Excerpt', 'postpress-ai' );        // short summary
 		$out['date']         = __( 'Date', 'postpress-ai' );
@@ -151,7 +156,7 @@ class PPALogging { // CHANGED:
 		$title = trim( sprintf(
 			'%s — %s %s',
 			$a['subject'] !== '' ? $a['subject'] : __( 'Untitled', 'postpress-ai' ),
-			strtoupper( $a['type'] ),
+			strtoupper( (string) $a['type'] ),
 			( $a['status'] ? '[' . $a['status'] . ']' : '' )
 		) );
 
@@ -159,7 +164,8 @@ class PPALogging { // CHANGED:
 			'post_type'   => 'ppa_generation',
 			'post_status' => 'publish', // history rows are immediately visible in admin
 			'post_title'  => $title,
-			'post_content'=> (string) $a['content'],
+			// Allow rich content (already server-side); store as-is.                                # CHANGED:
+			'post_content'=> (string) $a['content'],                                                 // CHANGED:
 		], true );
 
 		if ( is_wp_error( $post_id ) ) {
@@ -177,7 +183,11 @@ class PPALogging { // CHANGED:
 		if ( is_array( $a['meta'] ) ) {
 			foreach ( $a['meta'] as $k => $v ) {
 				if ( is_string( $k ) ) {
-					update_post_meta( $post_id, sanitize_key( $k ), is_scalar( $v ) ? (string) $v : wp_json_encode( $v ) );
+					update_post_meta(
+						$post_id,
+						sanitize_key( $k ),
+						is_scalar( $v ) ? (string) $v : wp_json_encode( $v )
+					);
 				}
 			}
 		}
