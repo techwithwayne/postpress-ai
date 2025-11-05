@@ -4,7 +4,11 @@ namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.
 /*
 CHANGE LOG
 ----------
-2025-10-29 • Save-to-Draft: allow auth via either logged-in+cap OR X-PPA-Key;                       # CHANGED:
+2025-11-04 • Add logging via \PPA\Logging\PPALogging::log_event():                                   # CHANGED:
+             - Log auth failures (error/fail), insert failures (error/fail), and draft success       # CHANGED:
+               (store/ok) with meta {post_id, slug, edit_link}.                                      # CHANGED:
+             - Safe helper ppa_log_safe() to avoid hard dependency fatals.                           # CHANGED:
+2025-10-29 • Save-to-Draft: allow auth via either logged-in+cap OR X-PPA-Key;                        # CHANGED:
              fixed debug tail path; removed leading backslashes; retained single-backslash callbacks. # CHANGED:
 */
 
@@ -12,6 +16,24 @@ defined('ABSPATH') || exit;
 
 // --- Debug breadcrumbs (non-sensitive) -------------------------------------------------------------- # CHANGED:
 error_log('PPA: store.php loaded');                                                                     # CHANGED:
+
+/**
+ * Minimal logging wrapper so this file never fatals if logging class is missing.                # CHANGED:
+ * @param array<string,mixed> $args                                                                # CHANGED:
+ * @return int|false                                                                               # CHANGED:
+ */
+if (!function_exists(__NAMESPACE__ . '\\ppa_log_safe')) {                                            // CHANGED:
+    function ppa_log_safe(array $args) {                                                             // CHANGED:
+        if (class_exists('\\PPA\\Logging\\PPALogging') && method_exists('\\PPA\\Logging\\PPALogging', 'log_event')) { // CHANGED:
+            try {                                                                                    // CHANGED:
+                return \PPA\Logging\PPALogging::log_event($args);                                     // CHANGED:
+            } catch (\Throwable $e) {                                                                // CHANGED:
+                error_log('PPA: store log_event error: ' . $e->getMessage());                        // CHANGED:
+            }                                                                                        // CHANGED:
+        }                                                                                            // CHANGED:
+        return false;                                                                                // CHANGED:
+    }                                                                                                // CHANGED:
+}
 
 /**
  * Normalize mixed JSON/form input into a canonical array.
@@ -142,17 +164,27 @@ function handle_store(): void {
     $pack = ppa_normalize_request();                                                                     # CHANGED:
 
     $mode = strtolower($pack['data']['mode'] ?? '');
+    $subject_for_log = ($pack['data']['title'] ?? '') !== '' ? (string) $pack['data']['title'] : __('Save Draft', 'postpress-ai'); // CHANGED:
 
     if ($mode === 'draft') {
         // Auth: logged-in+cap OR X-PPA-Key
         if (!ppa_is_authorized()) {                                                                      # CHANGED:
+            ppa_log_safe([                                                                               // CHANGED:
+                'type'     => 'error',                                                                   // CHANGED:
+                'subject'  => $subject_for_log,                                                          // CHANGED:
+                'provider' => 'local-fallback',                                                          // CHANGED:
+                'status'   => 'fail',                                                                    // CHANGED:
+                'message'  => 'auth required',                                                           // CHANGED:
+                'excerpt'  => wp_trim_words(wp_strip_all_tags((string) ($pack['data']['content'] ?? '')), 24, '…'), // CHANGED:
+                'meta'     => ['phase' => 'auth'],                                                       // CHANGED:
+            ]);                                                                                          // CHANGED:
             wp_send_json(
                 ['ok' => false, 'error' => 'auth required', 'ver' => 'postpress-ai.v2.1-2025-10-29'],
                 401
             );
         }
 
-        error_log('PPA: store mode=draft start');                                                        # CHANGED:
+        error_log('PPA: store mode=draft start');                                                        // CHANGED:
 
         // Build post array (force draft)
         $postarr = [
@@ -179,12 +211,22 @@ function handle_store(): void {
 
         $post_id = wp_insert_post($postarr, true);
         if (is_wp_error($post_id)) {
-            error_log('PPA: store mode=draft wp_error: ' . $post_id->get_error_message());               # CHANGED:
+            $msg = $post_id->get_error_message();                                                        // CHANGED:
+            error_log('PPA: store mode=draft wp_error: ' . $msg);                                        // CHANGED:
+            ppa_log_safe([                                                                               // CHANGED:
+                'type'     => 'error',                                                                   // CHANGED:
+                'subject'  => $subject_for_log,                                                          // CHANGED:
+                'provider' => 'local-fallback',                                                          // CHANGED:
+                'status'   => 'fail',                                                                    // CHANGED:
+                'message'  => $msg,                                                                      // CHANGED:
+                'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $postarr['post_content']), 24, '…'), // CHANGED:
+                'meta'     => ['phase' => 'insert'],                                                     // CHANGED:
+            ]);                                                                                          // CHANGED:
             wp_send_json(
                 [
                     'ok'      => false,
                     'error'   => 'insert failed',
-                    'message' => $post_id->get_error_message(),
+                    'message' => $msg,
                     'ver'     => 'postpress-ai.v2.1-2025-10-29',
                 ],
                 500
@@ -201,6 +243,22 @@ function handle_store(): void {
 
         $edit_link = get_edit_post_link((int) $post_id, '');
 
+        // SUCCESS LOG                                                                                   # CHANGED:
+        ppa_log_safe([                                                                                   // CHANGED:
+            'type'     => 'store',                                                                        // CHANGED:
+            'subject'  => $subject_for_log,                                                               // CHANGED:
+            'provider' => 'local-fallback',                                                               // CHANGED:
+            'status'   => 'ok',                                                                           // CHANGED:
+            'message'  => 'draft saved',                                                                  // CHANGED:
+            'excerpt'  => wp_trim_words(wp_strip_all_tags((string) ($pack['data']['excerpt'] ?: $pack['data']['content'])), 24, '…'), // CHANGED:
+            'content'  => (string) $pack['data']['content'],                                              // CHANGED:
+            'meta'     => [                                                                               // CHANGED:
+                'post_id'   => (int) $post_id,                                                            // CHANGED:
+                'slug'      => (string) ($pack['data']['slug'] ?? ''),                                    // CHANGED:
+                'edit_link' => (string) $edit_link,                                                       // CHANGED:
+            ],                                                                                            // CHANGED:
+        ]);                                                                                               // CHANGED:
+
         $resp = [
             'ok'        => true,
             'post_id'   => (int) $post_id,
@@ -209,7 +267,7 @@ function handle_store(): void {
             'edit_link' => $edit_link,
             'ver'       => 'postpress-ai.v2.1-2025-10-29',
         ];
-        error_log('PPA: store mode=draft ok id=' . (int) $post_id);                                      # CHANGED:
+        error_log('PPA: store mode=draft ok id=' . (int) $post_id);                                      // CHANGED:
         wp_send_json($resp, 200);
     }
 
