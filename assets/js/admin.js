@@ -4,21 +4,22 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-11-03: Add auto-fill (Title/Excerpt/Slug) after successful Preview response.     // CHANGED:
- *             - Tolerant JSON extraction (body.*, body.result.*, body.data.*).         // CHANGED:
- *             - HTML fallback: <h1> for title, first <p> text for excerpt.             // CHANGED:
- *             - Safe slug sanitizer; only fills empty fields (never overwrites).       // CHANGED:
- * 2025-10-30: Add full “Save to Draft” wiring:
- *             - Robust store payload (title, content, excerpt, status, slug, tags, categories).
- *             - TinyMCE/Classic editor content detection with graceful fallback.          // CHANGED:
- *             - Tolerant field selectors for various admin screens.                       // CHANGED:
- *             - Unified notices, double-submit guard kept.                                // CHANGED:
- * 2025-10-30: Keep Preview flow intact; provider sniff retained.                          // CHANGED:
+ * 2025-11-05: UX polish + resilience                                             // CHANGED:
+ *   - Handle 429 rate-limit: show retry countdown, disable/reenable buttons.     // CHANGED:
+ *   - Surface structured errors (error.type/message/details).                    // CHANGED:
+ *   - Live slug auto-suggest from title until user edits slug.                   // CHANGED:
+ *   - A11y: #ppa-toolbar-msg gets role/aria-live; preview pane focusable.        // CHANGED:
+ *   - Light pre-click debounce guard on action buttons.                           // CHANGED:
+ * 2025-11-03: Add auto-fill (Title/Excerpt/Slug) after successful Preview resp.  // CHANGED:
+ *             - Tolerant JSON extraction (body.*, body.result.*, body.data.*).   // CHANGED:
+ *             - HTML fallback: <h1> for title, first <p> text for excerpt.       // CHANGED:
+ *             - Safe slug sanitizer; only fills empty fields (never overwrites). // CHANGED:
+ * 2025-10-30: Add full “Save to Draft” wiring.
+ *             - Robust store payload; TinyMCE/Classic detection; tolerant sels.  // CHANGED:
+ *             - Unified notices, double-submit guard kept.                       // CHANGED:
+ * 2025-10-30: Keep Preview flow intact; provider sniff retained.                 // CHANGED:
  *
- * 2025-10-19: Added provider tracing for preview via <!-- provider: X --> sniff.
- * 2025-10-19: Added double-submit guard: disables buttons during async ops and re-enables on settle.
- * 2025-10-19: Expanded tolerant parsing: also reads id/message at body.level and body.result.level.
- * 2025-10-19: Replaced most alert() errors with inline toolbar notices (fallback to alert if no container).
+ * 2025-10-19: Provider tracing via <!-- provider: X -->; async guards & notices.
  * =================================
  *
  * Notes:
@@ -28,11 +29,12 @@
  *     html: body.html | body.result.html | body.data.html | body.content | body.preview | body.raw
  *     message: body.message | body.result.message
  *     id: body.id | body.result.id
- * - Inline notices render into #ppa-toolbar-msg when available; otherwise fall back to alert().
  */
 
 (function () {
   'use strict';
+
+  var PPA_JS_VER = 'admin.v2025-11-05'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -40,6 +42,21 @@
     console.info('PPA: composer root not found, admin.js is idle');
     return;
   }
+
+  // Ensure toolbar message acts as a live region (A11y)                         // CHANGED:
+  (function ensureLiveRegion(){                                                 // CHANGED:
+    var msg = document.getElementById('ppa-toolbar-msg');                       // CHANGED:
+    if (msg) {                                                                  // CHANGED:
+      if (!msg.getAttribute('role')) msg.setAttribute('role', 'status');        // CHANGED:
+      if (!msg.getAttribute('aria-live')) msg.setAttribute('aria-live', 'polite'); // CHANGED:
+    }                                                                            // CHANGED:
+  })();                                                                          // CHANGED:
+
+  // Make preview pane focusable for screen readers                               // CHANGED:
+  (function ensurePreviewPaneFocusable(){                                        // CHANGED:
+    var pane = document.getElementById('ppa-preview-pane');                      // CHANGED:
+    if (pane && !pane.hasAttribute('tabindex')) pane.setAttribute('tabindex', '-1'); // CHANGED:
+  })();                                                                          // CHANGED:
 
   // ---- Helpers -------------------------------------------------------------
 
@@ -76,6 +93,7 @@
     var pane = $('#ppa-preview-pane');
     if (!pane) return;
     pane.innerHTML = html;
+    try { pane.focus(); } catch (e) {} // A11y: move focus to updated region    // CHANGED:
   }
 
   // Extract `provider` from an HTML comment like: <!-- provider: local-fallback -->
@@ -85,9 +103,9 @@
     return m ? m[1] : '';
   }
 
-  // --- Rich text helpers (Classic/TinyMCE/Gutenberg-compatible) ------------- // CHANGED:
+  // --- Rich text helpers (Classic/TinyMCE/Gutenberg-compatible) -------------
 
-  function getTinyMCEContentById(id) { // CHANGED:
+  function getTinyMCEContentById(id) {
     try {
       if (!window.tinyMCE || !tinyMCE.get) return '';
       var ed = tinyMCE.get(id);
@@ -97,28 +115,23 @@
     }
   }
 
-  function getEditorContent() { // CHANGED:
+  function getEditorContent() {
     // Try common WordPress editor fields, in order.
-    // 1) Custom composer textarea
     var txt = $('#ppa-content');
     if (txt && String(txt.value || '').trim()) return String(txt.value || '').trim();
 
-    // 2) TinyMCE (classic editor)
     var mce = getTinyMCEContentById('content');
     if (mce) return mce;
 
-    // 3) Fallback to the raw textarea #content (classic editor fallback)
     var raw = $('#content');
     if (raw && String(raw.value || '').trim()) return String(raw.value || '').trim();
 
-    // 4) Gutenberg note: we don't programmatically read blocks here; server will normalize if needed.
     return '';
   }
 
   // ---- Payload builders ----------------------------------------------------
 
   function buildPreviewPayload() {
-    // Lightweight preview fields (prompting inputs)
     var subject = $('#ppa-subject');
     var brief = $('#ppa-brief');
     var genre = $('#ppa-genre');
@@ -130,39 +143,33 @@
       brief: brief ? brief.value : '',
       genre: genre ? genre.value : '',
       tone: tone ? tone.value : '',
-      word_count: wc ? Number(wc.value || 0) : 0
+      word_count: wc ? Number(wc.value || 0) : 0,
+      _js_ver: PPA_JS_VER // trace for debugging                                    // CHANGED:
     };
   }
 
-  function readCsvValues(el) { // CHANGED:
+  function readCsvValues(el) {
     if (!el) return [];
     var raw = String(el.value || '').trim();
     if (!raw) return [];
     return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   }
 
-  function buildStorePayload(target) { // CHANGED:
+  function buildStorePayload(target) {
     // Build a tolerant payload for /ppa_store: include core post fields when present.
-    // Field ids are tolerant and optional; server normalizes.
-    var title = $('#ppa-title') || $('#title'); // custom or core
+    var title = $('#ppa-title') || $('#title');
     var excerpt = $('#ppa-excerpt') || $('#excerpt');
     var slug = $('#ppa-slug') || $('#post_name');
 
-    // Tags/Cats (comma-separated text inputs or multi-selects)
     var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
     var catsEl = $('#ppa-categories') || $('#post_category');
-
-    // Status (explicit if provided; otherwise server may decide based on target)
     var statusEl = $('#ppa-status');
 
     var payload = {
-      // Core post fields
       title: title ? String(title.value || '') : '',
       content: getEditorContent(),
       excerpt: excerpt ? String(excerpt.value || '') : '',
       slug: slug ? String(slug.value || '') : '',
-
-      // Taxonomy (tolerant)
       tags: (function () {
         if (tagsEl && tagsEl.tagName === 'SELECT') {
           return $all('option:checked', tagsEl).map(function (o) { return o.value; });
@@ -173,20 +180,15 @@
         if (catsEl && catsEl.tagName === 'SELECT') {
           return $all('option:checked', catsEl).map(function (o) { return o.value; });
         }
-        // Comma-separated fallback if using text
         return readCsvValues(catsEl);
       })(),
-
-      // Status/Target
       status: statusEl ? String(statusEl.value || '') : '',
-
-      // Metadata
-      target_sites: [String(target || 'draft')], // 'draft' | 'publish'
+      target_sites: [String(target || 'draft')],
       source: 'admin',
-      ver: '1'
+      ver: '1',
+      _js_ver: PPA_JS_VER // trace                                                  // CHANGED:
     };
 
-    // Also include preview prompt fields if present (server may use them for context)
     var prev = buildPreviewPayload();
     for (var k in prev) {
       if (Object.prototype.hasOwnProperty.call(prev, k) && !Object.prototype.hasOwnProperty.call(payload, k)) {
@@ -203,7 +205,6 @@
   var btnPublish = $('#ppa-publish');
 
   function noticeContainer() {
-    // Preferred container for inline notices; optional in DOM.
     return $('#ppa-toolbar-msg') || null;
   }
 
@@ -212,10 +213,8 @@
     var el = noticeContainer();
     var text = String(message == null ? '' : message);
     if (!el) {
-      // Fallback to alert if we have nowhere to render.
       if (type === 'error' || type === 'warn') {
-        // eslint-disable-next-line no-alert
-        alert(text);
+        alert(text); // eslint-disable-line no-alert
       } else {
         console.info('PPA:', type + ':', text);
       }
@@ -226,6 +225,13 @@
     el.className = clsBase + ' ' + clsType;
     el.textContent = text;
   }
+
+  function renderNoticeTimed(type, message, ms) {                               // CHANGED:
+    renderNotice(type, message);                                                // CHANGED:
+    if (ms && ms > 0) {                                                         // CHANGED:
+      setTimeout(function(){ clearNotice(); }, ms);                              // CHANGED:
+    }                                                                            // CHANGED:
+  }                                                                              // CHANGED:
 
   function clearNotice() {
     var el = noticeContainer();
@@ -247,6 +253,16 @@
       }
     });
   }
+
+  // Lightweight extra debounce to avoid double-trigger before withBusy runs     // CHANGED:
+  function clickGuard(btn) {                                                     // CHANGED:
+    if (!btn) return false;                                                      // CHANGED:
+    var ts = Number(btn.getAttribute('data-ppa-ts') || 0);                       // CHANGED:
+    var now = Date.now();                                                        // CHANGED:
+    if (now - ts < 350) return true; // ignore clicks <350ms apart               // CHANGED:
+    btn.setAttribute('data-ppa-ts', String(now));                                // CHANGED:
+    return false;                                                                // CHANGED:
+  }                                                                              // CHANGED:
 
   function withBusy(promiseFactory, label) {
     setButtonsDisabled(true);
@@ -295,14 +311,13 @@
       .then(function (res) {
         var ct = (res.headers.get('content-type') || '').toLowerCase();
         return res.text().then(function (text) {
-          // Try to parse JSON; if not JSON, wrap raw text.
           var body = ct.indexOf('application/json') !== -1 ? jsonTryParse(text) : jsonTryParse(text);
-          return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct };
+          return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct, headers: res.headers }; // CHANGED:
         });
       })
       .catch(function (err) {
         console.info('PPA: fetch error', err);
-        return { ok: false, status: 0, body: { error: String(err) }, raw: '', contentType: '' };
+        return { ok: false, status: 0, body: { error: String(err) }, raw: '', contentType: '', headers: new Headers() }; // CHANGED:
       });
   }
 
@@ -315,7 +330,7 @@
     if (body.data && typeof body.data.html === 'string') return body.data.html;
     if (typeof body.content === 'string') return body.content;
     if (typeof body.preview === 'string') return body.preview;
-    if (typeof body.raw === 'string') return body.raw; // last resort if server returned non-JSON
+    if (typeof body.raw === 'string') return body.raw;
     return '';
   }
 
@@ -333,32 +348,38 @@
     return '';
   }
 
-  // ---- Auto-fill helpers (Title/Excerpt/Slug) ------------------------------ // CHANGED:
+  // Structured error picker                                                   // CHANGED:
+  function pickStructuredError(body) {                                        // CHANGED:
+    if (!body || typeof body !== 'object') return null;                       // CHANGED:
+    if (body.error && typeof body.error === 'object') return body.error;      // CHANGED:
+    return null;                                                               // CHANGED:
+  }                                                                            // CHANGED:
 
-  function getElTitle() { return $('#ppa-title') || $('#title'); }          // CHANGED:
-  function getElExcerpt() { return $('#ppa-excerpt') || $('#excerpt'); }    // CHANGED:
-  function getElSlug() { return $('#ppa-slug') || $('#post_name'); }        // CHANGED:
+  // ---- Auto-fill helpers (Title/Excerpt/Slug) ------------------------------
 
-  function setIfEmpty(el, val) {                                            // CHANGED:
+  function getElTitle() { return $('#ppa-title') || $('#title'); }
+  function getElExcerpt() { return $('#ppa-excerpt') || $('#excerpt'); }
+  function getElSlug() { return $('#ppa-slug') || $('#post_name'); }
+
+  function setIfEmpty(el, val) {
     if (!el) return;
     var cur = String(el.value || '').trim();
     if (!cur && val) el.value = String(val);
   }
 
-  function sanitizeSlug(s) {                                                // CHANGED:
+  function sanitizeSlug(s) {
     if (!s) return '';
-    // Lowercase, strip HTML, remove non-url chars, collapse dashes.
     var t = String(s).toLowerCase();
-    t = t.replace(/<[^>]*>/g, '');                 // strip any tags if present
-    t = t.normalize ? t.normalize('NFKD') : t;     // unicode normalize when available
-    t = t.replace(/[^\w\s-]+/g, '');               // remove punctuation except dash/underscore
-    t = t.replace(/\s+/g, '-');                    // spaces → dashes
-    t = t.replace(/-+/g, '-');                     // collapse multiples
-    t = t.replace(/^-+|-+$/g, '');                 // trim leading/trailing dashes
+    t = t.replace(/<[^>]*>/g, '');
+    t = t.normalize ? t.normalize('NFKD') : t;
+    t = t.replace(/[^\w\s-]+/g, '');
+    t = t.replace(/\s+/g, '-');
+    t = t.replace(/-+/g, '-');
+    t = t.replace(/^-+|-+$/g, '');
     return t;
   }
 
-  function textFromFirstMatch(html, selector) {                              // CHANGED:
+  function textFromFirstMatch(html, selector) {
     try {
       var tmp = document.createElement('div');
       tmp.innerHTML = html || '';
@@ -371,8 +392,7 @@
     }
   }
 
-  function extractTitleFromHtml(html) {                                     // CHANGED:
-    // Priority: <h1>, fallback first heading in order h1..h3.
+  function extractTitleFromHtml(html) {
     var t = textFromFirstMatch(html, 'h1');
     if (t) return t;
     t = textFromFirstMatch(html, 'h2');
@@ -381,15 +401,13 @@
     return t || '';
   }
 
-  function extractExcerptFromHtml(html) {                                   // CHANGED:
-    // First non-empty <p> text; trimmed, single line.
+  function extractExcerptFromHtml(html) {
     var p = textFromFirstMatch(html, 'p');
     if (!p) return '';
-    // Make it short-ish; WordPress excerpt is typically brief.
     return p.replace(/\s+/g, ' ').trim().slice(0, 300);
   }
 
-  function pickField(body, key) {                                           // CHANGED:
+  function pickField(body, key) {
     if (!body || typeof body !== 'object') return '';
     if (typeof body[key] === 'string') return body[key];
     if (body.result && typeof body.result[key] === 'string') return body.result[key];
@@ -397,54 +415,91 @@
     return '';
   }
 
-  function autoFillAfterPreview(body, html) {                               // CHANGED:
-    // 1) Attempt JSON-sourced values.
+  function autoFillAfterPreview(body, html) {
     var title = pickField(body, 'title');
     var excerpt = pickField(body, 'excerpt');
     var slug = pickField(body, 'slug');
 
-    // 2) Fallback from HTML if still missing.
     if (!title) title = extractTitleFromHtml(html);
     if (!excerpt) excerpt = extractExcerptFromHtml(html);
     if (!slug && title) slug = sanitizeSlug(title);
 
-    // 3) Set fields only if currently empty (do not overwrite user input).
     setIfEmpty(getElTitle(), title);
     setIfEmpty(getElExcerpt(), excerpt);
     setIfEmpty(getElSlug(), slug);
 
-    // 4) Console trace for observability.
     console.info('PPA: autofill candidates →', { title: !!title, excerpt: !!excerpt, slug: !!slug });
   }
 
+  // Live slug auto-suggest until user edits slug                                // CHANGED:
+  (function setupLiveSlugSuggest(){                                             // CHANGED:
+    var titleEl = getElTitle();                                                 // CHANGED:
+    var slugEl = getElSlug();                                                   // CHANGED:
+    if (!titleEl || !slugEl) return;                                           // CHANGED:
+    var touched = false;                                                        // CHANGED:
+    slugEl.addEventListener('input', function(){ touched = true; });            // CHANGED:
+    slugEl.addEventListener('change', function(){ touched = true; });           // CHANGED:
+    titleEl.addEventListener('input', function(){                               // CHANGED:
+      if (touched) return;                                                      // CHANGED:
+      if (String(slugEl.value || '').trim()) return;                            // CHANGED:
+      var s = sanitizeSlug(titleEl.value || '');                                // CHANGED:
+      if (s) slugEl.value = s;                                                  // CHANGED:
+    });                                                                         // CHANGED:
+  })();                                                                          // CHANGED:
+
   // ---- Events --------------------------------------------------------------
+
+  function handleRateLimit(res, which) {                                       // CHANGED:
+    if (!res || res.status !== 429) return false;                              // CHANGED:
+    var retry = 0;                                                             // CHANGED:
+    var err = pickStructuredError(res.body);                                   // CHANGED:
+    if (err && err.details && typeof err.details.retry_after === 'number') {   // CHANGED:
+      retry = Math.max(0, Math.ceil(err.details.retry_after));                 // CHANGED:
+    }                                                                          // CHANGED:
+    var btn = which === 'preview' ? btnPreview : which === 'draft' ? btnDraft : btnPublish; // CHANGED:
+    if (btn) btn.disabled = true;                                              // CHANGED:
+    var sec = retry || 10;                                                     // CHANGED:
+    var t = setInterval(function(){                                            // CHANGED:
+      renderNotice('warn', 'Rate-limited. Try again in ' + sec + 's.');        // CHANGED:
+      if (--sec <= 0) {                                                        // CHANGED:
+        clearInterval(t);                                                      // CHANGED:
+        if (btn) btn.disabled = false;                                         // CHANGED:
+        clearNotice();                                                         // CHANGED:
+      }                                                                        // CHANGED:
+    }, 1000);                                                                  // CHANGED:
+    return true;                                                               // CHANGED:
+  }                                                                            // CHANGED:
 
   if (btnPreview) {
     btnPreview.addEventListener('click', function (ev) {
       ev.preventDefault();
+      if (clickGuard(btnPreview)) return;                                      // CHANGED:
       console.info('PPA: Preview clicked');
 
       withBusy(function () {
         var payload = buildPreviewPayload();
         return apiPost('ppa_preview', payload).then(function (res) {
-          var html = pickHtmlFromResponseBody(res.body);
+          if (handleRateLimit(res, 'preview')) return;                         // CHANGED:
 
-          // Provider tracing — sniff provider marker and log it.
+          var html = pickHtmlFromResponseBody(res.body);
+          var serr = pickStructuredError(res.body);                            // CHANGED:
+
           var provider = extractProviderFromHtml(html);
-          if (provider) {
-            console.info('PPA: provider=' + provider);
-          } else {
-            console.info('PPA: provider=(unknown)');
+          console.info('PPA: provider=' + (provider || '(unknown)'));
+
+          if (serr && !res.ok) {                                              // CHANGED:
+            var msg = serr.message || 'Request failed.';                       // CHANGED:
+            renderNotice('error', '[' + (serr.type || 'error') + '] ' + msg);  // CHANGED:
+            return;                                                            // CHANGED:
           }
 
           if (html) {
             setPreview(html);
             clearNotice();
-            autoFillAfterPreview(res.body, html); // CHANGED: perform tolerant auto-fill after preview
+            autoFillAfterPreview(res.body, html);
             return;
           }
 
-          // If no HTML, surface a friendly message in the pane
           setPreview('<p><em>Preview did not return HTML content. Check logs.</em></p>');
           renderNotice('warn', 'Preview completed, but no HTML was returned.');
           console.info('PPA: preview response lacked HTML', res);
@@ -456,12 +511,15 @@
   if (btnDraft) {
     btnDraft.addEventListener('click', function (ev) {
       ev.preventDefault();
+      if (clickGuard(btnDraft)) return;                                        // CHANGED:
       console.info('PPA: Save Draft clicked');
 
       withBusy(function () {
         var payload = buildStorePayload('draft');
         return apiPost('ppa_store', payload).then(function (res) {
-          var msg = pickMessage(res.body) || 'Draft request sent.';
+          if (handleRateLimit(res, 'draft')) return;                           // CHANGED:
+          var serr = pickStructuredError(res.body);                            // CHANGED:
+          var msg = (serr && serr.message) || pickMessage(res.body) || 'Draft request sent.'; // CHANGED:
           var pid = pickId(res.body);
           if (!res.ok) {
             renderNotice('error', 'Draft failed (' + res.status + '): ' + msg);
@@ -469,7 +527,7 @@
             return;
           }
           var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
-          renderNotice('success', okMsg);
+          renderNoticeTimed('success', okMsg, 4000);                           // CHANGED:
           console.info('PPA: draft success', res);
         });
       }, 'draft');
@@ -479,6 +537,7 @@
   if (btnPublish) {
     btnPublish.addEventListener('click', function (ev) {
       ev.preventDefault();
+      if (clickGuard(btnPublish)) return;                                      // CHANGED:
       console.info('PPA: Publish clicked');
 
       /* eslint-disable no-alert */
@@ -491,20 +550,22 @@
       withBusy(function () {
         var payload = buildStorePayload('publish');
         return apiPost('ppa_store', payload).then(function (res) {
-          var msg = pickMessage(res.body) || 'Publish request sent.';
+          if (handleRateLimit(res, 'publish')) return;                         // CHANGED:
+          var serr = pickStructuredError(res.body);                            // CHANGED:
+          var msg = (serr && serr.message) || pickMessage(res.body) || 'Publish request sent.'; // CHANGED:
           var pid = pickId(res.body);
-        if (!res.ok) {
+          if (!res.ok) {
             renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
             console.info('PPA: publish failed', res);
             return;
           }
           var okMsg = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
-          renderNotice('success', okMsg);
+          renderNoticeTimed('success', okMsg, 4000);                           // CHANGED:
           console.info('PPA: publish success', res);
         });
       }, 'publish');
     });
   }
 
-  console.info('PPA: admin.js initialized');
+  console.info('PPA: admin.js initialized →', PPA_JS_VER);                     // CHANGED:
 })();
