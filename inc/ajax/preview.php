@@ -3,10 +3,14 @@
  * PostPress AI — AJAX Preview Proxy
  *
  * CHANGE LOG
- * 2025-11-04 • Add logging via \PPA\Logging\PPALogging::log_event() with safe guards.                    # CHANGED:
- *             - Log upstream Django success (ok) and failures (error)                                    # CHANGED:
- *             - Log local-fallback preview (ok)                                                           # CHANGED:
- *             - Added tiny helper ppa_log_safe() to avoid hard dependency fatals                          # CHANGED:
+ * 2025-11-06 • Return top-level `html`; forward structured errors; add no-store headers.               # CHANGED:
+ *             - If Django responds with {ok:false,error:{...}}, passthrough JSON + HTTP code.         # CHANGED:
+ *             - On success, include both top-level `html` and `result` payload (back-compat).         # CHANGED:
+ *             - Fallback still returns provider marker comment.                                       # CHANGED:
+ * 2025-11-04 • Add logging via \PPA\Logging\PPALogging::log_event() with safe guards.                 # CHANGED:
+ *             - Log upstream Django success (ok) and failures (error)                                 # CHANGED:
+ *             - Log local-fallback preview (ok)                                                       # CHANGED:
+ *             - Added tiny helper ppa_log_safe() to avoid hard dependency fatals                      # CHANGED:
  * 2025-10-28 • FIX: robust multi-source input merge; tolerate slashes/BOM; guard helper; always JSON-forward; safe breadcrumbs.
  * 2025-10-27 • Harden JSON forwarding; accept JSON or form; normalize payload keys; add safe breadcrumbs.
  */
@@ -18,21 +22,21 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Minimal logging wrapper so this file never fatals if logging class is missing.                # CHANGED:
- * @param array<string,mixed> $args                                                              # CHANGED:
- * @return int|false                                                                             # CHANGED:
+ * Minimal logging wrapper so this file never fatals if logging class is missing.
+ * @param array<string,mixed> $args
+ * @return int|false
  */
-if (!function_exists(__NAMESPACE__ . '\\ppa_log_safe')) {                                        // CHANGED:
-    function ppa_log_safe(array $args) {                                                         // CHANGED:
-        if (class_exists('\\PPA\\Logging\\PPALogging') && method_exists('\\PPA\\Logging\\PPALogging', 'log_event')) { // CHANGED:
-            try {                                                                                // CHANGED:
-                return \PPA\Logging\PPALogging::log_event($args);                                 // CHANGED:
-            } catch (\Throwable $e) {                                                            // CHANGED:
-                error_log('PPA: preview log_event error: ' . $e->getMessage());                  // CHANGED:
-            }                                                                                    // CHANGED:
-        }                                                                                        // CHANGED:
-        return false;                                                                            // CHANGED:
-    }                                                                                            // CHANGED:
+if (!function_exists(__NAMESPACE__ . '\\ppa_log_safe')) {
+    function ppa_log_safe(array $args) {
+        if (class_exists('\\PPA\\Logging\\PPALogging') && method_exists('\\PPA\\Logging\\PPALogging', 'log_event')) {
+            try {
+                return \PPA\Logging\PPALogging::log_event($args);
+            } catch (\Throwable $e) {
+                error_log('PPA: preview log_event error: ' . $e->getMessage());
+            }
+        }
+        return false;
+    }
 }
 
 /**
@@ -103,6 +107,11 @@ if (!function_exists(__NAMESPACE__ . '\\ppa_collect_input')) {
  * Handle preview requests from admin-ajax.php?action=ppa_preview
  */
 function preview() {
+    // Ensure JSON + no-store headers on all exits.                                              # CHANGED:
+    nocache_headers();                                                                          # CHANGED:
+    header('Content-Type: application/json; charset=' . get_option('blog_charset'));            # CHANGED:
+    header('Cache-Control: no-store');                                                          # CHANGED:
+
     $in = ppa_collect_input();
 
     // Normalize (accept multiple aliases)
@@ -152,11 +161,11 @@ function preview() {
         'body'        => $body_json,
     ]);
 
-    $subject_for_log = $title ?: __('Preview', 'postpress-ai');                                                // CHANGED:
+    $subject_for_log = $title ?: __('Preview', 'postpress-ai');
 
     if (is_wp_error($resp)) {
-        // Upstream transport failure -> log error, then fall back.                                            // CHANGED:
-        $msg = $resp->get_error_message();                                                                     // CHANGED:
+        // Upstream transport failure -> log error, then fall back.
+        $msg = $resp->get_error_message();
         error_log('PPA: preview upstream error: ' . $msg);
         ppa_log_safe([
             'type'     => 'error',
@@ -165,19 +174,27 @@ function preview() {
             'status'   => 'fail',
             'message'  => $msg,
             'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $content), 24, '…'),
-            'meta'     => ['endpoint' => $endpoint, 'phase' => 'transport'],                                   // CHANGED:
-        ]);                                                                                                     // CHANGED:
+            'meta'     => ['endpoint' => $endpoint, 'phase' => 'transport'],
+        ]);
     } else {
         $code = wp_remote_retrieve_response_code($resp);
         $body = wp_remote_retrieve_body($resp);
         error_log('PPA: preview upstream code=' . intval($code) . ' len=' . strlen((string) $body));
+        $decoded = json_decode($body, true);
+
+        // If Django returned a structured error, forward it with status.                         # CHANGED:
+        if (is_array($decoded) && empty($decoded['ok']) && !empty($decoded['error'])) {          # CHANGED:
+            $status = ($code >= 400 && $code <= 599) ? $code : 502;                              # CHANGED:
+            wp_send_json($decoded, $status);                                                     # CHANGED:
+        }                                                                                        # CHANGED:
+
         if ($code >= 200 && $code < 300) {
-            $decoded = json_decode($body, true);
             if (is_array($decoded) && !empty($decoded['ok'])) {
-                $result  = isset($decoded['result']) && is_array($decoded['result']) ? $decoded['result'] : $decoded;    // CHANGED:
-                $ex      = (string) ($result['excerpt'] ?? $result['summary'] ?? '');                                     // CHANGED:
-                $long    = (string) ($result['content'] ?? $result['html'] ?? '');                                        // CHANGED:
-                // Log django success                                                                                      // CHANGED:
+                $result  = isset($decoded['result']) && is_array($decoded['result']) ? $decoded['result'] : $decoded;
+                $ex      = (string) ($result['excerpt'] ?? $result['summary'] ?? '');
+                $long    = (string) ($result['content'] ?? $result['html'] ?? '');
+                $html    = $long;                                                                // CHANGED:
+                // Log django success
                 ppa_log_safe([
                     'type'     => 'preview',
                     'subject'  => $subject_for_log,
@@ -190,17 +207,19 @@ function preview() {
                         'slug'   => (string) ($payload['slug'] ?? ''),
                         'tags'   => $payload['tags'],
                         'cats'   => $payload['categories'],
-                    ],                                                                                                   // CHANGED:
-                ]);                                                                                                       // CHANGED:
+                    ],
+                ]);
 
+                // Successful pass-through: include top-level html for the frontend.             # CHANGED:
                 wp_send_json([
                     'ok'       => true,
                     'ver'      => isset($decoded['ver']) ? $decoded['ver'] : '1',
+                    'html'     => $html,                                                         // CHANGED:
                     'result'   => isset($decoded['result']) ? $decoded['result'] : $decoded,
                     'provider' => 'django',
                 ], 200);
             } else {
-                // Non-OK payload from django -> log error (then fall back)                                              // CHANGED:
+                // Non-OK payload from django -> log error (then fall back)
                 ppa_log_safe([
                     'type'     => 'error',
                     'subject'  => $subject_for_log,
@@ -208,11 +227,11 @@ function preview() {
                     'status'   => 'fail',
                     'message'  => 'invalid django payload',
                     'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $content), 24, '…'),
-                    'meta'     => ['endpoint' => $endpoint, 'phase' => 'payload'],                                       // CHANGED:
-                ]);                                                                                                       // CHANGED:
+                    'meta'     => ['endpoint' => $endpoint, 'phase' => 'payload'],
+                ]);
             }
         } else {
-            // Non-2xx from django -> log error (then fall back)                                                          // CHANGED:
+            // Non-2xx from django -> log error (then fall back)
             ppa_log_safe([
                 'type'     => 'error',
                 'subject'  => $subject_for_log,
@@ -220,13 +239,13 @@ function preview() {
                 'status'   => 'fail',
                 'message'  => 'http ' . intval($code),
                 'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $content), 24, '…'),
-                'meta'     => ['endpoint' => $endpoint, 'phase' => 'http'],                                              // CHANGED:
-            ]);                                                                                                           // CHANGED:
+                'meta'     => ['endpoint' => $endpoint, 'phase' => 'http'],
+            ]);
         }
     }
 
-    // Fallback (also log success for the local-fallback shown to the user)                                    // CHANGED:
-    $fallback_html = '<h1>' . esc_html($title ?: 'Preview') . '</h1>' . "\n<p>Preview is using a local fallback.</p>\n<!-- provider: local-fallback -->"; // CHANGED:
+    // Fallback (also log success for the local-fallback shown to the user)
+    $fallback_html = '<h1>' . esc_html($title ?: 'Preview') . '</h1>' . "\n<p>Preview is using a local fallback.</p>\n<!-- provider: local-fallback -->";
     ppa_log_safe([
         'type'     => 'preview',
         'subject'  => $subject_for_log,
@@ -239,15 +258,17 @@ function preview() {
             'slug'   => (string) ($payload['slug'] ?? ''),
             'tags'   => $payload['tags'],
             'cats'   => $payload['categories'],
-        ],                                                                                                               // CHANGED:
-    ]);                                                                                                                   // CHANGED:
+        ],
+    ]);
 
+    // Include top-level html for the frontend as well.                                          # CHANGED:
     wp_send_json([
         'ok'       => true,
         'ver'      => '1',
+        'html'     => $fallback_html,                                                            # CHANGED:
         'result'   => [
             'title'   => $title,
-            'html'    => $fallback_html,                                                                                  // CHANGED:
+            'html'    => $fallback_html,
             'summary' => "Preview generated for '" . ($title ?: 'Preview') . "' using local-fallback.",
         ],
         'provider' => 'local-fallback',
