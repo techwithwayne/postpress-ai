@@ -1,26 +1,23 @@
-// /home/u3007-tenkoaygp3je/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/js/admin.js
+// /var/www/html/wp-content/plugins/postpress-ai/assets/js/admin.js
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-11-06: Add "Edit Draft" link to success notice (uses body.edit_link or body.result.edit_link).  // CHANGED:
- *             - New helpers: pickEditLink(), escAttr(), renderNoticeHtml(), renderNoticeTimedHtml().    // CHANGED:
- *             - Draft success now shows clickable "Edit Draft" when link is present.                    // CHANGED:
- * 2025-11-05: UX polish + resilience                                                                      // CHANGED:
- *   - Handle 429 rate-limit: show retry countdown, disable/reenable buttons.                              // CHANGED:
- *   - Surface structured errors (error.type/message/details).                                             // CHANGED:
- *   - Live slug auto-suggest from title until user edits slug.                                            // CHANGED:
- *   - A11y: #ppa-toolbar-msg gets role/aria-live; preview pane focusable.                                 // CHANGED:
- *   - Light pre-click debounce guard on action buttons.                                                   // CHANGED:
- * 2025-11-03: Add auto-fill (Title/Excerpt/Slug) after successful Preview resp.                           // CHANGED:
- *             - Tolerant JSON extraction (body.*, body.result.*, body.data.*).                            // CHANGED:
- *             - HTML fallback: <h1> for title, first <p> text for excerpt.                                // CHANGED:
- *             - Safe slug sanitizer; only fills empty fields (never overwrites).                          // CHANGED:
+ * 2025-11-05: UX polish + resilience                                             // CHANGED:
+ *   - Handle 429 rate-limit: show retry countdown, disable/reenable buttons.     // CHANGED:
+ *   - Surface structured errors (error.type/message/details).                    // CHANGED:
+ *   - Live slug auto-suggest from title until user edits slug.                   // CHANGED:
+ *   - A11y: #ppa-toolbar-msg gets role/aria-live; preview pane focusable.        // CHANGED:
+ *   - Light pre-click debounce guard on action buttons.                           // CHANGED:
+ * 2025-11-03: Add auto-fill (Title/Excerpt/Slug) after successful Preview resp.  // CHANGED:
+ *             - Tolerant JSON extraction (body.*, body.result.*, body.data.*).   // CHANGED:
+ *             - HTML fallback: <h1> for title, first <p> text for excerpt.       // CHANGED:
+ *             - Safe slug sanitizer; only fills empty fields (never overwrites). // CHANGED:
  * 2025-10-30: Add full “Save to Draft” wiring.
- *             - Robust store payload; TinyMCE/Classic detection; tolerant sels.                           // CHANGED:
- *             - Unified notices, double-submit guard kept.                                                // CHANGED:
- * 2025-10-30: Keep Preview flow intact; provider sniff retained.                                          // CHANGED:
+ *             - Robust store payload; TinyMCE/Classic detection; tolerant sels.  // CHANGED:
+ *             - Unified notices, double-submit guard kept.                       // CHANGED:
+ * 2025-10-30: Keep Preview flow intact; provider sniff retained.                 // CHANGED:
  *
  * 2025-10-19: Provider tracing via <!-- provider: X -->; async guards & notices.
  * =================================
@@ -32,13 +29,12 @@
  *     html: body.html | body.result.html | body.data.html | body.content | body.preview | body.raw
  *     message: body.message | body.result.message
  *     id: body.id | body.result.id
- *     edit_link: body.edit_link | body.result.edit_link                                        // CHANGED:
  */
 
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-11-06'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-11-05'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -237,21 +233,6 @@
     }                                                                            // CHANGED:
   }                                                                              // CHANGED:
 
-  // Render notice with safe HTML (for links)                                    // CHANGED:
-  function renderNoticeHtml(type, html) {                                        // CHANGED:
-    var el = noticeContainer();                                                  // CHANGED:
-    if (!el) { console.info('PPA:', type + ':', html); return; }                 // CHANGED:
-    var clsBase = 'ppa-notice';                                                  // CHANGED:
-    var clsType = 'ppa-notice-' + type;                                          // CHANGED:
-    el.className = clsBase + ' ' + clsType;                                      // CHANGED:
-    el.innerHTML = String(html || '');                                           // CHANGED:
-  }                                                                               // CHANGED:
-
-  function renderNoticeTimedHtml(type, html, ms) {                               // CHANGED:
-    renderNoticeHtml(type, html);                                                // CHANGED:
-    if (ms && ms > 0) { setTimeout(function(){ clearNotice(); }, ms); }          // CHANGED:
-  }                                                                               // CHANGED:
-
   function clearNotice() {
     var el = noticeContainer();
     if (el) {
@@ -367,15 +348,6 @@
     return '';
   }
 
-  // NEW: pick edit_link safely                                                  // CHANGED:
-  function pickEditLink(body) {                                                  // CHANGED:
-    if (!body || typeof body !== 'object') return '';                             // CHANGED:
-    var v = '';                                                                    // CHANGED:
-    if (typeof body.edit_link === 'string') v = body.edit_link;                    // CHANGED:
-    else if (body.result && typeof body.result.edit_link === 'string') v = body.result.edit_link; // CHANGED:
-    return String(v || '');                                                        // CHANGED:
-  }                                                                                // CHANGED:
-
   // Structured error picker                                                   // CHANGED:
   function pickStructuredError(body) {                                        // CHANGED:
     if (!body || typeof body !== 'object') return null;                       // CHANGED:
@@ -475,16 +447,6 @@
     });                                                                         // CHANGED:
   })();                                                                          // CHANGED:
 
-  // ---- Simple escaper for attribute values (URL) ---------------------------- // CHANGED:
-  function escAttr(s){                                                           // CHANGED:
-    return String(s || '')                                                       // CHANGED:
-      .replace(/&/g,'&amp;')                                                     // CHANGED:
-      .replace(/</g,'&lt;')                                                      // CHANGED:
-      .replace(/>/g,'&gt;')                                                      // CHANGED:
-      .replace(/"/g,'&quot;')                                                    // CHANGED:
-      .replace(/'/g,'&#39;');                                                    // CHANGED:
-  }                                                                              // CHANGED:
-
   // ---- Events --------------------------------------------------------------
 
   function handleRateLimit(res, which) {                                       // CHANGED:
@@ -559,20 +521,13 @@
           var serr = pickStructuredError(res.body);                            // CHANGED:
           var msg = (serr && serr.message) || pickMessage(res.body) || 'Draft request sent.'; // CHANGED:
           var pid = pickId(res.body);
-          var edit = pickEditLink(res.body);                                   // CHANGED:
           if (!res.ok) {
             renderNotice('error', 'Draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
             return;
           }
-          if (edit) {                                                          // CHANGED:
-            var link = '<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit Draft</a>'; // CHANGED:
-            var okHtml = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + ' — ' + link;                     // CHANGED:
-            renderNoticeTimedHtml('success', okHtml, 6000);                    // CHANGED:
-          } else {
-            var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
-            renderNoticeTimed('success', okMsg, 4000);
-          }
+          var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
+          renderNoticeTimed('success', okMsg, 4000);                           // CHANGED:
           console.info('PPA: draft success', res);
         });
       }, 'draft');
