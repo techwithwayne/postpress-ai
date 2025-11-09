@@ -3,10 +3,12 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
- * 2025-11-08: Add submenus under the top-level:                                            # CHANGED:
- *             - Rename default submenu to “PostPress Composer” (same slug as parent).      # CHANGED:
- *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.              # CHANGED:
- *             - Remove legacy Tools→Testbed to avoid duplicates.                           # CHANGED:
+ * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;     // CHANGED:
+ *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.     // CHANGED:
+ * 2025-11-08: Add submenus under the top-level:                                                   // CHANGED:
+ *             - Rename default submenu to “PostPress Composer” (same slug as parent).             // CHANGED:
+ *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.                     // CHANGED:
+ *             - Remove legacy Tools→Testbed to avoid duplicates.                                  // CHANGED:
  * 2025-11-04: New file. Restores the top-level "PostPress AI" admin menu and composer renderer.
  *             - Registers menu with capability 'edit_posts' (Admin/Editor/Author).
  *             - Defines ppa_render_composer() (no inline JS/CSS; includes composer.php).
@@ -43,13 +45,13 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			65
 		);
 
-		// Rename the auto-generated first submenu to “PostPress Composer”                # CHANGED:
+		// Rename the auto-generated first submenu to “PostPress Composer”                // CHANGED:
 		global $submenu;                                                                 // CHANGED:
 		if ( isset( $submenu[ $menu_slug ][0] ) ) {                                      // CHANGED:
 			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );   // CHANGED:
 		}                                                                                // CHANGED:
 
-		// Explicitly ensure the Composer submenu exists with the same slug as parent    # CHANGED:
+		// Explicitly ensure the Composer submenu exists with the same slug as parent    // CHANGED:
 		add_submenu_page(                                                                // CHANGED:
 			$menu_slug,                                                                  // parent
 			__( 'PostPress Composer', 'postpress-ai' ),                                  // page title
@@ -59,7 +61,7 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			'ppa_render_composer'
 		);
 
-		// Testbed submenu under PostPress AI                                            # CHANGED:
+		// Testbed submenu under PostPress AI                                            // CHANGED:
 		add_submenu_page(                                                                // CHANGED:
 			$menu_slug,                                                                  // parent = PostPress AI
 			__( 'PPA Testbed', 'postpress-ai' ),                                         // page title
@@ -69,7 +71,7 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			'ppa_render_testbed'                                                          // callback
 		);
 
-		// Remove any legacy Tools→Testbed to avoid duplicates                           # CHANGED:
+		// Remove any legacy Tools→Testbed to avoid duplicates                           // CHANGED:
 		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                // CHANGED:
 
 		error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ', cap=' . $capability . ')' );
@@ -127,9 +129,33 @@ if ( ! function_exists( 'ppa_render_testbed' ) ) {                              
 			}                                                                                // CHANGED:
 		}                                                                                    // CHANGED:
 
-		error_log( 'PPA: testbed UI not found in inc/admin/' );                               // CHANGED:
-		echo '<div class="wrap"><h1>PPA Testbed</h1><p>'                                      // CHANGED:
-		   . esc_html__( 'Testbed UI not found. Provide inc/admin/testbed.php.', 'postpress-ai' ) // CHANGED:
-		   . '</p></div>';                                                                    // CHANGED:
+		// Fallback UI — no inline JS/CSS; centralized enqueue provides styles/scripts.      // CHANGED:
+		error_log( 'PPA: testbed UI not found in inc/admin/ — using fallback markup' );      // CHANGED:
+		?>
+		<div class="wrap ppa-testbed-wrap">                                                  <!-- CHANGED -->
+			<h1><?php echo esc_html__( 'Testbed', 'postpress-ai' ); ?></h1>                  <!-- CHANGED -->
+			<p class="ppa-hint">
+				<?php echo esc_html__( 'This is the PostPress AI Testbed. Use it to send preview/draft requests to the backend.', 'postpress-ai' ); ?>
+			</p>
+
+			<div class="ppa-form-group">
+				<label for="ppaTbTitle"><?php echo esc_html__( 'Title', 'postpress-ai' ); ?></label>
+				<input type="text" id="ppaTbTitle" placeholder="<?php echo esc_attr__( 'Enter a title…', 'postpress-ai' ); ?>">
+			</div>
+
+			<div class="ppa-form-group">
+				<label for="ppaTbContent"><?php echo esc_html__( 'Content', 'postpress-ai' ); ?></label>
+				<textarea id="ppaTbContent" rows="8" placeholder="<?php echo esc_attr__( 'Optional: seed content or notes…', 'postpress-ai' ); ?>"></textarea>
+			</div>
+
+			<div class="ppa-actions" role="group" aria-label="Testbed actions">
+				<button id="ppaTbPreview" class="ppa-btn" type="button"><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></button>
+				<button id="ppaTbDraft" class="ppa-btn ppa-btn-secondary" type="button"><?php echo esc_html__( 'Save to Draft', 'postpress-ai' ); ?></button>
+			</div>
+
+			<div id="ppaTbLog" class="ppa-log" aria-live="polite" aria-atomic="true"></div>
+		</div>
+		<?php
+		// End fallback markup                                                              // CHANGED:
 	}                                                                                        // CHANGED:
 }
