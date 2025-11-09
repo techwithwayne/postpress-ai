@@ -4,69 +4,71 @@
  * PostPress AI — Frontend Shortcodes
  *
  * ========= CHANGE LOG =========
- * 2025-11-03: Register assets on wp_enqueue_scripts so wp_*_is('ppa-frontend','registered')         // CHANGED:
- *             works before the first render; keep enqueue on render only.                           // CHANGED:
- * 2025-11-03: New file. Adds [postpress_ai_preview] shortcode scaffold with asset hooks.            // CHANGED:
- *             - No inline JS/CSS; enqueues 'ppa-frontend' script/style when shortcode used.        // CHANGED:
- *             - Progressive HTML markup with data-attrs for JS to enhance.                         // CHANGED:
- *             - Uses admin-ajax endpoint action=ppa_preview (frontend public preview).              // CHANGED:
- *             - Defensive namespace + static init() registration.                                   // CHANGED:
- * ==============================
+ * 2025-11-09: Add 'ppa-frontend-config' inline script that safely merges into window.PPA             // CHANGED:
+ *             (ajaxUrl, restUrl, page, nonce). Make 'ppa-frontend' depend on that config.            // CHANGED:
+ *             Keep early registration; enqueue only on render. No inline JS/CSS in HTML.             // CHANGED:
+ * 2025-11-03: Register assets on wp_enqueue_scripts so wp_*_is('ppa-frontend','registered') works.
+ * 2025-11-03: New file. Adds [postpress_ai_preview] shortcode scaffold with asset hooks.
  */
 
-namespace PPA\Shortcodes; // CHANGED:
+namespace PPA\Shortcodes; // keep namespace
 
 // phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped
 
-class PPAShortcodes { // CHANGED:
+class PPAShortcodes {
 
 	/**
-	 * Register hooks. Call PPAShortcodes::init() from the plugin bootstrap.                   // CHANGED:
+	 * Register hooks. Call PPAShortcodes::init() from the plugin bootstrap.
 	 */
-	public static function init() { // CHANGED:
-		add_action( 'init', [ __CLASS__, 'register_shortcodes' ] ); // CHANGED:
-		// Ensure assets are REGISTERED early on the front-end (not enqueued) so                  // CHANGED:
-		// wp_script_is/wp_style_is(...,'registered') checks pass before rendering.               // CHANGED:
-		add_action( 'wp_enqueue_scripts', [ __CLASS__, 'register_frontend_assets' ], 5 );         // CHANGED:
-	} // CHANGED:
+	public static function init() {
+		add_action( 'init', [ __CLASS__, 'register_shortcodes' ] );
+		// Register (not enqueue) public assets early so wp_*_is(...,'registered') works.
+		add_action( 'wp_enqueue_scripts', [ __CLASS__, 'register_frontend_assets' ], 5 );
+	}
 
 	/**
-	 * Register all shortcodes.                                                                // CHANGED:
+	 * Register all shortcodes.
 	 */
-	public static function register_shortcodes() { // CHANGED:
-		add_shortcode( 'postpress_ai_preview', [ __CLASS__, 'render_preview' ] ); // CHANGED:
-	} // CHANGED:
+	public static function register_shortcodes() {
+		add_shortcode( 'postpress_ai_preview', [ __CLASS__, 'render_preview' ] );
+	}
 
 	/**
-	 * Compute plugin base URL for assets robustly.                                            // CHANGED:
-	 * Avoids brittle paths if plugin folder name differs.                                     // CHANGED:
+	 * Compute plugin base URL for assets robustly.
+	 * Avoids brittle paths if plugin folder name differs.
 	 *
 	 * @return string
 	 */
-	private static function plugin_base_url() { // CHANGED:
-		// __DIR__ = .../inc/shortcodes ; go up two levels to plugin root.                       // CHANGED:
-		$root_file = dirname( __DIR__, 2 ) . '/postpress-ai.php';                                // CHANGED:
-		return plugins_url( '', $root_file );                                                    // CHANGED:
-	} // CHANGED:
+	private static function plugin_base_url() {
+		// __DIR__ = .../inc/shortcodes ; go up two levels to plugin root.
+		$root_file = dirname( __DIR__, 2 ) . '/postpress-ai.php';
+		return plugins_url( '', $root_file );
+	}
 
 	/**
-	 * Register (but do not enqueue) public assets so checks like wp_style_is(...,'registered') // CHANGED:
-	 * succeed even before a shortcode render.                                                 // CHANGED:
+	 * Register (but do not enqueue) public assets so checks like wp_style_is(...,'registered')
+	 * succeed even before a shortcode render.
 	 */
-	public static function register_frontend_assets() { // CHANGED:
-		$plug_url = self::plugin_base_url();                                                   // CHANGED:
-		$ver      = defined( 'PPA_PLUGIN_VER' ) ? PPA_PLUGIN_VER : 'dev';                      // CHANGED:
+	public static function register_frontend_assets() {
+		$plug_url = self::plugin_base_url();
+		$ver      = defined( 'PPA_PLUGIN_VER' ) ? PPA_PLUGIN_VER : 'dev';
 
-		if ( ! wp_script_is( 'ppa-frontend', 'registered' ) ) {                                // CHANGED:
+		// Config carrier (inline only; no src)
+		if ( ! wp_script_is( 'ppa-frontend-config', 'registered' ) ) {                                      // CHANGED:
+			wp_register_script( 'ppa-frontend-config', false, [], null, true );                             // CHANGED:
+		}                                                                                                   // CHANGED:
+
+		// Main frontend JS depends on the config so window.PPA exists first.
+		if ( ! wp_script_is( 'ppa-frontend', 'registered' ) ) {
 			wp_register_script(
 				'ppa-frontend',
 				$plug_url . '/assets/js/ppa-frontend.js',
-				[ 'wp-i18n' ],
+				[ 'ppa-frontend-config', 'wp-i18n' ],                                                      // CHANGED:
 				$ver,
 				true
 			);
 		}
-		if ( ! wp_style_is( 'ppa-frontend', 'registered' ) ) {                                 // CHANGED:
+		if ( ! wp_style_is( 'ppa-frontend', 'registered' ) ) {
 			wp_register_style(
 				'ppa-frontend',
 				$plug_url . '/assets/css/ppa-frontend.css',
@@ -74,29 +76,47 @@ class PPAShortcodes { // CHANGED:
 				$ver
 			);
 		}
-	} // CHANGED:
+	}
 
 	/**
-	 * (Kept) Ensure assets are registered before enqueue on render.                           // CHANGED:
+	 * Ensure assets are registered before enqueue on render.
 	 */
-	private static function ensure_assets() { // CHANGED:
-		self::register_frontend_assets();                                                      // CHANGED:
-	} // CHANGED:
+	private static function ensure_assets() {
+		self::register_frontend_assets();
+	}
 
 	/**
-	 * Shortcode: [postpress_ai_preview subject="" brief="" genre="" tone="" word_count=""]    // CHANGED:
-	 *
-	 * Renders a progressive-enhancement container. No inline JS/CSS per project rules.        // CHANGED:
-	 * Frontend JS (ppa-frontend.js) will POST to admin-ajax.php?action=ppa_preview.           // CHANGED:
-	 *
-	 * @param array $atts Shortcode attributes.                                                // CHANGED:
-	 * @return string HTML markup.                                                             // CHANGED:
+	 * Inject a minimal, safe window.PPA config for the frontend,
+	 * merged (not overwritten) so admin screens and other code paths coexist.
 	 */
-	public static function render_preview( $atts ) { // CHANGED:
-		self::ensure_assets();                          // CHANGED:
-		wp_enqueue_script( 'ppa-frontend' );           // CHANGED:
+	private static function inline_frontend_config() {                                                        // CHANGED:
+		$cfg = [
+			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+			'restUrl' => esc_url_raw( rest_url() ),
+			'page'    => 'shortcode',
+			'nonce'   => wp_create_nonce( 'ppa-admin' ),
+		];
+		$js = '(function(w){var C=' . wp_json_encode( $cfg ) . ';w.PPA=w.PPA||{};for(var k in C){w.PPA[k]=C[k];}})(window);';
+		// Ensure the carrier handle exists and then print the inline before main script.
+		wp_enqueue_script( 'ppa-frontend-config' );                                                           // CHANGED:
+		wp_add_inline_script( 'ppa-frontend-config', $js, 'before' );                                         // CHANGED:
+	}
+
+	/**
+	 * Shortcode: [postpress_ai_preview subject="" brief="" genre="" tone="" word_count=""]
+	 *
+	 * Renders a progressive-enhancement container. No inline JS/CSS per project rules.
+	 * Frontend JS (ppa-frontend.js) will POST to admin-ajax.php?action=ppa_preview.
+	 *
+	 * @param array $atts Shortcode attributes.
+	 * @return string HTML markup.
+	 */
+	public static function render_preview( $atts ) {
+		self::ensure_assets();
+		self::inline_frontend_config();                                                                       // CHANGED:
+		wp_enqueue_script( 'ppa-frontend' );
 		if ( wp_style_is( 'ppa-frontend', 'registered' ) ) {
-			wp_enqueue_style( 'ppa-frontend' );        // CHANGED:
+			wp_enqueue_style( 'ppa-frontend' );
 		}
 
 		$atts = shortcode_atts(
@@ -109,9 +129,9 @@ class PPAShortcodes { // CHANGED:
 			],
 			$atts,
 			'postpress_ai_preview'
-		); // CHANGED:
+		);
 
-		// Build safe data attributes for the container.                                       // CHANGED:
+		// Build safe data attributes for the container.
 		$data_attrs = [
 			'data-ppa-action'    => esc_attr( 'ppa_preview' ),
 			'data-ppa-ajaxurl'   => esc_url( admin_url( 'admin-ajax.php' ) ),
@@ -120,14 +140,14 @@ class PPAShortcodes { // CHANGED:
 			'data-ppa-genre'     => esc_attr( $atts['genre'] ),
 			'data-ppa-tone'      => esc_attr( $atts['tone'] ),
 			'data-ppa-wordcount' => esc_attr( $atts['word_count'] ),
-		]; // CHANGED:
+		];
 
 		$attrs_html = '';
-		foreach ( $data_attrs as $k => $v ) {           // CHANGED:
-			$attrs_html .= sprintf( ' %s="%s"', $k, $v ); // CHANGED:
-		} // CHANGED:
+		foreach ( $data_attrs as $k => $v ) {
+			$attrs_html .= sprintf( ' %s="%s"', $k, $v );
+		}
 
-		ob_start(); // CHANGED:
+		ob_start();
 		?>
 <div class="ppa-frontend"<?php echo $attrs_html; // phpcs:ignore ?>>
 	<div class="ppa-frontend__form" aria-live="polite">
@@ -162,8 +182,8 @@ class PPAShortcodes { // CHANGED:
 	<div class="ppa-frontend__preview"></div>
 </div>
 		<?php
-		return trim( (string) ob_get_clean() ); // CHANGED:
-	} // CHANGED:
-} // CHANGED:
+		return trim( (string) ob_get_clean() );
+	}
+}
 
 // phpcs:enable
