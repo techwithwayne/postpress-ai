@@ -13,10 +13,12 @@
 
 /**
  * CHANGE LOG
- * 2025-11-08 — Add PPA_PLUGIN_FILE; add PPA_VERSION alias to PPA_PLUGIN_VER for consistency;                    # CHANGED:
- *              keep centralized enqueue wiring; minor tidy of cache-bust fallbacks to use PPA_VERSION.         # CHANGED:
+ * 2025-11-09 — Recognize new Testbed screen id 'postpress-ai_page_ppa-testbed'; sanitize $_GET['page']; // CHANGED:
+ *              keep legacy 'tools_page_ppa-testbed' and query fallback.                                   // CHANGED:
+ * 2025-11-08 — Add PPA_PLUGIN_FILE; add PPA_VERSION alias to PPA_PLUGIN_VER for consistency;             // CHANGED:
+ *              keep centralized enqueue wiring; minor tidy of cache-bust fallbacks to use PPA_VERSION.   // CHANGED:
  * 2025-11-08 — Prefer controller class for AJAX (includes inc/class-ppa-controller.php on plugins_loaded);
- *              fallback to inc/ajax/{preview.php,store.php} only if controller not found; always load marker.php.  # CHANGED:
+ *              fallback to inc/ajax/{preview.php,store.php} only if controller not found; always load marker.php.
  * 2025-11-04 — Repair fatal: remove stray/duplicated blocks, complete cache-buster, centralize requires, init logging & shortcode.
  * 2025-11-04 — Scope admin enqueue to Composer/Testbed screens only.
  * 2025-11-04 — Load AJAX handlers early.
@@ -99,13 +101,15 @@ add_action( 'plugins_loaded', function () {
 add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
 	$screen     = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 	$screen_id  = $screen ? $screen->id : '';
-	$page_param = isset( $_GET['page'] ) ? (string) $_GET['page'] : '';
+	$page_param = isset( $_GET['page'] ) ? sanitize_key( (string) $_GET['page'] ) : '';                 // CHANGED:
 
-	$composer_id = 'toplevel_page_postpress-ai';
-	$testbed_id  = 'tools_page_ppa-testbed';
+	$composer_id          = 'toplevel_page_postpress-ai';
+	$testbed_id_legacy    = 'tools_page_ppa-testbed';
+	$testbed_id_new_menu  = 'postpress-ai_page_ppa-testbed';                                            // CHANGED:
 
 	$is_composer = ( $screen_id === $composer_id ) || ( $page_param === 'postpress-ai' );
-	$is_testbed  = ( $screen_id === $testbed_id )  || ( $page_param === 'ppa-testbed' );
+	$is_testbed  = in_array( $screen_id, array( $testbed_id_new_menu, $testbed_id_legacy ), true )      // CHANGED:
+	               || ( $page_param === 'ppa-testbed' );                                                // CHANGED:
 
 	if ( ! ( $is_composer || $is_testbed ) ) {
 		return;
