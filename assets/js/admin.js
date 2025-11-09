@@ -4,8 +4,9 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-11-08.5: Fix ajax URL key to match enqueue (window.PPA.ajaxUrl); keep legacy fallback.   // CHANGED
- * 2025-11-08.4: Align with window.PPA config + publish link parity.                              // history
+ * 2025-11-09.1: Fix optional-chaining + .trim() bug on preview probe; bump JS ver.           // CHANGED:
+ * 2025-11-08.5: Fix ajax URL key to match enqueue (window.PPA.ajaxUrl); keep legacy fallback.
+ * 2025-11-08.4: Align with window.PPA config + publish link parity.
  *   - Read ajax/nonce from window.PPA (fallbacks kept).
  *   - Send both X-PPA-Nonce and X-WP-Nonce if nonce present.
  *   - Publish success mirrors Draft: render View/Edit links when available.
@@ -26,7 +27,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-11-08.5'; // CHANGED
+  var PPA_JS_VER = 'admin.v2025-11-09.1'; // CHANGED
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -55,8 +56,8 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel) || []); }
 
-  function getAjaxUrl() {                                                     // CHANGED
-    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;          // CHANGED: primary (matches enqueue)
+  function getAjaxUrl() {                                                     // CHANGED (kept)
+    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;          // primary (matches enqueue)
     if (window.PPA && window.PPA.ajax) return window.PPA.ajax;                // legacy support
     if (window.ppaAdmin && window.ppaAdmin.ajaxurl) return window.ppaAdmin.ajaxurl;
     if (window.ajaxurl) return window.ajaxurl;
@@ -387,7 +388,7 @@
     return String(v || '');
   }
 
-  function pickViewLink(body) {                                              // CHANGED
+  function pickViewLink(body) {
     if (!body || typeof body !== 'object') return '';
     var cand = '';
     if (typeof body.view_link === 'string') cand = body.view_link;
@@ -523,7 +524,8 @@
 
       // Early guard to prevent empty submissions with no preview
       var probe = buildStorePayload('draft');
-      var hasPreviewHtml = !!document.getElementById('ppa-preview-pane')?.innerHTML.trim();
+      var paneEl = document.getElementById('ppa-preview-pane');                                     // CHANGED:
+      var hasPreviewHtml = !!(paneEl && String(paneEl.innerHTML || '').trim());                    // CHANGED:
       if (!probe.title && !probe.content && !hasPreviewHtml) {
         renderNotice('warn', 'Add a title or run Preview before saving a draft.');
         return;
