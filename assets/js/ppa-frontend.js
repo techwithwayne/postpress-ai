@@ -1,160 +1,207 @@
-// /home/customer/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/js/ppa-frontend.js
-/**
- * PostPress AI — Frontend JS for [postpress_ai_preview]
+/*
+ * PostPress AI — Admin Testbed JS
  *
- * ========= CHANGE LOG =========
- * 2025-11-03: New file. Progressive enhancement for shortcode container.                // CHANGED:
- *             - Finds .ppa-frontend wrappers and enhances form submit.                 // CHANGED:
- *             - Posts to admin-ajax.php?action=ppa_preview (JSON tolerant).            // CHANGED:
- *             - Renders returned HTML into .ppa-frontend__preview.                     // CHANGED:
- *             - Inline notices via .ppa-frontend__msg, no alerts, no inline CSS.       // CHANGED:
- *             - Zero exposure of PPA_SHARED_KEY (server-to-server only).               // CHANGED:
- * =====================================================================================
+ * CHANGE LOG
+ * 2025-11-07 • Bind #ppaTbPreview/#ppaTbDraft; handle 429 rate-limit w/ countdown;                 // CHANGED:
+ *              surface structured errors; render preview HTML + JSON trace in #ppaTbLog;           // CHANGED:
+ *              safe key header (if localized), harden busy state + logs.                           // CHANGED:
+ * 2025-10-29 • Initial extract from inline: robust logging, JSON tolerant parsing,                  // CHANGED:
+ *              button disable states, and small UX niceties.                                       // CHANGED:
+ *
+ * Expected DOM on Testbed screen:
+ * - #ppaTbTitle   (input[type=text])
+ * - #ppaTbContent (textarea)
+ * - #ppaTbPreview (button)
+ * - #ppaTbDraft   (button)
+ * - #ppaTbLog     (div)
  */
 
 (function () {
-  'use strict';
+  "use strict";
 
-  // ---- Utilities ----------------------------------------------------------- // CHANGED:
-  function $(sel, ctx) { return (ctx || document).querySelector(sel); }               // CHANGED:
-  function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel) || []); } // CHANGED:
+  const $ = (sel, ctx) => (ctx || document).querySelector(sel);
 
-  function jsonTryParse(text) {                                                       // CHANGED:
-    try { return JSON.parse(text); } catch (e) { return { raw: String(text || '') }; }
+  // Guard: only run on the Testbed screen DOM
+  const titleEl   = $("#ppaTbTitle");
+  const contentEl = $("#ppaTbContent");
+  const btnPrev   = $("#ppaTbPreview");
+  const btnDraft  = $("#ppaTbDraft");
+  const logBox    = $("#ppaTbLog");
+
+  if (!titleEl || !contentEl || !btnPrev || !btnDraft || !logBox) {
+    // Not on the testbed screen; bail
+    return;
   }
 
-  function pickHtml(body) {                                                           // CHANGED:
-    if (!body || typeof body !== 'object') return '';
-    if (typeof body.html === 'string') return body.html;
-    if (body.result && typeof body.result.html === 'string') return body.result.html;
-    if (body.data && typeof body.data.html === 'string') return body.data.html;
-    if (typeof body.content === 'string') return body.content;
-    if (typeof body.preview === 'string') return body.preview;
-    if (typeof body.raw === 'string') return body.raw;
-    return '';
-  }
+  // ajaxUrl from localized script or fallback to WP admin-ajax
+  const ajaxUrl =
+    (window.PPA && window.PPA.ajaxUrl) ||
+    (typeof window.ajaxurl === "string" && window.ajaxurl) ||
+    (document.body.dataset && document.body.dataset.ajaxurl) ||
+    "/wp-admin/admin-ajax.php";
 
-  function pickMessage(body) {                                                        // CHANGED:
-    if (!body || typeof body !== 'object') return '';
-    if (typeof body.message === 'string') return body.message;
-    if (body.result && typeof body.result.message === 'string') return body.result.message;
-    return '';
-  }
+  // Optional shared key if server localized it (never log it)
+  const sharedKey = (window.PPA && window.PPA.key) || "";
 
-  function renderNotice(wrapper, type, text) {                                        // CHANGED:
-    var msg = $('.ppa-frontend__msg', wrapper);
-    if (!msg) return;
-    msg.setAttribute('data-type', String(type || 'info'));
-    msg.textContent = String(text == null ? '' : text);
-  }
+  // ---------- Utilities ------------------------------------------------------
 
-  function setBusy(wrapper, busy) {                                                   // CHANGED:
-    var btn = $('.ppa-frontend__btn', wrapper);
-    if (btn) {
-      btn.disabled = !!busy;
-      if (busy) btn.setAttribute('aria-busy', 'true'); else btn.removeAttribute('aria-busy');
+  function setBusy(busy) {
+    btnPrev.disabled  = !!busy;
+    btnDraft.disabled = !!busy;
+    if (busy) {
+      writeLog("Working…");
     }
   }
 
-  function toNumber(v) {                                                              // CHANGED:
-    var n = Number(v);
-    return Number.isFinite(n) ? n : 0;
+  function writeLog(msg) {
+    if (!logBox) return;
+    if (typeof msg === "string") {
+      logBox.textContent = msg;
+    } else {
+      try {
+        logBox.textContent = JSON.stringify(msg, null, 2);
+      } catch (e) {
+        logBox.textContent = String(msg);
+      }
+    }
   }
 
-  // ---- Core enhance -------------------------------------------------------- // CHANGED:
-  function enhance(wrapper) {                                                         // CHANGED:
-    if (!wrapper || wrapper.__ppaEnhanced) return;
-    wrapper.__ppaEnhanced = true;
+  function writeLogHtml(html, jsonObj) {                                           // CHANGED:
+    if (!logBox) return;                                                           // CHANGED:
+    const safeJson = (() => {                                                      // CHANGED:
+      try { return JSON.stringify(jsonObj || {}, null, 2); } catch(_) { return ""; } // CHANGED:
+    })();                                                                          // CHANGED:
+    logBox.innerHTML =                                                             // CHANGED:
+      String(html || "<p><em>(no html)</em></p>") +                                // CHANGED:
+      '<hr><pre style="white-space:pre-wrap;word-break:break-word;margin:0;">' +   // CHANGED:
+      safeJson.replace(/[&<>]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[s])) +  // CHANGED:
+      '</pre>';                                                                    // CHANGED:
+  }                                                                                // CHANGED:
 
-    var previewPane = $('.ppa-frontend__preview', wrapper);
-    var form = $('.ppa-frontend__form-inner', wrapper);
+  function jsonTry(text) {
+    try { return JSON.parse(text); } catch { return { ok: false, raw: String(text || "") }; }
+  }
 
-    // Read defaults from data- attributes (author may prefill via shortcode attrs).   // CHANGED:
-    var cfg = {
-      ajaxurl: (wrapper.getAttribute('data-ppa-ajaxurl') || '').trim(),
-      action: (wrapper.getAttribute('data-ppa-action') || 'ppa_preview').trim(),
-      subject: (wrapper.getAttribute('data-ppa-subject') || '').trim(),
-      brief: (wrapper.getAttribute('data-ppa-brief') || '').trim(),
-      genre: (wrapper.getAttribute('data-ppa-genre') || '').trim(),
-      tone: (wrapper.getAttribute('data-ppa-tone') || '').trim(),
-      word_count: toNumber(wrapper.getAttribute('data-ppa-wordcount') || '0')
-    };
+  async function postJSON(action, payload) {
+    const headers = { "Content-Type": "application/json" };
+    if (sharedKey) headers["X-PPA-Key"] = sharedKey; // optional                     // CHANGED:
 
-    // Seed the form fields with defaults if present.                                   // CHANGED:
-    if (form) {
-      var fx = {
-        subject: form.querySelector('[name="subject"]'),
-        brief: form.querySelector('[name="brief"]'),
-        genre: form.querySelector('[name="genre"]'),
-        tone: form.querySelector('[name="tone"]'),
-        word_count: form.querySelector('[name="word_count"]')
+    const res  = await fetch(`${ajaxUrl}?action=${encodeURIComponent(action)}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload || {}),
+      credentials: "same-origin",
+    });
+
+    const text = await res.text();
+    const data = jsonTry(text);
+    // Always expose HTTP status so the caller can branch (e.g., 429)               // CHANGED:
+    if (data && typeof data === "object") data.http_status = res.status;           // CHANGED:
+    return data;
+  }
+
+  // 429 rate-limit handling with countdown                                         // CHANGED:
+  function handleRateLimit(data) {                                                 // CHANGED:
+    const is429 = Number(data && data.http_status) === 429;                        // CHANGED:
+    if (!is429) return false;                                                      // CHANGED:
+    const retry = Math.max(0, Math.ceil(                                           // CHANGED:
+      Number(data?.error?.details?.retry_after || 10)                              // CHANGED:
+    ));                                                                            // CHANGED:
+    btnPrev.disabled = true;                                                       // CHANGED:
+    btnDraft.disabled = true;                                                      // CHANGED:
+    let sec = retry;                                                               // CHANGED:
+    writeLog(`Rate-limited. Try again in ${sec}s.`);                               // CHANGED:
+    const t = setInterval(() => {                                                  // CHANGED:
+      sec -= 1;                                                                    // CHANGED:
+      if (sec <= 0) {                                                              // CHANGED:
+        clearInterval(t);                                                          // CHANGED:
+        btnPrev.disabled = false;                                                  // CHANGED:
+        btnDraft.disabled = false;                                                 // CHANGED:
+        writeLog("Ready.");                                                        // CHANGED:
+      } else {                                                                     // CHANGED:
+        writeLog(`Rate-limited. Try again in ${sec}s.`);                           // CHANGED:
+      }                                                                            // CHANGED:
+    }, 1000);                                                                      // CHANGED:
+    return true;                                                                   // CHANGED:
+  }                                                                                // CHANGED:
+
+  function surfaceStructuredError(data) {                                          // CHANGED:
+    const err = data && data.error;                                                // CHANGED:
+    if (!err || typeof err !== "object") return false;                             // CHANGED:
+    const type = String(err.type || "error");                                      // CHANGED:
+    const msg  = String(err.message || "Request failed.");                         // CHANGED:
+    writeLog(`[${type}] ${msg}`);                                                  // CHANGED:
+    return true;                                                                    // CHANGED:
+  }                                                                                // CHANGED:
+
+  // ---------- Actions --------------------------------------------------------
+
+  async function doPreview() {
+    setBusy(true);
+    try {
+      const payload = {
+        title:   titleEl.value,
+        content: contentEl.value,
+        status:  "draft",
       };
-      if (fx.subject && !fx.subject.value && cfg.subject) fx.subject.value = cfg.subject;
-      if (fx.brief && !fx.brief.value && cfg.brief) fx.brief.value = cfg.brief;
-      if (fx.genre && !fx.genre.value && cfg.genre) fx.genre.value = cfg.genre;
-      if (fx.tone && !fx.tone.value && cfg.tone) fx.tone.value = cfg.tone;
-      if (fx.word_count && !fx.word_count.value && cfg.word_count) fx.word_count.value = String(cfg.word_count);
+      const data = await postJSON("ppa_preview", payload);
 
-      // Submit handler (AJAX)                                                            // CHANGED:
-      form.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        renderNotice(wrapper, 'info', '');
-        setBusy(wrapper, true);
+      // 429 countdown?
+      if (handleRateLimit(data)) return;                                           // CHANGED:
+      // Structured error?
+      if (!data?.ok && surfaceStructuredError(data)) return;                        // CHANGED:
 
-        var payload = {
-          subject: fx.subject ? fx.subject.value : '',
-          brief: fx.brief ? fx.brief.value : '',
-          genre: fx.genre ? fx.genre.value : '',
-          tone: fx.tone ? fx.tone.value : '',
-          word_count: fx.word_count ? toNumber(fx.word_count.value || '0') : 0
-        };
+      // Prefer top-level html; fall back to nested/result/html or content/raw      // CHANGED:
+      const html =
+        (typeof data?.html === "string" && data.html) ||
+        (typeof data?.result?.html === "string" && data.result.html) ||
+        (typeof data?.content === "string" && data.content) ||
+        (typeof data?.preview === "string" && data.preview) ||
+        (typeof data?.raw === "string" && data.raw) ||
+        "";
 
-        var url = cfg.ajaxurl || (window.ajaxurl || '/wp-admin/admin-ajax.php');
-        var qs = url.indexOf('?') === -1 ? '?' : '&';
-        var endpoint = url + qs + 'action=' + encodeURIComponent(cfg.action || 'ppa_preview');
-
-        fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify(payload)
-        })
-          .then(function (res) {
-            var ct = (res.headers.get('content-type') || '').toLowerCase();
-            return res.text().then(function (text) {
-              var body = ct.indexOf('application/json') !== -1 ? jsonTryParse(text) : jsonTryParse(text);
-              return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct };
-            });
-          })
-          .then(function (resp) {
-            var html = pickHtml(resp.body);
-            if (html && previewPane) {
-              previewPane.innerHTML = html;
-              renderNotice(wrapper, 'success', '');
-            } else {
-              renderNotice(wrapper, 'warn', 'Preview completed, but no HTML was returned.');
-              if (previewPane) previewPane.innerHTML = '<p><em>No preview HTML returned.</em></p>';
-            }
-          })
-          .catch(function (err) {
-            console.info('PPA(frontend): fetch error', err);
-            renderNotice(wrapper, 'error', 'There was an error while generating the preview.');
-          })
-          .finally(function () { setBusy(wrapper, false); });
-      });
+      if (html) {
+        writeLogHtml(html, data);                                                  // CHANGED:
+      } else {
+        writeLog(data);
+      }
+    } catch (e) {
+      writeLog({ ok: false, error: String(e) });
+    } finally {
+      setBusy(false);
     }
   }
 
-  // Enhance all existing shortcode wrappers on DOM ready.                               // CHANGED:
-  function ready(fn) {                                                                  // CHANGED:
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
-    else fn();
+  async function doDraft() {
+    setBusy(true);
+    try {
+      const payload = {
+        title:   titleEl.value,
+        content: contentEl.value,
+        status:  "draft",
+        mode:    "draft",
+      };
+      const data = await postJSON("ppa_store", payload);
+
+      if (handleRateLimit(data)) return;                                           // CHANGED:
+      if (!data?.ok && surfaceStructuredError(data)) return;                        // CHANGED:
+
+      // Prefer id from top-level; fallback to result.id                            // CHANGED:
+      const id = (data && (data.id ?? data?.result?.id)) ?? null;                  // CHANGED:
+      if (id != null) {
+        writeLog({ ok: true, message: "Draft saved", id: Number(id), ver: data.ver || "1" }); // CHANGED:
+      } else {
+        writeLog(data);
+      }
+    } catch (e) {
+      writeLog({ ok: false, error: String(e) });
+    } finally {
+      setBusy(false);
+    }
   }
 
-  ready(function () {
-    $all('.ppa-frontend').forEach(enhance);
-    // In case of dynamically inserted content later, projects may re-run enhance(wrapper).
-  });
+  btnPrev .addEventListener("click", doPreview);
+  btnDraft.addEventListener("click", doDraft);
 
-  console.info('PPA(frontend): initialized');
+  console.info("PPA: testbed.js initialized → testbed.v2025-11-07");              // CHANGED:
 })();
