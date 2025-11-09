@@ -2,6 +2,12 @@
    PostPress AI — Two-Column Dark Composer Layout
    ------------------------------------------------------- */
 
+  :root{
+  --ppa-bg:#121212; --ppa-panel:#1c1c1c; --ppa-border:rgba(255,255,255,0.10);
+  --ppa-text:#f5f5f5; --ppa-accent:#ff6c00;
+}
+#ppa-composer{ background:var(--ppa-bg); color:var(--ppa-text); }
+
 .ppa-composer-wrap {
   display: grid;
   grid-template-columns: 1fr 1fr;   /* 50/50 columns */
@@ -34,7 +40,8 @@
 }
 
 /* === Form fields === */
-.ppa-form-panel h1 { color: #ff6c00; margin-top: 0; }
+.ppa-form-panel h1,
+.ppa-composer-wrap h1 { color: #ff6c00; margin-top: 0; }
 .ppa-form-panel label {
   display: block;
   margin-top: 16px;
@@ -342,28 +349,7 @@ select::-webkit-scrollbar-thumb:hover {
   border-radius: 6px; /* CHANGED: */
   padding: 14px; /* CHANGED: */
 }
-/* ==========================================================================
-   PostPress AI — Admin CSS (append)
-   ======= CHANGE LOG =======
-   2025-10-19: Added toolbar notice styles (.ppa-notice + variants) and busy-state button styling. // CHANGED:
-   ========================================================================== */
 
-/* Toolbar notice container (shown near composer controls) */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
-  margin-top: 10px; /* CHANGED: */
-  padding: 10px 12px; /* CHANGED: */
-  border-radius: 6px; /* CHANGED: */
-  line-height: 1.35; /* CHANGED: */
-  font-size: 13px; /* CHANGED: */
-  background: rgba(255, 255, 255, 0.06); /* CHANGED: */
-  color: #ffffff; /* CHANGED: */
-  border: 1px solid rgba(255, 255, 255, 0.12); /* CHANGED: */
-}
-
-/* Default/cleared state */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
-  opacity: 0.95; /* CHANGED: */
-}
 
 /* Success / Error / Warn / Info variants (dark UI with brand accent) */ /* CHANGED: */
 #ppa-toolbar-msg.ppa-notice-success { /* CHANGED: */
