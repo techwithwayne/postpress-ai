@@ -13,6 +13,8 @@
 
 /**
  * CHANGE LOG
+ * 2025-11-10 — Simplify admin enqueue: delegate screen checks to ppa_admin_enqueue() and          # CHANGED:
+ *              remove duplicate gating here; hook once after includes load.                       # CHANGED:
  * 2025-11-09 — Recognize new Testbed screen id 'postpress-ai_page_ppa-testbed'; sanitize $_GET['page']; // CHANGED:
  *              keep legacy 'tools_page_ppa-testbed' and query fallback.                                   // CHANGED:
  * 2025-11-08 — Add PPA_PLUGIN_FILE; add PPA_VERSION alias to PPA_PLUGIN_VER for consistency;             // CHANGED:
@@ -96,29 +98,14 @@ add_action( 'plugins_loaded', function () {
 }, 8 );
 
 /** ---------------------------------------------------------------------------------
- * Admin enqueue — scope strictly to our screens
+ * Admin enqueue — delegate to inc/admin/enqueue.php (single source of truth)
  * -------------------------------------------------------------------------------- */
-add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
-	$screen     = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-	$screen_id  = $screen ? $screen->id : '';
-	$page_param = isset( $_GET['page'] ) ? sanitize_key( (string) $_GET['page'] ) : '';                 // CHANGED:
-
-	$composer_id          = 'toplevel_page_postpress-ai';
-	$testbed_id_legacy    = 'tools_page_ppa-testbed';
-	$testbed_id_new_menu  = 'postpress-ai_page_ppa-testbed';                                            // CHANGED:
-
-	$is_composer = ( $screen_id === $composer_id ) || ( $page_param === 'postpress-ai' );
-	$is_testbed  = in_array( $screen_id, array( $testbed_id_new_menu, $testbed_id_legacy ), true )      // CHANGED:
-	               || ( $page_param === 'ppa-testbed' );                                                // CHANGED:
-
-	if ( ! ( $is_composer || $is_testbed ) ) {
-		return;
-	}
-
-	if ( function_exists( 'ppa_admin_enqueue' ) ) {
-		ppa_admin_enqueue();
-	}
-}, 10 );
+add_action( 'plugins_loaded', function () {                                                     // CHANGED:
+	// After includes above (priority 9), this runs and attaches the enqueue if present.     // CHANGED:
+	if ( function_exists( 'ppa_admin_enqueue' ) ) {                                           // CHANGED:
+		add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 10 );                      // CHANGED:
+	}                                                                                         // CHANGED:
+}, 10 );                                                                                       // CHANGED:
 
 /** ---------------------------------------------------------------------------------
  * Public asset cache-busting (ver=filemtime) — handles registered by shortcode
