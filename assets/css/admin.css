@@ -1,124 +1,68 @@
-/* -------------------------------------------------------
-   PostPress AI — Two-Column Dark Composer Layout
-   ------------------------------------------------------- */
+/* ==========================================================================
+   PostPress AI — Admin CSS
+   Path: assets/css/admin.css
 
-  :root{
-  --ppa-bg:#121212; --ppa-panel:#1c1c1c; --ppa-border:rgba(255,255,255,0.10);
-  --ppa-text:#f5f5f5; --ppa-accent:#ff6c00;
+   ========= CHANGE LOG =========
+   2025-11-10 — Dedupe notice/button blocks; add .ppa-testbed-wrap; generic .ppa-notice
+                 variants; keep brand tokens; readability polish.                         # CHANGED:
+   2025-11-10 — FIX: remove nested comment markers from header to prevent CSS breakage.   # CHANGED:
+   2025-10-19 — Added toolbar notice styles and busy-state button styling.
+   ========================================================================== */
+
+/* -------------------------------------------------------
+   Brand tokens
+   ------------------------------------------------------- */
+:root {                                                                                   /* CHANGED */
+  --ppa-bg: #121212;
+  --ppa-panel: #1c1c1c;
+  --ppa-border: rgba(255,255,255,0.10);
+  --ppa-text: #f5f5f5;
+  --ppa-accent: #ff6c00;
 }
-#ppa-composer{ background:var(--ppa-bg); color:var(--ppa-text); }
+
+/* -------------------------------------------------------
+   Page wrappers
+   ------------------------------------------------------- */
+#ppa-composer { background: var(--ppa-bg); color: var(--ppa-text); }
 
 .ppa-composer-wrap {
   display: grid;
-  grid-template-columns: 1fr 1fr;   /* 50/50 columns */
+  grid-template-columns: 1fr 1fr;
   gap: 24px;
-  color: #f5f5f5;
-  background-color: #121212;
+  color: var(--ppa-text);
+  background-color: var(--ppa-bg);
   padding: 24px;
   border-radius: 12px;
   box-sizing: border-box;
 }
 
-/* === Left panel === */
-.ppa-form-panel {
-  background: #1c1c1c;
-  border-radius: 12px;
+/* Testbed wrapper (same look) */                                                          /* CHANGED */
+.ppa-testbed-wrap {
+  background: var(--ppa-bg);
+  color: var(--ppa-text);
   padding: 24px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
-  display: flex;
-  flex-direction: column;
-}
-
-/* === Right panel === */
-.ppa-preview-panel {
-  background: #1c1c1c;
   border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
-  overflow-y: auto;
-  max-height: 80vh;
-}
-
-/* === Form fields === */
-.ppa-form-panel h1,
-.ppa-composer-wrap h1 { color: #ff6c00; margin-top: 0; }
-.ppa-form-panel label {
-  display: block;
-  margin-top: 16px;
-  font-weight: 600;
-  color: #fff;
-}
-.ppa-form-panel input,
-.ppa-form-panel select,
-.ppa-form-panel textarea {
-  width: 100%;
-  margin-top: 6px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid #333;
-  background: #2b2b2b;
-  color: #fff;
-  font-size: 14px;
-}
-.ppa-form-panel input:focus,
-.ppa-form-panel select:focus,
-.ppa-form-panel textarea:focus {
-  outline: none;
-  border-color: #ff6c00;
-  box-shadow: 0 0 0 1px #ff6c00;
-}
-.ppa-subhead { margin-bottom: 12px; font-size: 14px; color: #ccc; }
-
-/* === Buttons === */
-.ppa-buttons {
-  margin-top: 24px;
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.ppa-btn {
-  padding: 10px 18px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-  border: none;
-  transition: background .2s ease;
-}
-.ppa-btn-primary { background: #ff6c00; color: #fff; }
-.ppa-btn-primary:hover { background: #ff8126; }
-.ppa-btn-secondary {
-  background: #2b2b2b;
-  color: #fff;
-  border: 1px solid #333;
-}
-.ppa-btn-secondary:hover { background: #3a3a3a; }
-
-/* === Preview area === */
-.ppa-preview-panel h2 { margin-top: 0; color: #ff6c00; }
-#ppa-preview-meta { font-size: 14px; color: #ccc; margin-bottom: 12px; }
-.ppa-preview-panel .tone,
-.ppa-preview-panel .genre { color: #ff6c00; font-weight: 600; }
-.ppa-preview-panel ul { list-style: disc; margin-left: 24px; }
-.ppa-preview-panel li { margin-bottom: 6px; }
-
-/* === Messages === */
-.ppa-success {
-  background: #143f1b; border: 1px solid #26a649; color: #b8f1c4;
-  padding: 8px 12px; border-radius: 6px;
-}
-.ppa-error {
-  background: #3f1414; border: 1px solid #c43d3d; color: #f4b8b8;
-  padding: 8px 12px; border-radius: 6px;
-}
-
-/* === Responsive === */
-@media (max-width: 900px) {
-  .ppa-composer-wrap { grid-template-columns: 1fr; }
+  box-sizing: border-box;
 }
 
 /* -------------------------------------------------------
-   Preview readability & brand styling enhancements
+   Panels
    ------------------------------------------------------- */
+.ppa-form-panel,
+.ppa-preview-panel {
+  background: var(--ppa-panel);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+}
+
+.ppa-preview-panel {
+  overflow-y: auto;
+  max-height: 80vh;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #e0e0e0;
+}
 
 /* subtle vertical divider between form and preview */
 @media (min-width: 901px) {
@@ -128,96 +72,86 @@
   }
 }
 
-/* Typography inside preview */
-.ppa-preview-panel {
-  font-size: 15px;
-  line-height: 1.7;
-  color: #e0e0e0;
-}
-
-.ppa-preview-panel p {
-  margin-bottom: 1em;
+/* -------------------------------------------------------
+   Typography
+   ------------------------------------------------------- */
+.ppa-form-panel h1,
+.ppa-composer-wrap h1,
+.ppa-testbed-wrap h1 {                                                                      /* CHANGED */
+  color: var(--ppa-accent);
+  margin-top: 0;
 }
 
 .ppa-preview-panel h2,
 .ppa-preview-panel h3,
 .ppa-preview-panel h4 {
-  color: #ff6c00;
+  color: var(--ppa-accent);
   margin-top: 1.2em;
   margin-bottom: 0.4em;
   font-weight: 700;
 }
 
-.ppa-preview-panel strong {
-  color: #fff;
-  font-weight: 700;
-}
-
-.ppa-preview-panel em {
-  color: #f5f5f5;
-  font-style: italic;
-}
-
+.ppa-preview-panel p { margin-bottom: 1em; }
+.ppa-preview-panel strong { color: #fff; font-weight: 700; }
+.ppa-preview-panel em { color: #f5f5f5; font-style: italic; }
 .ppa-preview-panel ul,
-.ppa-preview-panel ol {
-  margin-left: 24px;
-  padding-left: 0;
-  color: #d0d0d0;
-}
+.ppa-preview-panel ol { margin-left: 24px; padding-left: 0; color: #d0d0d0; }
+.ppa-preview-panel li { margin-bottom: 6px; }
+.ppa-preview-panel a { color: #ff8126; text-decoration: underline; }
+.ppa-preview-panel a:hover { color: #ffa45b; }
+.ppa-preview-panel hr { border: 0; border-top: 1px solid #333; margin: 1.5em 0; }
 
-.ppa-preview-panel li {
-  margin-bottom: 6px;
-}
-
-.ppa-preview-panel a {
-  color: #ff8126;
-  text-decoration: underline;
-}
-
-.ppa-preview-panel a:hover {
-  color: #ffa45b;
-}
-
-/* divider line between content sections */
-.ppa-preview-panel hr {
-  border: 0;
-  border-top: 1px solid #333;
-  margin: 1.5em 0;
-}
-
-/* make scrollbars subtle */
-.ppa-preview-panel::-webkit-scrollbar {
-  width: 8px;
-}
-.ppa-preview-panel::-webkit-scrollbar-thumb {
-  background-color: #2b2b2b;
-  border-radius: 8px;
-}
-.ppa-preview-panel::-webkit-scrollbar-thumb:hover {
-  background-color: #3a3a3a;
-}
+/* Make scrollbars subtle */
+.ppa-preview-panel::-webkit-scrollbar { width: 8px; }
+.ppa-preview-panel::-webkit-scrollbar-thumb { background-color: #2b2b2b; border-radius: 8px; }
+.ppa-preview-panel::-webkit-scrollbar-thumb:hover { background-color: #3a3a3a; }
 
 /* -------------------------------------------------------
-   UX Polish: fade transitions + dropdown readability
+   Forms
    ------------------------------------------------------- */
+.ppa-subhead { margin-bottom: 12px; font-size: 14px; color: #ccc; }
 
-/* Fade-in animation for preview updates */
-@keyframes ppaFadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
+.ppa-form-group {                                                                           /* CHANGED */
+  margin-top: 16px;
 }
 
-#ppa-preview-body {
-  animation: ppaFadeIn 0.3s ease-in-out;
+.ppa-form-panel label {
+  display: block;
+  margin-top: 16px;
+  font-weight: 600;
+  color: #fff;
 }
 
-/* Highlight live meta change */
-#ppa-preview-meta {
-  transition: color 0.3s ease, opacity 0.3s ease;
+.ppa-form-panel input,
+.ppa-form-panel select,
+.ppa-form-panel textarea,
+.ppa-testbed-wrap input,                                                                    /* CHANGED */
+.ppa-testbed-wrap select,                                                                   /* CHANGED */
+.ppa-testbed-wrap textarea {                                                                /* CHANGED */
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #2b2b2b;
+  color: #fff;
+  font-size: 14px;
+}
+
+.ppa-form-panel input:focus,
+.ppa-form-panel select:focus,
+.ppa-form-panel textarea:focus,
+.ppa-testbed-wrap input:focus,                                                              /* CHANGED */
+.ppa-testbed-wrap select:focus,                                                             /* CHANGED */
+.ppa-testbed-wrap textarea:focus {                                                          /* CHANGED */
+  outline: none;
+  border-color: var(--ppa-accent);
+  box-shadow: 0 0 0 1px var(--ppa-accent);
 }
 
 /* Dropdown (select) appearance fix for dark theme */
-.ppa-form-panel select {
+.ppa-form-panel select,
+.ppa-testbed-wrap select {                                                                  /* CHANGED */
   color: #f5f5f5;
   background-color: #2b2b2b;
   border: 1px solid #444;
@@ -231,174 +165,113 @@
   padding-right: 28px;
 }
 
-/* When focused */
-.ppa-form-panel select:focus {
-  border-color: #ff6c00;
+.ppa-form-panel select:focus,
+.ppa-testbed-wrap select:focus {                                                            /* CHANGED */
+  border-color: var(--ppa-accent);
   outline: none;
-  box-shadow: 0 0 0 1px #ff6c00;
+  box-shadow: 0 0 0 1px var(--ppa-accent);
 }
 
-/* Options dropdown colors (for Chromium + Firefox) */
-.ppa-form-panel select option {
+/* Options dropdown colors */
+.ppa-form-panel select option,
+.ppa-testbed-wrap select option {                                                           /* CHANGED */
   color: #fff;
   background-color: #1c1c1c;
 }
 
 /* Improve scrollbar contrast for option lists */
-select::-webkit-scrollbar {
-  width: 8px;
+select::-webkit-scrollbar { width: 8px; }
+select::-webkit-scrollbar-thumb { background-color: #444; border-radius: 4px; }
+select::-webkit-scrollbar-thumb:hover { background-color: #555; }
+
+/* -------------------------------------------------------
+   Buttons
+   ------------------------------------------------------- */
+.ppa-actions {                                                                              /* CHANGED */
+  margin-top: 24px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-select::-webkit-scrollbar-thumb {
-  background-color: #444;
-  border-radius: 4px;
+
+.ppa-btn {
+  padding: 10px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  border: none;
+  transition: background .2s ease;
 }
-select::-webkit-scrollbar-thumb:hover {
-  background-color: #555;
+
+.ppa-btn-primary { background: var(--ppa-accent); color: #fff; }
+.ppa-btn-primary:hover { background: #ff8126; }
+.ppa-btn-secondary {
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #333;
+}
+.ppa-btn-secondary:hover { background: #3a3a3a; }
+
+/* Busy/disabled (supports WP .button as well) */                                           /* CHANGED */
+#ppa-composer .button[disabled],
+#ppa-composer .button[aria-busy="true"],
+.ppa-btn[disabled],
+.ppa-btn[aria-busy="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+  position: relative;
+}
+
+#ppa-composer .button-primary[aria-busy="true"]::after,
+.ppa-btn.ppa-btn-primary[aria-busy="true"]::after {                                         /* CHANGED */
+  content: '…';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
 }
 
 /* -------------------------------------------------------
-   Animated feedback for success / error messages
+   Notices (shared)
    ------------------------------------------------------- */
-
-.ppa-success,
-.ppa-error {
-  opacity: 0;
-  transform: translateY(4px);
-  animation: ppaFadeIn 0.35s ease-in-out forwards;
+.ppa-notice {                                                                               /* CHANGED */
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: 1.35;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0.95;
+  animation: ppaFadeIn 0.35s ease-in-out;
 }
 
-/* Optional: subtle glow outline matching their colors */
-.ppa-success {
-  box-shadow: 0 0 10px rgba(38,166,73,0.3);
+.ppa-notice-success { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.35); color: #d1fae5; }  /* CHANGED */
+.ppa-notice-error   { background: rgba(239,68,68,0.18);  border-color: rgba(239,68,68,0.40);  color: #fee2e2; }  /* CHANGED */
+.ppa-notice-warn    { background: rgba(255,108,0,0.20);  border-color: rgba(255,108,0,0.40);  color: #fff7ed; }  /* CHANGED */
+.ppa-notice-info    { background: rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.40); color: #dbeafe; }  /* CHANGED */
+
+/* Specific spots that use notices */
+#ppa-toolbar-msg { }  /* retained ID; styles come from .ppa-notice + variant classes */      /* CHANGED */
+#ppa-preview-pane  { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 14px; } /* CHANGED */
+
+/* -------------------------------------------------------
+   Animations
+   ------------------------------------------------------- */
+@keyframes ppaFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.ppa-error {
-  box-shadow: 0 0 10px rgba(196,61,61,0.3);
-}
-/* ==========================================================================
-   PostPress AI — Admin CSS (append)
-   ======= CHANGE LOG =======
-   2025-10-19: Added toolbar notice styles (.ppa-notice + variants) and busy-state button styling. // CHANGED:
-   ========================================================================== */
+/* Apply to preview re-render target if present */
+#ppa-preview-body { animation: ppaFadeIn 0.3s ease-in-out; }
 
-/* Toolbar notice container (shown near composer controls) */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
-  margin-top: 10px; /* CHANGED: */
-  padding: 10px 12px; /* CHANGED: */
-  border-radius: 6px; /* CHANGED: */
-  line-height: 1.35; /* CHANGED: */
-  font-size: 13px; /* CHANGED: */
-  background: rgba(255, 255, 255, 0.06); /* CHANGED: */
-  color: #ffffff; /* CHANGED: */
-  border: 1px solid rgba(255, 255, 255, 0.12); /* CHANGED: */
-}
-
-/* Default/cleared state */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice { /* CHANGED: */
-  opacity: 0.95; /* CHANGED: */
-}
-
-/* Success / Error / Warn / Info variants (dark UI with brand accent) */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice-success { /* CHANGED: */
-  background: rgba(16, 185, 129, 0.15); /* teal-ish */ /* CHANGED: */
-  border-color: rgba(16, 185, 129, 0.35); /* CHANGED: */
-  color: #d1fae5; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-error { /* CHANGED: */
-  background: rgba(239, 68, 68, 0.18); /* red-ish */ /* CHANGED: */
-  border-color: rgba(239, 68, 68, 0.40); /* CHANGED: */
-  color: #fee2e2; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-warn { /* CHANGED: */
-  background: rgba(255, 108, 0, 0.20); /* brand accent #ff6c00 */ /* CHANGED: */
-  border-color: rgba(255, 108, 0, 0.40); /* CHANGED: */
-  color: #fff7ed; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-info { /* CHANGED: */
-  background: rgba(59, 130, 246, 0.18); /* blue-ish */ /* CHANGED: */
-  border-color: rgba(59, 130, 246, 0.40); /* CHANGED: */
-  color: #dbeafe; /* CHANGED: */
-}
-
-/* Buttons disabled/busy state */ /* CHANGED: */
-#ppa-composer .button[disabled],
-#ppa-composer .button[aria-busy="true"] { /* CHANGED: */
-  opacity: 0.6; /* CHANGED: */
-  cursor: not-allowed; /* CHANGED: */
-  pointer-events: none; /* CHANGED: */
-  position: relative; /* CHANGED: */
-}
-
-/* Optional subtle busy indicator dot on primary buttons */ /* CHANGED: */
-#ppa-composer .button-primary[aria-busy="true"]::after { /* CHANGED: */
-  content: '…'; /* CHANGED: */
-  position: absolute; /* CHANGED: */
-  right: 10px; /* CHANGED: */
-  top: 50%; /* CHANGED: */
-  transform: translateY(-50%); /* CHANGED: */
-  font-weight: 700; /* CHANGED: */
-}
-
-/* Keep the preview pane readable over dark bg */ /* CHANGED: */
-#ppa-preview-pane { /* CHANGED: */
-  background: rgba(255, 255, 255, 0.02); /* CHANGED: */
-  border: 1px solid rgba(255, 255, 255, 0.08); /* CHANGED: */
-  border-radius: 6px; /* CHANGED: */
-  padding: 14px; /* CHANGED: */
-}
-
-
-/* Success / Error / Warn / Info variants (dark UI with brand accent) */ /* CHANGED: */
-#ppa-toolbar-msg.ppa-notice-success { /* CHANGED: */
-  background: rgba(16, 185, 129, 0.15); /* teal-ish */ /* CHANGED: */
-  border-color: rgba(16, 185, 129, 0.35); /* CHANGED: */
-  color: #d1fae5; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-error { /* CHANGED: */
-  background: rgba(239, 68, 68, 0.18); /* red-ish */ /* CHANGED: */
-  border-color: rgba(239, 68, 68, 0.40); /* CHANGED: */
-  color: #fee2e2; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-warn { /* CHANGED: */
-  background: rgba(255, 108, 0, 0.20); /* brand accent #ff6c00 */ /* CHANGED: */
-  border-color: rgba(255, 108, 0, 0.40); /* CHANGED: */
-  color: #fff7ed; /* CHANGED: */
-}
-
-#ppa-toolbar-msg.ppa-notice-info { /* CHANGED: */
-  background: rgba(59, 130, 246, 0.18); /* blue-ish */ /* CHANGED: */
-  border-color: rgba(59, 130, 246, 0.40); /* CHANGED: */
-  color: #dbeafe; /* CHANGED: */
-}
-
-/* Buttons disabled/busy state */ /* CHANGED: */
-#ppa-composer .button[disabled],
-#ppa-composer .button[aria-busy="true"] { /* CHANGED: */
-  opacity: 0.6; /* CHANGED: */
-  cursor: not-allowed; /* CHANGED: */
-  pointer-events: none; /* CHANGED: */
-  position: relative; /* CHANGED: */
-}
-
-/* Optional subtle busy indicator dot on primary buttons */ /* CHANGED: */
-#ppa-composer .button-primary[aria-busy="true"]::after { /* CHANGED: */
-  content: '…'; /* CHANGED: */
-  position: absolute; /* CHANGED: */
-  right: 10px; /* CHANGED: */
-  top: 50%; /* CHANGED: */
-  transform: translateY(-50%); /* CHANGED: */
-  font-weight: 700; /* CHANGED: */
-}
-
-/* Keep the preview pane readable over dark bg */ /* CHANGED: */
-#ppa-preview-pane { /* CHANGED: */
-  background: rgba(255, 255, 255, 0.02); /* CHANGED: */
-  border: 1px solid rgba(255, 255, 255, 0.08); /* CHANGED: */
-  border-radius: 6px; /* CHANGED: */
-  padding: 14px; /* CHANGED: */
+/* -------------------------------------------------------
+   Responsive
+   ------------------------------------------------------- */
+@media (max-width: 900px) {
+  .ppa-composer-wrap { grid-template-columns: 1fr; }
 }
