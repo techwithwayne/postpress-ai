@@ -13,6 +13,8 @@
 
 /**
  * CHANGE LOG
+ * 2025-11-11 — Fix syntax error in includes block (require_once shortcodes); keep enqueue + ver overrides.     # CHANGED:
+ * 2025-11-11 — Add defensive remove_action() before our enqueue hook to avoid duplicate earlier hooks.        # CHANGED:
  * 2025-11-11 — Script ver override by SRC: force filemtime ?ver for ANY handle whose src points to          # CHANGED:
  *               postpress-ai/assets/js/admin.js (priority 999). Keeps jsTagVer === window.PPA.jsVer.        # CHANGED:
  * 2025-11-10 — Run admin enqueue at priority 99 so our filemtime ver wins; add admin-side                    # CHANGED:
@@ -64,7 +66,7 @@ add_action( 'plugins_loaded', function () {
 
 	// Frontend shortcode
 	$shortcodes = PPA_PLUGIN_DIR . 'inc/shortcodes/class-ppa-shortcodes.php';
-	if ( file_exists( $shortcodes ) ) { require_once $shortcodes; \PPA\Shortcodes\PPAShortcodes::init(); }
+	if ( file_exists( $shortcodes ) ) { require_once $shortcodes; \PPA\Shortcodes\PPAShortcodes::init(); }   // CHANGED:
 
 	// Logging module
 	$logging = PPA_PLUGIN_DIR . 'inc/logging/class-ppa-logging.php';
@@ -99,6 +101,9 @@ add_action( 'plugins_loaded', function () {
  * -------------------------------------------------------------------------------- */
 add_action( 'plugins_loaded', function () {                                                      // CHANGED:
 	if ( function_exists( 'ppa_admin_enqueue' ) ) {                                              // CHANGED:
+		// Neutralize any earlier hooks that might enqueue duplicates at other priorities.       // CHANGED:
+		remove_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 10 );                       // CHANGED:
+		remove_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 99 );                       // CHANGED:
 		add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 99 );                          // CHANGED:
 	}
 }, 10 );                                                                                         // CHANGED:
