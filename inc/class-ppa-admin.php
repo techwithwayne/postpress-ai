@@ -4,10 +4,12 @@
  * Path: inc/class-ppa-admin.php
  *
  * ========= CHANGE LOG =========
- * 2025-11-10: Deprecate legacy asset enqueues; delegate to centralized loader in               // CHANGED:
- *             inc/admin/enqueue.php. Stop adding admin_enqueue_scripts hook.                  // CHANGED:
- *             Provide no-op enqueue() and defensive remove_action in init().                 // CHANGED:
- * 2025-11-08: Add cache-busted CSS/JS (filemtime), limit to plugin screen, expose PPA cfg.
+ * 2025-11-11: Harden deprecation — remove_action across common priorities and callback forms;        # CHANGED:
+ *             add late guard on admin_init to ensure no legacy enqueue survives.                     # CHANGED:
+ * 2025-11-10: Deprecate legacy asset enqueues; delegate to centralized loader in                     # (prev)
+ *             inc/admin/enqueue.php. Stop adding admin_enqueue_scripts hook.                         # (prev)
+ *             Provide no-op enqueue() and defensive remove_action in init().                         # (prev)
+ * 2025-11-08: Add cache-busted CSS/JS (filemtime), limit to plugin screen, expose PPA cfg.           # (prev)
  */
 
 namespace PPA\Admin; // CHANGED:
@@ -22,8 +24,22 @@ class Admin { // CHANGED:
      * No longer attaches admin_enqueue_scripts; centralized loader owns assets.               // CHANGED:
      */
     public static function init() { // CHANGED:
-        // If an older version already attached this class's enqueue, remove it defensively.   // CHANGED:
-        remove_action('admin_enqueue_scripts', [__CLASS__, 'enqueue'], 10);                    // CHANGED:
+        // Actively remove any previously-attached legacy enqueues, regardless of priority    // CHANGED:
+        foreach ([10, 20, 99, 100] as $prio) {                                               // CHANGED:
+            remove_action('admin_enqueue_scripts', [__CLASS__, 'enqueue'], $prio);            // CHANGED:
+            // Some older builds stored the callable as a static-string reference             // CHANGED:
+            remove_action('admin_enqueue_scripts', __NAMESPACE__ . '\\Admin::enqueue', $prio);// CHANGED:
+            remove_action('admin_enqueue_scripts', 'PPA\\Admin\\Admin::enqueue', $prio);      // CHANGED:
+        }
+
+        // Late guard: if any code re-adds this after plugins_loaded, yank it at runtime.      // CHANGED:
+        add_action('admin_init', function () {                                                // CHANGED:
+            foreach ([10, 20, 99, 100] as $prio) {                                           // CHANGED:
+                remove_action('admin_enqueue_scripts', [__CLASS__, 'enqueue'], $prio);        // CHANGED:
+                remove_action('admin_enqueue_scripts', __NAMESPACE__ . '\\Admin::enqueue', $prio); // CHANGED:
+                remove_action('admin_enqueue_scripts', 'PPA\\Admin\\Admin::enqueue', $prio);  // CHANGED:
+            }
+        }, 1);                                                                                // CHANGED:
         // Intentionally DO NOT add any enqueue hooks here.                                    // CHANGED:
     }                                                                                          // CHANGED:
 
