@@ -4,30 +4,58 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-11-09.1: Fix optional-chaining + .trim() bug on preview probe; bump JS ver.           // CHANGED:
- * 2025-11-08.5: Fix ajax URL key to match enqueue (window.PPA.ajaxUrl); keep legacy fallback.
- * 2025-11-08.4: Align with window.PPA config + publish link parity.
- *   - Read ajax/nonce from window.PPA (fallbacks kept).
- *   - Send both X-PPA-Nonce and X-WP-Nonce if nonce present.
- *   - Publish success mirrors Draft: render View/Edit links when available.
- *   - pickViewLink() also considers data.link and data.result.link.
- * 2025-11-08.3: Robust save path:
- *   - Nonce fallback: data-ppa-nonce → ppaAdmin.nonce → #ppa-nonce.
- *   - Empty-content fix: use Preview pane HTML when editor is blank; auto-fill.
- *   - Early guard on empty submit (no title, no content, no preview HTML).
- *   - Wrap-aware fields: pickId()/pickEditLink() read data.* and data.result.*.
- * 2025-11-08: Add "View Draft" link (prefer view/permalink; fallback to edit; both when present).
- * 2025-11-06: Add "Edit Draft" link to success notice.
- * 2025-11-05: UX polish + resilience
- * 2025-11-03: Auto-fill (Title/Excerpt/Slug) after Preview.
- * 2025-10-30: “Save to Draft” wiring.
- * 2025-10-19: Provider tracing; async guards & notices.
+ * 2025-11-11.6: Always render preview from result.html (fallback to content); set data-ppa-provider on pane;    // CHANGED:
+ *               de-duplicate readCsvValues; add window.PPA_LAST_PREVIEW debug hook; version bump.               // CHANGED:
+ * 2025-11-11.5: Preview payload now maps UI fields for Django normalize endpoint:
+ *               - subject → title, brief → content (+html/text synonyms).
+ *               - If no HTML returned, show JSON diagnostic in preview pane.
+ * 2025-11-11.4: Add early guard for Preview when both subject & brief are empty (UX); DevTools test hook.
+ * 2025-11-11.3: Support nested preview shapes (data.result.content/html, result.content/html); provider pick.
+ * 2025-11-11:   Version parity check; set window.PPA._tagJsVer; ES5-safe; data-attrs only if #ppa-composer.
+ * 2025-10..2025-11: Prior fixes & UX polish (see earlier entries).
  */
 
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-11-09.1'; // CHANGED
+  // ==== Version parity check (tag ?ver vs window.PPA.jsVer) ==============================
+  (function versionParityCheck(){
+    function parseVer(u){
+      try {
+        var url = new URL(u, window.location.origin);
+        return String(url.searchParams.get('ver') || '');
+      } catch (e) {
+        var m = String(u||'').match(/[?&]ver=([^&#]+)/i);
+        return m ? decodeURIComponent(m[1]) : '';
+      }
+    }
+    function getOwnAdminScriptTag(){
+      var current = document.currentScript;
+      if (current && /postpress-ai\/assets\/js\/admin\.js/i.test(String(current.src||''))) return current;
+      var nodes = document.getElementsByTagName('script');
+      for (var i = nodes.length - 1; i >= 0; i--) {
+        var s = nodes[i];
+        var src = String(s && s.src || '');
+        if (src.indexOf('postpress-ai/assets/js/admin.js') !== -1) return s;
+      }
+      return null;
+    }
+    var tag = getOwnAdminScriptTag();
+    var tagVer = tag ? parseVer(tag.src) : '';
+    var cfgVer = (window.PPA && String(window.PPA.jsVer || '')) || '';
+    if (window.PPA) { window.PPA._tagJsVer = tagVer; }
+    var r = document.getElementById('ppa-composer');
+    if (r) {
+      try { r.setAttribute('data-ppa-jsver', cfgVer); r.setAttribute('data-ppa-tag-jsver', tagVer); } catch (e) {}
+    }
+    if (cfgVer && tagVer && cfgVer !== tagVer) {
+      console.warn('PPA: JS version mismatch — window.PPA.jsVer != tag ?ver', { cfgVer: cfgVer, tagVer: tagVer });
+    } else {
+      console.info('PPA: JS version parity OK', { jsVer: cfgVer || '(n/a)', tagVer: tagVer || '(n/a)' });
+    }
+  })();
+
+  var PPA_JS_VER = 'admin.v2025-11-11.6'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -56,12 +84,23 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel) || []); }
 
-  function getAjaxUrl() {                                                     // CHANGED (kept)
-    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;          // primary (matches enqueue)
-    if (window.PPA && window.PPA.ajax) return window.PPA.ajax;                // legacy support
+  function getAjaxUrl() {
+    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;
+    if (window.PPA && window.PPA.ajax) return window.PPA.ajax; // legacy
     if (window.ppaAdmin && window.ppaAdmin.ajaxurl) return window.ppaAdmin.ajaxurl;
     if (window.ajaxurl) return window.ajaxurl;
     return '/wp-admin/admin-ajax.php';
+  }
+
+  // Simple escapers
+  function escHtml(s){
+    return String(s || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function escAttr(s){
+    return String(s || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   // Expanded nonce fallback: data-attr → PPA.nonce → ppaAdmin.nonce → #ppa-nonce
@@ -79,7 +118,8 @@
   }
 
   function jsonTryParse(text) {
-    try { return JSON.parse(text); } catch (e) {
+    try { return JSON.parse(text); }
+    catch (e) {
       console.info('PPA: JSON parse failed, returning raw text');
       return { raw: String(text || '') };
     }
@@ -122,30 +162,83 @@
     return '';
   }
 
+  // Convert plain text to minimal HTML paragraphs
+  function toHtmlFromText(text){
+    var t = String(text || '').trim();
+    if (!t) return '';
+    // Split by blank lines into paragraphs; keep single newlines as <br>
+    var parts = t.split(/\n{2,}/);
+    for (var i = 0; i < parts.length; i++) {
+      var safe = escHtml(parts[i]).replace(/\n/g,'<br>');
+      parts[i] = '<p>' + safe + '</p>';
+    }
+    return parts.join('');
+  }
+
   // ---- Payload builders ----------------------------------------------------
 
-  function buildPreviewPayload() {
-    var subject = $('#ppa-subject');
-    var brief = $('#ppa-brief');
-    var genre = $('#ppa-genre');
-    var tone = $('#ppa-tone');
-    var wc = $('#ppa-word-count');
-    return {
-      subject: subject ? subject.value : '',
-      brief: brief ? brief.value : '',
-      genre: genre ? genre.value : '',
-      tone: tone ? tone.value : '',
-      word_count: wc ? Number(wc.value || 0) : 0,
-      _js_ver: PPA_JS_VER
-    };
-  }
+  function buildPreviewPayload() {                                                                                  // CHANGED:
+    var subject = $('#ppa-subject');                                                                               // CHANGED:
+    var brief   = $('#ppa-brief');                                                                                 // CHANGED:
+    var genre   = $('#ppa-genre');                                                                                 // CHANGED:
+    var tone    = $('#ppa-tone');                                                                                  // CHANGED:
+    var wc      = $('#ppa-word-count');                                                                            // CHANGED:
 
-  function readCsvValues(el) {
-    if (!el) return [];
-    var raw = String(el.value || '').trim();
-    if (!raw) return [];
-    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-  }
+    var titleEl = $('#ppa-title') || $('#title');                                                                  // CHANGED:
+    var contentFromEditor = getEditorContent();                                                                     // CHANGED:
+    var subjVal = subject ? subject.value : '';                                                                     // CHANGED:
+    var briefVal = brief ? brief.value : '';                                                                        // CHANGED:
+
+    // Compose HTML content for normalize endpoint when editor is empty                                             // CHANGED:
+    var composedHtml = contentFromEditor;                                                                           // CHANGED:
+    if (!composedHtml && briefVal) {                                                                                // CHANGED:
+      composedHtml = toHtmlFromText(briefVal);                                                                      // CHANGED:
+    }                                                                                                               // CHANGED:
+
+    var payload = {                                                                                                 // CHANGED:
+      // canonical inputs for Django normalize                                                                       // CHANGED:
+      title: (titleEl && titleEl.value) ? String(titleEl.value) : String(subjVal || ''),                            // CHANGED:
+      content: String(composedHtml || ''),                                                                           // CHANGED:
+      // synonyms (help backends that look for these keys)                                                           // CHANGED:
+      html: String(composedHtml || ''),                                                                              // CHANGED:
+      text: String(briefVal || ''),                                                                                  // CHANGED:
+      // UI/meta                                                                                                      // CHANGED:
+      subject: subjVal,                                                                                              // CHANGED:
+      brief: briefVal,                                                                                               // CHANGED:
+      genre: genre ? genre.value : '',                                                                               // CHANGED:
+      tone:  tone  ? tone.value  : '',                                                                               // CHANGED:
+      word_count: wc ? Number(wc.value || 0) : 0,                                                                    // CHANGED:
+      _js_ver: PPA_JS_VER                                                                                            // CHANGED:
+    };                                                                                                               // CHANGED:
+
+    // Optional: pass tags/categories if present on the page                                                         // CHANGED:
+    var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');                               // CHANGED:
+    var catsEl = $('#ppa-categories') || $('#post_category');                                                        // CHANGED:
+    if (tagsEl) {                                                                                                     // CHANGED:
+      payload.tags = (function(){                                                                                     // CHANGED:
+        if (tagsEl.tagName === 'SELECT') {                                                                            // CHANGED:
+          return $all('option:checked', tagsEl).map(function (o) { return o.value; });                                // CHANGED:
+        } return readCsvValues(tagsEl);                                                                               // CHANGED:
+      })();                                                                                                           // CHANGED:
+    }                                                                                                                 // CHANGED:
+    if (catsEl) {                                                                                                     // CHANGED:
+      payload.categories = (function(){                                                                               // CHANGED:
+        if (catsEl.tagName === 'SELECT') {                                                                            // CHANGED:
+          return $all('option:checked', catsEl).map(function (o) { return o.value; });                                // CHANGED:
+        } return readCsvValues(catsEl);                                                                               // CHANGED:
+      })();                                                                                                           // CHANGED:
+    }                                                                                                                 // CHANGED:
+
+    return payload;                                                                                                   // CHANGED:
+  }                                                                                                                   // CHANGED:
+
+  // (global) CSV reader used by preview/store payloads — de-duplicated                                             // CHANGED:
+  function readCsvValues(el) {                                                                                       // CHANGED:
+    if (!el) return [];                                                                                               // CHANGED:
+    var raw = String(el.value || '').trim();                                                                          // CHANGED:
+    if (!raw) return [];                                                                                              // CHANGED:
+    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);                                     // CHANGED:
+  }                                                                                                                   // CHANGED:
 
   function textFromFirstMatch(html, selector) {
     try {
@@ -241,7 +334,7 @@
     var el = noticeContainer();
     var text = String(message == null ? '' : message);
     if (!el) {
-      if (type === 'error' || type === 'warn') { alert(text); } // eslint-disable-line no-alert
+      if (type === 'error' || type === 'warn') { alert(text); }
       else { console.info('PPA:', type + ':', text); }
       return;
     }
@@ -268,11 +361,14 @@
   }
 
   function setButtonsDisabled(disabled) {
-    [btnPreview, btnDraft, btnPublish].forEach(function (b) {
-      if (!b) return;
+    var arr = [btnPreview, btnDraft, btnPublish];
+    for (var i = 0; i < arr.length; i++) {
+      var b = arr[i];
+      if (!b) continue;
       b.disabled = !!disabled;
-      if (disabled) b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
-    });
+      if (disabled) { b.setAttribute('aria-busy', 'true'); }
+      else { b.removeAttribute('aria-busy'); }
+    }
   }
 
   // Lightweight extra debounce to avoid double-trigger before withBusy runs
@@ -315,7 +411,6 @@
   function apiPost(action, data) {
     var url = getAjaxUrl();
     var nonce = getNonce();
-
     var qs = url.indexOf('?') === -1 ? '?' : '&';
     var endpoint = url + qs + 'action=' + encodeURIComponent(action);
 
@@ -332,38 +427,46 @@
       body: JSON.stringify(data || {}),
       credentials: 'same-origin'
     })
-      .then(function (res) {
-        var ct = (res.headers.get('content-type') || '').toLowerCase();
-        return res.text().then(function (text) {
-          var body = ct.indexOf('application/json') !== -1 ? jsonTryParse(text) : jsonTryParse(text);
-          return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct, headers: res.headers };
-        });
-      })
-      .catch(function (err) {
-        console.info('PPA: fetch error', err);
-        return { ok: false, status: 0, body: { error: String(err) }, raw: '', contentType: '', headers: new Headers() };
+    .then(function (res) {
+      var ct = (res.headers.get('content-type') || '').toLowerCase();
+      return res.text().then(function (text) {
+        var body = ct.indexOf('application/json') !== -1 ? jsonTryParse(text) : jsonTryParse(text);
+        return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct, headers: res.headers };
       });
+    })
+    .catch(function (err) {
+      console.info('PPA: fetch error', err);
+      return { ok: false, status: 0, body: { error: String(err) }, raw: '', contentType: '', headers: new Headers() };
+    });
   }
 
   // ---- Response Shape Helpers ---------------------------------------------
 
   function pickHtmlFromResponseBody(body) {
     if (!body || typeof body !== 'object') return '';
-    if (typeof body.html === 'string') return body.html;
+    // prefer nested shapes (WP AJAX → Django proxy)
+    if (body.data && body.data.result && typeof body.data.result.html === 'string') return body.data.result.html;
+    if (body.data && body.data.result && typeof body.data.result.content === 'string') return body.data.result.content;
     if (body.result && typeof body.result.html === 'string') return body.result.html;
-    if (body.data && typeof body.data.html === 'string') return body.data.html;
+    if (body.result && typeof body.result.content === 'string') return body.result.content;
+    // simpler shapes
+    if (typeof body.data === 'object' && typeof body.data.html === 'string') return body.data.html;
+    if (typeof body.html === 'string') return body.html;
     if (typeof body.content === 'string') return body.content;
     if (typeof body.preview === 'string') return body.preview;
     if (typeof body.raw === 'string') return body.raw;
     return '';
   }
 
+  // DevTools hook
+  if (!window.__PPA_TEST_PICK_HTML) { window.__PPA_TEST_PICK_HTML = function (b) { return pickHtmlFromResponseBody(b); }; }
+
   function pickMessage(body) {
     if (!body || typeof body !== 'object') return '';
     if (typeof body.message === 'string') return body.message;
     if (body.result && typeof body.result.message === 'string') return body.result.message;
-    if (body.data && typeof body.data.message === 'string') return body.data.message; // wrap-aware
-    if (body.data && body.data.result && typeof body.data.result.message === 'string') return body.data.result.message; // wrap-aware
+    if (body.data && typeof body.data.message === 'string') return body.data.message;
+    if (body.data && body.data.result && typeof body.data.result.message === 'string') return body.data.result.message;
     return '';
   }
 
@@ -371,9 +474,9 @@
     if (!body || typeof body !== 'object') return '';
     if (typeof body.id === 'string' || typeof body.id === 'number') return String(body.id);
     if (body.result && (typeof body.result.id === 'string' || typeof body.result.id === 'number')) return String(body.result.id);
-    if (body.data && (typeof body.data.id === 'string' || typeof body.data.id === 'number')) return String(body.data.id);                    // wrap-aware
-    if (body.data && body.data.result && (typeof body.data.result.id === 'string' || typeof body.data.result.id === 'number'))               // wrap-aware
-      return String(body.data.result.id);                                                                                                     // wrap-aware
+    if (body.data && (typeof body.data.id === 'string' || typeof body.data.id === 'number')) return String(body.data.id);
+    if (body.data && body.data.result && (typeof body.data.result.id === 'string' || typeof body.data.result.id === 'number'))
+      return String(body.data.result.id);
     return '';
   }
 
@@ -382,9 +485,8 @@
     var v = '';
     if (typeof body.edit_link === 'string') v = body.edit_link;
     else if (body.result && typeof body.result.edit_link === 'string') v = body.result.edit_link;
-    else if (body.data && typeof body.data.edit_link === 'string') v = body.data.edit_link;                     // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.edit_link === 'string')                    // wrap-aware
-      v = body.data.result.edit_link;                                                                            // wrap-aware
+    else if (body.data && typeof body.data.edit_link === 'string') v = body.data.edit_link;
+    else if (body.data && body.data.result && typeof body.data.result.edit_link === 'string') v = body.data.result.edit_link;
     return String(v || '');
   }
 
@@ -397,10 +499,10 @@
     else if (body.result && typeof body.result.view_link === 'string') cand = body.result.view_link;
     else if (body.result && typeof body.result.permalink === 'string') cand = body.result.permalink;
     else if (body.result && typeof body.result.link === 'string') cand = body.result.link;
-    else if (body.data && typeof body.data.permalink === 'string') cand = body.data.permalink;                   // wrap-aware
-    else if (body.data && typeof body.data.link === 'string') cand = body.data.link;                             // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.permalink === 'string') cand = body.data.result.permalink; // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.link === 'string') cand = body.data.result.link;           // wrap-aware
+    else if (body.data && typeof body.data.permalink === 'string') cand = body.data.permalink;
+    else if (body.data && typeof body.data.link === 'string') cand = body.data.link;
+    else if (body.data && body.data.result && typeof body.data.result.permalink === 'string') cand = body.data.result.permalink;
+    else if (body.data && body.data.result && typeof body.data.result.link === 'string') cand = body.data.result.link;
     return String(cand || '');
   }
 
@@ -411,7 +513,17 @@
     return null;
   }
 
-  // ---- Auto-fill helpers (Title/Excerpt/Slug) ------------------------------
+  function pickProvider(body, html) {
+    if (body && typeof body === 'object') {
+      if (typeof body.provider === 'string') return body.provider;
+      if (body.result && typeof body.result.provider === 'string') return body.result.provider;
+      if (body.data && typeof body.data.provider === 'string') return body.data.provider;
+      if (body.data && body.data.result && typeof body.data.result.provider === 'string') return body.data.result.provider;
+    }
+    return extractProviderFromHtml(html || '');
+  }
+
+  // ---- Auto-fill helpers (Title/Excerpt/Slug) --------------------------------
 
   function getElTitle() { return $('#ppa-title') || $('#title'); }
   function getElExcerpt() { return $('#ppa-excerpt') || $('#excerpt'); }
@@ -428,8 +540,8 @@
       if (!src || typeof src !== 'object') return '';
       if (typeof src[key] === 'string') return src[key];
       if (src.result && typeof src.result[key] === 'string') return src.result[key];
-      if (src.data && typeof src.data[key] === 'string') return src.data[key];                    // wrap-aware
-      if (src.data && src.data.result && typeof src.data.result[key] === 'string') return src.data.result[key]; // wrap-aware
+      if (src.data && typeof src.data[key] === 'string') return src.data[key];
+      if (src.data && src.data.result && typeof src.data.result[key] === 'string') return src.data.result[key];
       return '';
     }
 
@@ -446,13 +558,6 @@
     setIfEmpty(getElSlug(), slug);
 
     console.info('PPA: autofill candidates →', { title: !!title, excerpt: !!excerpt, slug: !!slug });
-  }
-
-  // ---- Simple escaper for attribute values (URL) ---------------------------
-  function escAttr(s){
-    return String(s || '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   // ---- Events --------------------------------------------------------------
@@ -482,17 +587,26 @@
     btnPreview.addEventListener('click', function (ev) {
       ev.preventDefault();
       if (clickGuard(btnPreview)) return;
+
+      // Early guard: avoid empty requests where backend returns ok:true but empty HTML
+      var probe = buildPreviewPayload();
+      if (!String(probe.title || '').trim() && !String(probe.text || '').trim() && !String(probe.content || '').trim()) {
+        renderNotice('warn', 'Add a subject or a brief before preview.');
+        return;
+      }
+
       console.info('PPA: Preview clicked');
 
       withBusy(function () {
-        var payload = buildPreviewPayload();
+        var payload = probe; // validated payload
         return apiPost('ppa_preview', payload).then(function (res) {
           if (handleRateLimit(res, 'preview')) return;
 
           var html = pickHtmlFromResponseBody(res.body);
           var serr = pickStructuredError(res.body);
-
-          var provider = extractProviderFromHtml(html);
+          var provider = pickProvider(res.body, html);
+          // Debug hook: expose last preview result for quick inspection                                         // CHANGED:
+          try { window.PPA_LAST_PREVIEW = res; } catch (e) {}                                                    // CHANGED:
           console.info('PPA: provider=' + (provider || '(unknown)'));
 
           if (serr && !res.ok) {
@@ -501,15 +615,19 @@
             return;
           }
 
-          if (html) {
+          if (html && String(html).trim()) {
             setPreview(html);
+            var pane = $('#ppa-preview-pane');                                                                  // CHANGED:
+            if (pane) { try { pane.setAttribute('data-ppa-provider', String(provider || '')); } catch (e) {} }  // CHANGED:
             clearNotice();
             autoFillAfterPreview(res.body, html);
             return;
           }
 
-          setPreview('<p><em>Preview did not return HTML content. Check logs.</em></p>');
-          renderNotice('warn', 'Preview completed, but no HTML was returned.');
+          // Diagnostic fallback: show the JSON shape so we can see what came back
+          var pretty = escHtml(JSON.stringify(res.body, null, 2));
+          setPreview('<pre class="ppa-json">' + pretty + '</pre>');
+          renderNotice('warn', 'Preview completed with no HTML; showing JSON response.');
           console.info('PPA: preview response lacked HTML', res);
         });
       }, 'preview');
@@ -524,8 +642,8 @@
 
       // Early guard to prevent empty submissions with no preview
       var probe = buildStorePayload('draft');
-      var paneEl = document.getElementById('ppa-preview-pane');                                     // CHANGED:
-      var hasPreviewHtml = !!(paneEl && String(paneEl.innerHTML || '').trim());                    // CHANGED:
+      var paneEl = document.getElementById('ppa-preview-pane');
+      var hasPreviewHtml = !!(paneEl && String(paneEl.innerHTML || '').trim());
       if (!probe.title && !probe.content && !hasPreviewHtml) {
         renderNotice('warn', 'Add a title or run Preview before saving a draft.');
         return;
@@ -538,8 +656,8 @@
           var serr = pickStructuredError(res.body);
           var msg = (serr && serr.message) || pickMessage(res.body) || 'Draft request sent.';
           var pid = pickId(res.body);
-          var edit = pickEditLink(res.body);  // wrap-aware
-          var view = pickViewLink(res.body);  // wrap-aware
+          var edit = pickEditLink(res.body);
+          var view = pickViewLink(res.body);
           if (!res.ok) {
             renderNotice('error', 'Draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
