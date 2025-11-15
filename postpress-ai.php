@@ -13,17 +13,20 @@
 
 /**
  * CHANGE LOG
- * 2025-11-09 — Recognize new Testbed screen id 'postpress-ai_page_ppa-testbed'; sanitize $_GET['page']; // CHANGED:
- *              keep legacy 'tools_page_ppa-testbed' and query fallback.                                   // CHANGED:
- * 2025-11-08 — Add PPA_PLUGIN_FILE; add PPA_VERSION alias to PPA_PLUGIN_VER for consistency;             // CHANGED:
- *              keep centralized enqueue wiring; minor tidy of cache-bust fallbacks to use PPA_VERSION.   // CHANGED:
- * 2025-11-08 — Prefer controller class for AJAX (includes inc/class-ppa-controller.php on plugins_loaded);
- *              fallback to inc/ajax/{preview.php,store.php} only if controller not found; always load marker.php.
- * 2025-11-04 — Repair fatal: remove stray/duplicated blocks, complete cache-buster, centralize requires, init logging & shortcode.
- * 2025-11-04 — Scope admin enqueue to Composer/Testbed screens only.
- * 2025-11-04 — Load AJAX handlers early.
- * 2025-11-04 — Add robust asset version rotator (filemtime fallback to PPA_PLUGIN_VER).
- * 2025-11-04 — No inline JS/CSS in templates.
+ * 2025-11-11 — Fix syntax error in includes block (require_once shortcodes); keep enqueue + ver overrides.     # CHANGED:
+ * 2025-11-11 — Add defensive remove_action() before our enqueue hook to avoid duplicate earlier hooks.        # CHANGED:
+ * 2025-11-11 — Script ver override by SRC: force filemtime ?ver for ANY handle whose src points to          # CHANGED:
+ *               postpress-ai/assets/js/admin.js (priority 999). Keeps jsTagVer === window.PPA.jsVer.        # CHANGED:
+ * 2025-11-10 — Run admin enqueue at priority 99 so our filemtime ver wins; add admin-side                    # CHANGED:
+ *              script/style ver filters for ppa-admin, ppa-admin-css, ppa-testbed (force ?ver).             # CHANGED:
+ * 2025-11-10 — Simplify admin enqueue: delegate screen checks to ppa_admin_enqueue() and                     # CHANGED:
+ *              remove duplicate gating here; hook once after includes load.                                  # CHANGED:
+ * 2025-11-09 — Recognize new Testbed screen id 'postpress-ai_page_ppa-testbed'; sanitize $_GET['page'];     // CHANGED:
+ *              keep legacy 'tools_page_ppa-testbed' and query fallback.                                     // CHANGED:
+ * 2025-11-08 — Add PPA_PLUGIN_FILE; add PPA_VERSION alias to PPA_PLUGIN_VER for consistency;                // CHANGED:
+ *              keep centralized enqueue wiring; minor tidy of cache-bust fallbacks to use PPA_VERSION.      // CHANGED:
+ * 2025-11-08 — Prefer controller class for AJAX; fallback to inc/ajax/* only if controller not found; always load marker.php.
+ * 2025-11-04 — Centralize requires; init logging & shortcode; remove inline JS/CSS.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -33,8 +36,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 /** ---------------------------------------------------------------------------------
  * Constants
  * -------------------------------------------------------------------------------- */
-if ( ! defined( 'PPA_PLUGIN_FILE' ) ) {                     // CHANGED:
-	define( 'PPA_PLUGIN_FILE', __FILE__ );                  // CHANGED:
+if ( ! defined( 'PPA_PLUGIN_FILE' ) ) {                      // CHANGED:
+	define( 'PPA_PLUGIN_FILE', __FILE__ );                   // CHANGED:
 }
 if ( ! defined( 'PPA_PLUGIN_DIR' ) ) {
 	define( 'PPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -45,9 +48,8 @@ if ( ! defined( 'PPA_PLUGIN_URL' ) ) {
 if ( ! defined( 'PPA_PLUGIN_VER' ) ) {
 	define( 'PPA_PLUGIN_VER', '2.1.0' );
 }
-if ( ! defined( 'PPA_VERSION' ) ) {                         // CHANGED:
-	// Alias for consistency in new code paths; keeps older PPA_PLUGIN_VER usages valid.  // CHANGED:
-	define( 'PPA_VERSION', PPA_PLUGIN_VER );               // CHANGED:
+if ( ! defined( 'PPA_VERSION' ) ) {                          // CHANGED:
+	define( 'PPA_VERSION', PPA_PLUGIN_VER );                 // CHANGED:
 }
 
 /** ---------------------------------------------------------------------------------
@@ -64,7 +66,7 @@ add_action( 'plugins_loaded', function () {
 
 	// Frontend shortcode
 	$shortcodes = PPA_PLUGIN_DIR . 'inc/shortcodes/class-ppa-shortcodes.php';
-	if ( file_exists( $shortcodes ) ) { require_once $shortcodes; \PPA\Shortcodes\PPAShortcodes::init(); }
+	if ( file_exists( $shortcodes ) ) { require_once $shortcodes; \PPA\Shortcodes\PPAShortcodes::init(); }   // CHANGED:
 
 	// Logging module
 	$logging = PPA_PLUGIN_DIR . 'inc/logging/class-ppa-logging.php';
@@ -80,10 +82,9 @@ add_action( 'plugins_loaded', function () {
 	$ajax_dir   = PPA_PLUGIN_DIR . 'inc/ajax/';
 
 	if ( file_exists( $controller ) ) {
-		// Preferred path: class registers wp_ajax_* hooks internally.
+		// Preferred: class registers wp_ajax_* hooks internally.
 		require_once $controller;
 	} else {
-		// Fallback path: legacy handlers directly define wp_ajax_* callbacks.
 		foreach ( array( 'preview.php', 'store.php' ) as $file ) {
 			$path = $ajax_dir . $file;
 			if ( file_exists( $path ) ) { require_once $path; }
@@ -91,34 +92,58 @@ add_action( 'plugins_loaded', function () {
 	}
 
 	// marker.php is always loaded (no controller equivalent).
-	$marker = $ajax_dir . 'marker.php';
+	$marker = PPA_PLUGIN_DIR . 'inc/ajax/marker.php';
 	if ( file_exists( $marker ) ) { require_once $marker; }
 }, 8 );
 
 /** ---------------------------------------------------------------------------------
- * Admin enqueue — scope strictly to our screens
+ * Admin enqueue — delegate to inc/admin/enqueue.php (single source of truth)
  * -------------------------------------------------------------------------------- */
-add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
-	$screen     = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-	$screen_id  = $screen ? $screen->id : '';
-	$page_param = isset( $_GET['page'] ) ? sanitize_key( (string) $_GET['page'] ) : '';                 // CHANGED:
-
-	$composer_id          = 'toplevel_page_postpress-ai';
-	$testbed_id_legacy    = 'tools_page_ppa-testbed';
-	$testbed_id_new_menu  = 'postpress-ai_page_ppa-testbed';                                            // CHANGED:
-
-	$is_composer = ( $screen_id === $composer_id ) || ( $page_param === 'postpress-ai' );
-	$is_testbed  = in_array( $screen_id, array( $testbed_id_new_menu, $testbed_id_legacy ), true )      // CHANGED:
-	               || ( $page_param === 'ppa-testbed' );                                                // CHANGED:
-
-	if ( ! ( $is_composer || $is_testbed ) ) {
-		return;
+add_action( 'plugins_loaded', function () {                                                      // CHANGED:
+	if ( function_exists( 'ppa_admin_enqueue' ) ) {                                              // CHANGED:
+		// Neutralize any earlier hooks that might enqueue duplicates at other priorities.       // CHANGED:
+		remove_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 10 );                       // CHANGED:
+		remove_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 99 );                       // CHANGED:
+		add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue', 99 );                          // CHANGED:
 	}
+}, 10 );                                                                                         // CHANGED:
 
-	if ( function_exists( 'ppa_admin_enqueue' ) ) {
-		ppa_admin_enqueue();
-	}
-}, 10 );
+/** ---------------------------------------------------------------------------------
+ * Admin asset cache-busting (ver=filemtime) — enforce for admin handles/SRCs
+ * -------------------------------------------------------------------------------- */
+add_action( 'admin_init', function () {                                                          // CHANGED:
+	// Styles (admin) — by handle
+	add_filter( 'style_loader_src', function ( $src, $handle ) {
+		if ( 'ppa-admin-css' !== $handle ) { return $src; }
+		$file = PPA_PLUGIN_DIR . 'assets/css/admin.css';
+		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );
+		$src  = remove_query_arg( 'ver', $src );
+		return add_query_arg( 'ver', $ver, $src );
+	}, 10, 2 );
+
+	// Scripts (admin) — by handle (ppa-admin, ppa-testbed)
+	add_filter( 'script_loader_src', function ( $src, $handle ) {
+		if ( 'ppa-admin' !== $handle && 'ppa-testbed' !== $handle ) { return $src; }
+		$file = ( 'ppa-admin' === $handle )
+			? ( PPA_PLUGIN_DIR . 'assets/js/admin.js' )
+			: ( PPA_PLUGIN_DIR . 'inc/admin/ppa-testbed.js' );
+		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );
+		$src  = remove_query_arg( 'ver', $src );
+		return add_query_arg( 'ver', $ver, $src );
+	}, 10, 2 );
+
+	// Scripts (admin) — by SRC (catch-all): if any handle loads our admin.js path, force filemtime ver.   # CHANGED:
+	add_filter( 'script_loader_src', function ( $src, $handle ) {                                          // CHANGED:
+		// Quick path check; works for absolute URLs too.                                                  // CHANGED:
+		if ( strpos( (string) $src, 'postpress-ai/assets/js/admin.js' ) === false ) {                      // CHANGED:
+			return $src;                                                                                  // CHANGED:
+		}                                                                                                  // CHANGED:
+		$file = PPA_PLUGIN_DIR . 'assets/js/admin.js';                                                     // CHANGED:
+		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );                      // CHANGED:
+		$src  = remove_query_arg( 'ver', $src );                                                           // CHANGED:
+		return add_query_arg( 'ver', $ver, $src );                                                         // CHANGED:
+	}, 999, 2 );                                                                                            // CHANGED:
+}, 9 );                                                                                                      // CHANGED:
 
 /** ---------------------------------------------------------------------------------
  * Public asset cache-busting (ver=filemtime) — handles registered by shortcode
@@ -128,7 +153,7 @@ add_action( 'init', function () {
 	add_filter( 'style_loader_src', function ( $src, $handle ) {
 		if ( 'ppa-frontend' !== $handle ) { return $src; }
 		$file = PPA_PLUGIN_DIR . 'assets/css/ppa-frontend.css';
-		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );  // CHANGED:
+		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );
 		$src  = remove_query_arg( 'ver', $src );
 		return add_query_arg( 'ver', $ver, $src );
 	}, 10, 2 );
@@ -137,7 +162,7 @@ add_action( 'init', function () {
 	add_filter( 'script_loader_src', function ( $src, $handle ) {
 		if ( 'ppa-frontend' !== $handle ) { return $src; }
 		$file = PPA_PLUGIN_DIR . 'assets/js/ppa-frontend.js';
-		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );  // CHANGED:
+		$ver  = ( file_exists( $file ) ? (string) filemtime( $file ) : PPA_VERSION );
 		$src  = remove_query_arg( 'ver', $src );
 		return add_query_arg( 'ver', $ver, $src );
 	}, 10, 2 );
