@@ -3,6 +3,8 @@
  * Path: inc/admin/ppa-testbed.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-15: Add optional debug headers helper + console API for /postpress-ai/debug/headers/.       // CHANGED:
+ *             Uses future 'ppa_debug_headers' AJAX action via existing jsonFetch/api wrapper.          // CHANGED:
  * 2025-11-11: Normalize fallback input → {title, content|text, provider:"testbed"}; add X-Requested-With;  // CHANGED:
  *             optional #ppa-testbed-title support; safer JSON wrapper surfacing.                           // CHANGED:
  * 2025-11-10: Add X-WP-Nonce header from ppaAdmin.wpNonce; unify json fetch helper;                        // (prev)
@@ -34,6 +36,7 @@
   const titleEl   = $('#ppa-testbed-title');     // optional <input> title                                  // CHANGED:
   const previewEl = $('#ppa-testbed-preview');   // <button> Preview
   const storeEl   = $('#ppa-testbed-store');     // <button> Store
+  const debugEl   = $('#ppa-testbed-debug');     // optional <button> Debug Headers                          // CHANGED:
   const outEl     = $('#ppa-testbed-output');    // <pre> or <div> render response
   const statusEl  = $('#ppa-testbed-status');    // <div> live status/notice
 
@@ -159,14 +162,34 @@
     }
   }
 
+  async function doDebugHeaders() {                                                                     // CHANGED:
+    try {                                                                                               // CHANGED:
+      setStatus('Requesting debug headers…', 'info');                                                   // CHANGED:
+      const payload = { source: 'testbed' };                                                            // CHANGED:
+      if (DEBUG) console.info('Debug headers payload:', payload);                                       // CHANGED:
+      const data = await api('ppa_debug_headers', payload);                                             // CHANGED:
+      setOutput(data);                                                                                  // CHANGED:
+      setStatus('Debug headers received.', 'success');                                                  // CHANGED:
+    } catch (err) {                                                                                     // CHANGED:
+      console.error('Debug headers failed:', err);                                                      // CHANGED:
+      setStatus(`Debug headers failed: ${err?.message || err}`, 'error');                               // CHANGED:
+    }                                                                                                   // CHANGED:
+  }                                                                                                     // CHANGED:
+
   // --- Wire events if buttons exist ----------------------------------------------------------
   if (previewEl) previewEl.addEventListener('click', doPreview, { passive: true });
   if (storeEl)   storeEl.addEventListener('click', doStore,   { passive: true });
+  if (debugEl)   debugEl.addEventListener('click', doDebugHeaders, { passive: true });                  // CHANGED:
 
   // Expose minimal API for manual testing from Console
   window.PPATestbed = {
-    doPreview, doStore, parseInput, jsonFetch, api,
-    headers: () => ({ ...HEADERS })
+    doPreview,
+    doStore,
+    parseInput,
+    jsonFetch,
+    api,
+    headers: () => ({ ...HEADERS }),
+    debugHeaders: doDebugHeaders                                                                       // CHANGED:
   };
 
   if (DEBUG) console.info('PPA Testbed ready.');
