@@ -1,8 +1,10 @@
 <?php
 /**
  * CHANGE LOG
- * 2025-11-09 — Remove hardcoded <link> CSS fallback; centralized enqueue owns styles.        // CHANGED:
- * 2025-11-09 — Update H1 to "PostPress Composer" for menu consistency.                      // CHANGED:
+ * 2025-11-11 — Add Advanced fields (#ppa-title, #ppa-excerpt, #ppa-slug) for admin.js autofill/store parity.  // CHANGED:
+ * 2025-11-10 — UI polish: make Preview primary (accent) button; localize H1 text.
+ * 2025-11-09 — Remove hardcoded <link> CSS fallback; centralized enqueue owns styles.
+ * 2025-11-09 — Update H1 to "PostPress Composer" for menu consistency.
  * 2025-11-08 — Add versioned external CSS fallback (?ver=filemtime) to bust cache.
  * 2025-11-08 — Strip inline <style>; rely on assets/css/admin.css.
  * 2025-11-08 — Add #ppa-toolbar-msg live region for notices from admin.js.
@@ -19,68 +21,93 @@ error_log('PPA: composer.php rendering at ' . date('c'));
 $ppa_nonce    = wp_create_nonce('ppa-admin');
 $current_user = wp_get_current_user();
 
-// Styles are enqueued centrally in inc/admin/enqueue.php; no local <link> fallback.          // CHANGED:
+// Styles are enqueued centrally in inc/admin/enqueue.php; no local <link> fallback.
 ?>
-<!-- (No inline CSS; centralized enqueue supplies admin.css and admin.js) -->                <!-- CHANGED -->
+<!-- (No inline CSS; centralized enqueue supplies admin.css and admin.js) -->
 
 <div class="wrap ppa-composer-wrap" id="ppa-composer" data-ppa-nonce="<?php echo esc_attr($ppa_nonce); ?>">
 
-    <div class="ppa-form-panel" aria-label="PostPress AI Composer">
-        <h1>PostPress Composer</h1>                                                          <!-- CHANGED: -->
+    <div class="ppa-form-panel" aria-label="<?php echo esc_attr__( 'PostPress AI Composer', 'postpress-ai' ); ?>">
+        <h1><?php echo esc_html__( 'PostPress Composer', 'postpress-ai' ); ?></h1>
         <p class="ppa-hint">
-            Signed in as <strong><?php echo esc_html($current_user->display_name ?: $current_user->user_login); ?></strong>
+            <?php
+            /* translators: %s: current user display name */
+            printf(
+                esc_html__( 'Signed in as %s.', 'postpress-ai' ),
+                esc_html( $current_user->display_name ?: $current_user->user_login )
+            );
+            ?>
         </p>
 
         <!-- Live notice region consumed by admin.js -->
         <div id="ppa-toolbar-msg" class="ppa-notice" role="status" aria-live="polite"></div>
 
         <div class="ppa-form-group">
-            <label for="ppa-subject">Subject / Title</label>
-            <input type="text" id="ppa-subject" placeholder="What is this post about?">
+            <label for="ppa-subject"><?php echo esc_html__( 'Subject / Title', 'postpress-ai' ); ?></label>
+            <input type="text" id="ppa-subject" placeholder="<?php echo esc_attr__( 'What is this post about?', 'postpress-ai' ); ?>">
         </div>
 
         <div class="ppa-inline">
             <div class="ppa-form-group">
-                <label for="ppa-genre">Genre</label>
+                <label for="ppa-genre"><?php echo esc_html__( 'Genre', 'postpress-ai' ); ?></label>
                 <select id="ppa-genre">
-                    <option value="">Auto</option>
-                    <option value="howto">How-to</option>
-                    <option value="listicle">Listicle</option>
-                    <option value="news">News</option>
-                    <option value="review">Review</option>
+                    <option value=""><?php echo esc_html__( 'Auto', 'postpress-ai' ); ?></option>
+                    <option value="howto"><?php echo esc_html__( 'How-to', 'postpress-ai' ); ?></option>
+                    <option value="listicle"><?php echo esc_html__( 'Listicle', 'postpress-ai' ); ?></option>
+                    <option value="news"><?php echo esc_html__( 'News', 'postpress-ai' ); ?></option>
+                    <option value="review"><?php echo esc_html__( 'Review', 'postpress-ai' ); ?></option>
                 </select>
             </div>
             <div class="ppa-form-group">
-                <label for="ppa-tone">Tone</label>
+                <label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
                 <select id="ppa-tone">
-                    <option value="">Auto</option>
-                    <option value="casual">Casual</option>
-                    <option value="friendly">Friendly</option>
-                    <option value="professional">Professional</option>
-                    <option value="technical">Technical</option>
+                    <option value=""><?php echo esc_html__( 'Auto', 'postpress-ai' ); ?></option>
+                    <option value="casual"><?php echo esc_html__( 'Casual', 'postpress-ai' ); ?></option>
+                    <option value="friendly"><?php echo esc_html__( 'Friendly', 'postpress-ai' ); ?></option>
+                    <option value="professional"><?php echo esc_html__( 'Professional', 'postpress-ai' ); ?></option>
+                    <option value="technical"><?php echo esc_html__( 'Technical', 'postpress-ai' ); ?></option>
                 </select>
             </div>
             <div class="ppa-form-group">
-                <label for="ppa-word-count">Word Count</label>
-                <input type="number" id="ppa-word-count" min="300" step="100" placeholder="e.g. 1200">
+                <label for="ppa-word-count"><?php echo esc_html__( 'Word Count', 'postpress-ai' ); ?></label>
+                <input type="number" id="ppa-word-count" min="300" step="100" placeholder="<?php echo esc_attr__( 'e.g. 1200', 'postpress-ai' ); ?>">
             </div>
         </div>
 
         <div class="ppa-form-group">
-            <label for="ppa-brief">Optional brief / extra instructions</label>
-            <textarea id="ppa-brief" rows="6" placeholder="Any details, links, or constraints you want the AI to follow."></textarea>
+            <label for="ppa-brief"><?php echo esc_html__( 'Optional brief / extra instructions', 'postpress-ai' ); ?></label>
+            <textarea id="ppa-brief" rows="6" placeholder="<?php echo esc_attr__( 'Any details, links, or constraints you want the AI to follow.', 'postpress-ai' ); ?>"></textarea>
         </div>
 
-        <div class="ppa-actions" role="group" aria-label="Composer actions">
-            <button id="ppa-preview" class="ppa-btn" type="button">Preview</button>
-            <button id="ppa-draft" class="ppa-btn ppa-btn-secondary" type="button">Save to Draft</button>
-            <button id="ppa-publish" class="ppa-btn ppa-btn-secondary" type="button">Publish</button>
-            <span class="ppa-note">Preview uses the AI backend. “Save to Draft” creates a draft in WordPress. “Publish” publishes immediately.</span>
+        <!-- Advanced (optional) fields wired to admin.js autofill/store -->                                        <!-- CHANGED: -->
+        <details class="ppa-advanced">                                                                              <!-- CHANGED: -->
+            <summary><?php echo esc_html__( 'Advanced (optional)', 'postpress-ai' ); ?></summary>                   <!-- CHANGED: -->
+            <div class="ppa-form-group">                                                                            <!-- CHANGED: -->
+                <label for="ppa-title"><?php echo esc_html__( 'Title (override)', 'postpress-ai' ); ?></label>      <!-- CHANGED: -->
+                <input type="text" id="ppa-title" placeholder="<?php echo esc_attr__( 'Auto-filled after Preview', 'postpress-ai' ); ?>"> <!-- CHANGED: -->
+            </div>                                                                                                  <!-- CHANGED: -->
+            <div class="ppa-form-group">                                                                            <!-- CHANGED: -->
+                <label for="ppa-excerpt"><?php echo esc_html__( 'Excerpt (optional)', 'postpress-ai' ); ?></label>  <!-- CHANGED: -->
+                <textarea id="ppa-excerpt" rows="3" placeholder="<?php echo esc_attr__( 'Auto-filled after Preview', 'postpress-ai' ); ?>"></textarea> <!-- CHANGED: -->
+            </div>                                                                                                  <!-- CHANGED: -->
+            <div class="ppa-form-group">                                                                            <!-- CHANGED: -->
+                <label for="ppa-slug"><?php echo esc_html__( 'Slug (optional)', 'postpress-ai' ); ?></label>        <!-- CHANGED: -->
+                <input type="text" id="ppa-slug" placeholder="<?php echo esc_attr__( 'auto-generated-from-title', 'postpress-ai' ); ?>"> <!-- CHANGED: -->
+            </div>                                                                                                  <!-- CHANGED: -->
+        </details>                                                                                                  <!-- CHANGED: -->
+
+        <div class="ppa-actions" role="group" aria-label="<?php echo esc_attr__( 'Composer actions', 'postpress-ai' ); ?>">
+            <button id="ppa-preview" class="ppa-btn ppa-btn-primary" type="button"><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></button>
+            <button id="ppa-draft" class="ppa-btn ppa-btn-secondary" type="button"><?php echo esc_html__( 'Save to Draft', 'postpress-ai' ); ?></button>
+            <button id="ppa-publish" class="ppa-btn ppa-btn-secondary" type="button"><?php echo esc_html__( 'Publish', 'postpress-ai' ); ?></button>
+            <span class="ppa-note">
+                <?php echo esc_html__( 'Preview uses the AI backend. “Save to Draft” creates a draft in WordPress. “Publish” publishes immediately.', 'postpress-ai' ); ?>
+            </span>
         </div>
     </div>
 
-    <div class="ppa-preview-panel" aria-label="Preview panel">
-        <h1>Preview</h1>
-        <div id="ppa-preview-pane" aria-live="polite"><em>(Preview will appear here once generated.)</em></div>
+    <div class="ppa-preview-panel" aria-label="<?php echo esc_attr__( 'Preview panel', 'postpress-ai' ); ?>">
+        <h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
+        <div id="ppa-preview-pane" aria-live="polite"><em><?php echo esc_html__( '(Preview will appear here once generated.)', 'postpress-ai' ); ?></em></div>
     </div>
 </div>
