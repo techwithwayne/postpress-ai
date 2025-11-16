@@ -4,6 +4,8 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-15: Add X-PPA-View ('composer') and X-Requested-With headers for Composer AJAX parity with Django logs;  // CHANGED:
+ *             keeps existing payload/UX unchanged while improving diagnostics.                                      // CHANGED:
  * 2025-11-11.6: Always render preview from result.html (fallback to content); set data-ppa-provider on pane;    // CHANGED:
  *               de-duplicate readCsvValues; add window.PPA_LAST_PREVIEW debug hook; version bump.               // CHANGED:
  * 2025-11-11.5: Preview payload now maps UI fields for Django normalize endpoint:
@@ -55,7 +57,7 @@
     }
   })();
 
-  var PPA_JS_VER = 'admin.v2025-11-11.6'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-11-15.1'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -419,6 +421,16 @@
       headers['X-PPA-Nonce'] = nonce;
       headers['X-WP-Nonce']  = nonce;
     }
+    headers['X-Requested-With'] = 'XMLHttpRequest'; // CHANGED:
+
+    // Tag this as coming from the Composer view for Django-side diagnostics.                    // CHANGED:
+    var view = 'composer';                                                                      // CHANGED:
+    try {                                                                                       // CHANGED:
+      if (root && root.getAttribute('data-ppa-view')) {                                         // CHANGED:
+        view = String(root.getAttribute('data-ppa-view') || 'composer');                        // CHANGED:
+      }                                                                                         // CHANGED:
+    } catch (e) {}                                                                              // CHANGED:
+    headers['X-PPA-View'] = view;                                                               // CHANGED:
 
     console.info('PPA: POST', action, '→', endpoint);
     return fetch(endpoint, {
