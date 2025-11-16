@@ -4,6 +4,7 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-16: Add mode hint to store payloads (draft/publish/update) for Django/WP store pipeline.               // CHANGED:
  * 2025-11-15: Add X-PPA-View ('composer') and X-Requested-With headers for Composer AJAX parity with Django logs;  // CHANGED:
  *             keeps existing payload/UX unchanged while improving diagnostics.                                      // CHANGED:
  * 2025-11-11.6: Always render preview from result.html (fallback to content); set data-ppa-provider on pane;    // CHANGED:
@@ -57,7 +58,7 @@
     }
   })();
 
-  var PPA_JS_VER = 'admin.v2025-11-15.1'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-11-16.1'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -301,6 +302,17 @@
       ver: '1',
       _js_ver: PPA_JS_VER
     };
+
+    // Determine mode hint for backend (draft/publish/update).                     // CHANGED:
+    var modeVal = '';                                                             // CHANGED:
+    if (target === 'publish' || target === 'draft' || target === 'update') {      // CHANGED:
+      modeVal = String(target);                                                   // CHANGED:
+    } else if (statusEl) {                                                        // CHANGED:
+      modeVal = String(statusEl.value || '');                                     // CHANGED:
+    }                                                                             // CHANGED:
+    if (modeVal) {                                                                // CHANGED:
+      payload.mode = modeVal;                                                     // CHANGED:
+    }                                                                             // CHANGED:
 
     // If editor is empty, use Preview HTML and auto-fill
     if (!payload.content || !String(payload.content).trim()) {
