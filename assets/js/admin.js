@@ -459,6 +459,17 @@
     return payload;
   }
 
+    function hasTitleOrSubject() {
+    var subjectEl = $('#ppa-subject');
+    var titleEl   = $('#ppa-title') || $('#title');
+
+    var subject = subjectEl ? String(subjectEl.value || '').trim() : '';
+    var title   = titleEl ? String(titleEl.value || '').trim() : '';
+
+    return !!(subject || title);
+  }
+
+
   // ---- Toolbar Notices & Busy State ---------------------------------------
 
   var btnPreview  = $('#ppa-preview');
@@ -476,20 +487,74 @@
     }                                                                                 // CHANGED:
   })();                                                                               // CHANGED:
 
-  function noticeContainer() { return $('#ppa-toolbar-msg') || null; }
+    // NEW: ensure toolbar notice exists and sits above the buttons             // CHANGED:
+   var btnPreview  = $('#ppa-preview');
+  var btnDraft    = $('#ppa-draft');
+  var btnPublish  = $('#ppa-publish');
+  var btnGenerate = $('#ppa-generate'); // CHANGED:
 
-  function renderNotice(type, message) {
-    var el = noticeContainer();
-    var text = String(message == null ? '' : message);
-    if (!el) {
-      if (type === 'error' || type === 'warn') { alert(text); }
-      else { console.info('PPA:', type + ':', text); }
-      return;
-    }
-    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;
-    el.className = clsBase + ' ' + clsType;
-    el.textContent = text;
-  }
+  // Ensure we always have a notice container above the main buttons           // CHANGED:
+  function noticeContainer() {                                                // CHANGED:
+    var el = $('#ppa-toolbar-msg');                                           // CHANGED:
+    if (el) return el;                                                        // CHANGED:
+                                                                              // CHANGED:
+    // Try to anchor it in the same row as the primary buttons                // CHANGED:
+    var host = null;                                                          // CHANGED:
+    if (btnGenerate && btnGenerate.parentNode) {                              // CHANGED:
+      host = btnGenerate.parentNode;                                          // CHANGED:
+    } else if (btnPreview && btnPreview.parentNode) {                         // CHANGED:
+      host = btnPreview.parentNode;                                           // CHANGED:
+    } else if (btnDraft && btnDraft.parentNode) {                             // CHANGED:
+      host = btnDraft.parentNode;                                             // CHANGED:
+    } else if (btnPublish && btnPublish.parentNode) {                         // CHANGED:
+      host = btnPublish.parentNode;                                           // CHANGED:
+    }                                                                         // CHANGED:
+                                                                              // CHANGED:
+    if (!host) {                                                              // CHANGED:
+      console.info('PPA: noticeContainer could not find a host for toolbar msg'); // CHANGED:
+      return null;                                                            // CHANGED:
+    }                                                                         // CHANGED:
+                                                                              // CHANGED:
+    el = document.createElement('div');                                       // CHANGED:
+    el.id = 'ppa-toolbar-msg';                                                // CHANGED:
+    el.className = 'ppa-notice';                                              // CHANGED:
+    try {                                                                     // CHANGED:
+      el.setAttribute('role', 'status');                                      // CHANGED:
+      el.setAttribute('aria-live', 'polite');                                 // CHANGED:
+    } catch (e) {}                                                            // CHANGED:
+                                                                              // CHANGED:
+    // Insert *above* the buttons                                             // CHANGED:
+    host.insertBefore(el, host.firstChild);                                   // CHANGED:
+    console.info('PPA: created #ppa-toolbar-msg above buttons');              // CHANGED:
+    return el;                                                                // CHANGED:
+  }                                                                           // CHANGED:
+
+  function renderNotice(type, message) {                                      // CHANGED:
+    var el = noticeContainer();                                               // CHANGED:
+    var text = String(message == null ? '' : message);                        // CHANGED:
+    console.info('PPA: renderNotice', { type: type, message: text, hasEl: !!el }); // CHANGED:
+    if (!el) {                                                                // CHANGED:
+      // Hard fallback so you ALWAYS see something during debugging           // CHANGED:
+      if (type === 'error' || type === 'warn') {                              // CHANGED:
+        alert(text);                                                          // CHANGED:
+      } else {                                                                // CHANGED:
+        console.info('PPA:', type + ':', text);                               // CHANGED:
+      }                                                                       // CHANGED:
+      return;                                                                 // CHANGED:
+    }                                                                         // CHANGED:
+    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;               // CHANGED:
+    el.className = clsBase + ' ' + clsType;                                   // CHANGED:
+    el.textContent = text;                                                    // CHANGED:
+                                                                              // CHANGED:
+    // If for some reason it's still visually hidden, alert as a backup       // CHANGED:
+    try {                                                                     // CHANGED:
+      var visible = el.offsetWidth > 0 && el.offsetHeight > 0;                // CHANGED:
+      if (!visible && (type === 'error' || type === 'warn')) {                // CHANGED:
+        alert(text);                                                          // CHANGED:
+      }                                                                       // CHANGED:
+    } catch (e) {}                                                            // CHANGED:
+  }                                                                           // CHANGED:
+
 
   function renderNoticeTimed(type, message, ms) { renderNotice(type, message); if (ms && ms > 0) setTimeout(clearNotice, ms); }
 
@@ -955,11 +1020,17 @@
     });
   }
 
-  if (btnDraft) {
+    if (btnDraft) {
     btnDraft.addEventListener('click', function (ev) {
       ev.preventDefault();
       if (clickGuard(btnDraft)) return;
       console.info('PPA: Save Draft clicked');
+
+      // NEW: hard guard for missing title/subject
+      if (!hasTitleOrSubject()) {
+        renderNotice('warn', 'Add a title or subject before saving a draft.');
+        return;
+      }
 
       // Early guard to prevent empty submissions with no preview
       var probe = buildStorePayload('draft');
@@ -969,6 +1040,7 @@
         renderNotice('warn', 'Add a title or run Preview before saving a draft.');
         return;
       }
+
 
       withBusy(function () {
         var payload = probe; // use built probe (already has preview fallback)
@@ -1007,6 +1079,12 @@
       ev.preventDefault();
       if (clickGuard(btnPublish)) return;
       console.info('PPA: Publish clicked');
+
+      // NEW: hard guard for missing title/subject
+      if (!hasTitleOrSubject()) {
+        renderNotice('warn', 'Add a title or subject before publishing.');
+        return;
+      }
 
       /* eslint-disable no-alert */
       if (!window.confirm('Are you sure you want to publish this content now?')) {
