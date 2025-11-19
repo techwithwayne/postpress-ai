@@ -1,9 +1,16 @@
-// /home/u3007-tenkoaygp3je/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/js/admin.js
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-18.6: Hide Preview button in Composer and rename Generate Draft → Generate Preview.         // CHANGED:
+ * 2025-11-18.5: Preview now builds HTML from AI title + body/markdown/text instead of only raw html; // CHANGED:
+ *               JSON diagnostic fallback kept only as last resort.                                   // CHANGED:
+ * 2025-11-17.2: Enhance Markdown → HTML rendering for generate preview (headings, lists, inline em/strong). // CHANGED:
+ * 2025-11-17: Wire target audience field into preview payload.                                       // CHANGED:
+ * 2025-11-16.3: Wire ppa_generate (Generate button) to AI /generate/ endpoint; render structured draft + SEO    // CHANGED:
+ *               meta in preview and auto-fill core fields where empty.                                         // CHANGED:
+ * 2025-11-16.2: Clarify draft success notice to mention WordPress draft; bump JS internal version.              // CHANGED:
  * 2025-11-16: Add mode hint to store payloads (draft/publish/update) for Django/WP store pipeline.               // CHANGED:
  * 2025-11-15: Add X-PPA-View ('composer') and X-Requested-With headers for Composer AJAX parity with Django logs;  // CHANGED:
  *             keeps existing payload/UX unchanged while improving diagnostics.                                      // CHANGED:
@@ -58,7 +65,7 @@
     }
   })();
 
-  var PPA_JS_VER = 'admin.v2025-11-16.1'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-11-18.6'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -165,6 +172,29 @@
     return '';
   }
 
+  // Set editor content in a Classic/Block/TinyMCE-safe way
+  function setEditorContent(html) {
+    var value = String(html || '');
+    var txt = $('#ppa-content');
+    try {
+      if (window.tinyMCE && tinyMCE.get) {
+        var ed = tinyMCE.get('content');
+        if (ed && !ed.isHidden()) {
+          ed.setContent(value);
+          return;
+        }
+      }
+    } catch (e) {}
+    var raw = $('#content');
+    if (raw) {
+      raw.value = value;
+      return;
+    }
+    if (txt) {
+      txt.value = value;
+    }
+  }
+
   // Convert plain text to minimal HTML paragraphs
   function toHtmlFromText(text){
     var t = String(text || '').trim();
@@ -178,70 +208,163 @@
     return parts.join('');
   }
 
+  // Minimal Markdown-ish to HTML helper: headings, lists, and inline em/strong.
+  function markdownToHtml(m) {
+    var txt = String(m || '');
+    if (!txt) return '';
+    // If it already looks like HTML, just return it.
+    if (/<[a-z][\s\S]*>/i.test(txt)) {
+      return txt;
+    }
+
+    // Inline formatter: apply em/strong AFTER escaping HTML.
+    function applyInline(mdText) {
+      var s = escHtml(mdText);
+      // Bold: **text** or __text__
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
+      // Emphasis: *text* or _text_
+      s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      s = s.replace(/_(.+?)_/g, '<em>$1</em>');
+      return s;
+    }
+
+    var lines = txt.split(/\r?\n/);
+    var htmlParts = [];
+    var inList = false;
+    var paraBuf = [];
+
+    function flushParagraph() {
+      if (!paraBuf.length) return;
+      var text = paraBuf.join(' ').replace(/\s+/g, ' ').trim();
+      if (!text) { paraBuf = []; return; }
+      htmlParts.push('<p>' + applyInline(text) + '</p>');
+      paraBuf = [];
+    }
+
+    function flushList() {
+      if (!inList) return;
+      htmlParts.push('</ul>');
+      inList = false;
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var trimmed = String(line || '').trim();
+
+      // Blank line → paragraph / list break
+      if (!trimmed) {
+        flushParagraph();
+        flushList();
+        continue;
+      }
+
+      // Headings: #, ##, ###, ####, #####, ######
+      var mHeading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+      if (mHeading) {
+        flushParagraph();
+        flushList();
+        var level = mHeading[1].length;
+        if (level < 1) level = 1;
+        if (level > 6) level = 6;
+        var hText = applyInline(mHeading[2] || '');
+        htmlParts.push('<h' + level + '>' + hText + '</h' + level + '>');
+        continue;
+      }
+
+      // Unordered list items: -, *, + at start
+      var mList = trimmed.match(/^[-*+]\s+(.*)$/);
+      if (mList) {
+        flushParagraph();
+        if (!inList) {
+          htmlParts.push('<ul>');
+          inList = true;
+        }
+        htmlParts.push('<li>' + applyInline(mList[1] || '') + '</li>');
+        continue;
+      }
+
+      // Otherwise treat as paragraph text; accumulate.
+      paraBuf.push(trimmed);
+    }
+
+    // Flush any remaining open blocks
+    flushParagraph();
+    flushList();
+
+    if (!htmlParts.length) {
+      // Fallback to the old behavior if nothing parsed
+      return toHtmlFromText(txt);
+    }
+    return htmlParts.join('');
+  }
+
   // ---- Payload builders ----------------------------------------------------
 
-  function buildPreviewPayload() {                                                                                  // CHANGED:
-    var subject = $('#ppa-subject');                                                                               // CHANGED:
-    var brief   = $('#ppa-brief');                                                                                 // CHANGED:
-    var genre   = $('#ppa-genre');                                                                                 // CHANGED:
-    var tone    = $('#ppa-tone');                                                                                  // CHANGED:
-    var wc      = $('#ppa-word-count');                                                                            // CHANGED:
+  function buildPreviewPayload() {
+    var subject = $('#ppa-subject');
+    var brief   = $('#ppa-brief');
+    var genre   = $('#ppa-genre');
+    var tone    = $('#ppa-tone');
+    var wc      = $('#ppa-word-count');
+    var audience = $('#ppa-audience');
 
-    var titleEl = $('#ppa-title') || $('#title');                                                                  // CHANGED:
-    var contentFromEditor = getEditorContent();                                                                     // CHANGED:
-    var subjVal = subject ? subject.value : '';                                                                     // CHANGED:
-    var briefVal = brief ? brief.value : '';                                                                        // CHANGED:
+    var titleEl = $('#ppa-title') || $('#title');
+    var contentFromEditor = getEditorContent();
+    var subjVal = subject ? subject.value : '';
+    var briefVal = brief ? brief.value : '';
 
-    // Compose HTML content for normalize endpoint when editor is empty                                             // CHANGED:
-    var composedHtml = contentFromEditor;                                                                           // CHANGED:
-    if (!composedHtml && briefVal) {                                                                                // CHANGED:
-      composedHtml = toHtmlFromText(briefVal);                                                                      // CHANGED:
-    }                                                                                                               // CHANGED:
+    // Compose HTML content for normalize endpoint when editor is empty
+    var composedHtml = contentFromEditor;
+    if (!composedHtml && briefVal) {
+      composedHtml = toHtmlFromText(briefVal);
+    }
 
-    var payload = {                                                                                                 // CHANGED:
-      // canonical inputs for Django normalize                                                                       // CHANGED:
-      title: (titleEl && titleEl.value) ? String(titleEl.value) : String(subjVal || ''),                            // CHANGED:
-      content: String(composedHtml || ''),                                                                           // CHANGED:
-      // synonyms (help backends that look for these keys)                                                           // CHANGED:
-      html: String(composedHtml || ''),                                                                              // CHANGED:
-      text: String(briefVal || ''),                                                                                  // CHANGED:
-      // UI/meta                                                                                                      // CHANGED:
-      subject: subjVal,                                                                                              // CHANGED:
-      brief: briefVal,                                                                                               // CHANGED:
-      genre: genre ? genre.value : '',                                                                               // CHANGED:
-      tone:  tone  ? tone.value  : '',                                                                               // CHANGED:
-      word_count: wc ? Number(wc.value || 0) : 0,                                                                    // CHANGED:
-      _js_ver: PPA_JS_VER                                                                                            // CHANGED:
-    };                                                                                                               // CHANGED:
+    var payload = {
+      // canonical inputs for Django normalize
+      title: (titleEl && titleEl.value) ? String(titleEl.value) : String(subjVal || ''),
+      content: String(composedHtml || ''),
+      // synonyms (help backends that look for these keys)
+      html: String(composedHtml || ''),
+      text: String(briefVal || ''),
+      // UI/meta
+      subject: subjVal,
+      brief: briefVal,
+      genre: genre ? genre.value : '',
+      tone:  tone  ? tone.value  : '',
+      word_count: wc ? Number(wc.value || 0) : 0,
+      audience: audience ? String(audience.value || '') : '',
+      _js_ver: PPA_JS_VER
+    };
 
-    // Optional: pass tags/categories if present on the page                                                         // CHANGED:
-    var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');                               // CHANGED:
-    var catsEl = $('#ppa-categories') || $('#post_category');                                                        // CHANGED:
-    if (tagsEl) {                                                                                                     // CHANGED:
-      payload.tags = (function(){                                                                                     // CHANGED:
-        if (tagsEl.tagName === 'SELECT') {                                                                            // CHANGED:
-          return $all('option:checked', tagsEl).map(function (o) { return o.value; });                                // CHANGED:
-        } return readCsvValues(tagsEl);                                                                               // CHANGED:
-      })();                                                                                                           // CHANGED:
-    }                                                                                                                 // CHANGED:
-    if (catsEl) {                                                                                                     // CHANGED:
-      payload.categories = (function(){                                                                               // CHANGED:
-        if (catsEl.tagName === 'SELECT') {                                                                            // CHANGED:
-          return $all('option:checked', catsEl).map(function (o) { return o.value; });                                // CHANGED:
-        } return readCsvValues(catsEl);                                                                               // CHANGED:
-      })();                                                                                                           // CHANGED:
-    }                                                                                                                 // CHANGED:
+    // Optional: pass tags/categories if present on the page
+    var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
+    var catsEl = $('#ppa-categories') || $('#post_category');
+    if (tagsEl) {
+      payload.tags = (function(){
+        if (tagsEl.tagName === 'SELECT') {
+          return $all('option:checked', tagsEl).map(function (o) { return o.value; });
+        } return readCsvValues(tagsEl);
+      })();
+    }
+    if (catsEl) {
+      payload.categories = (function(){
+        if (catsEl.tagName === 'SELECT') {
+          return $all('option:checked', catsEl).map(function (o) { return o.value; });
+        } return readCsvValues(catsEl);
+      })();
+    }
 
-    return payload;                                                                                                   // CHANGED:
-  }                                                                                                                   // CHANGED:
+    return payload;
+  }
 
-  // (global) CSV reader used by preview/store payloads — de-duplicated                                             // CHANGED:
-  function readCsvValues(el) {                                                                                       // CHANGED:
-    if (!el) return [];                                                                                               // CHANGED:
-    var raw = String(el.value || '').trim();                                                                          // CHANGED:
-    if (!raw) return [];                                                                                              // CHANGED:
-    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);                                     // CHANGED:
-  }                                                                                                                   // CHANGED:
+  // (global) CSV reader used by preview/store payloads — de-duplicated
+  function readCsvValues(el) {
+    if (!el) return [];
+    var raw = String(el.value || '').trim();
+    if (!raw) return [];
+    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
 
   function textFromFirstMatch(html, selector) {
     try {
@@ -303,16 +426,16 @@
       _js_ver: PPA_JS_VER
     };
 
-    // Determine mode hint for backend (draft/publish/update).                     // CHANGED:
-    var modeVal = '';                                                             // CHANGED:
-    if (target === 'publish' || target === 'draft' || target === 'update') {      // CHANGED:
-      modeVal = String(target);                                                   // CHANGED:
-    } else if (statusEl) {                                                        // CHANGED:
-      modeVal = String(statusEl.value || '');                                     // CHANGED:
-    }                                                                             // CHANGED:
-    if (modeVal) {                                                                // CHANGED:
-      payload.mode = modeVal;                                                     // CHANGED:
-    }                                                                             // CHANGED:
+    // Determine mode hint for backend (draft/publish/update).
+    var modeVal = '';
+    if (target === 'publish' || target === 'draft' || target === 'update') {
+      modeVal = String(target);
+    } else if (statusEl) {
+      modeVal = String(statusEl.value || '');
+    }
+    if (modeVal) {
+      payload.mode = modeVal;
+    }
 
     // If editor is empty, use Preview HTML and auto-fill
     if (!payload.content || !String(payload.content).trim()) {
@@ -338,9 +461,20 @@
 
   // ---- Toolbar Notices & Busy State ---------------------------------------
 
-  var btnPreview = $('#ppa-preview');
-  var btnDraft   = $('#ppa-draft');
-  var btnPublish = $('#ppa-publish');
+  var btnPreview  = $('#ppa-preview');
+  var btnDraft    = $('#ppa-draft');
+  var btnPublish  = $('#ppa-publish');
+  var btnGenerate = $('#ppa-generate');
+
+  // Repurpose Generate as the main preview button and hide the old Preview.          // CHANGED:
+  (function adaptGenerateAsPreview(){                                                 // CHANGED:
+    if (btnPreview) {                                                                 // CHANGED:
+      try { btnPreview.style.display = 'none'; } catch (e) {}                         // CHANGED:
+    }                                                                                 // CHANGED:
+    if (btnGenerate) {                                                                // CHANGED:
+      try { btnGenerate.textContent = 'Generate Preview'; } catch (e) {}              // CHANGED:
+    }                                                                                 // CHANGED:
+  })();                                                                               // CHANGED:
 
   function noticeContainer() { return $('#ppa-toolbar-msg') || null; }
 
@@ -375,7 +509,7 @@
   }
 
   function setButtonsDisabled(disabled) {
-    var arr = [btnPreview, btnDraft, btnPublish];
+    var arr = [btnPreview, btnDraft, btnPublish, btnGenerate];
     for (var i = 0; i < arr.length; i++) {
       var b = arr[i];
       if (!b) continue;
@@ -433,16 +567,16 @@
       headers['X-PPA-Nonce'] = nonce;
       headers['X-WP-Nonce']  = nonce;
     }
-    headers['X-Requested-With'] = 'XMLHttpRequest'; // CHANGED:
+    headers['X-Requested-With'] = 'XMLHttpRequest';
 
-    // Tag this as coming from the Composer view for Django-side diagnostics.                    // CHANGED:
-    var view = 'composer';                                                                      // CHANGED:
-    try {                                                                                       // CHANGED:
-      if (root && root.getAttribute('data-ppa-view')) {                                         // CHANGED:
-        view = String(root.getAttribute('data-ppa-view') || 'composer');                        // CHANGED:
-      }                                                                                         // CHANGED:
-    } catch (e) {}                                                                              // CHANGED:
-    headers['X-PPA-View'] = view;                                                               // CHANGED:
+    // Tag this as coming from the Composer view for Django-side diagnostics.
+    var view = 'composer';
+    try {
+      if (root && root.getAttribute('data-ppa-view')) {
+        view = String(root.getAttribute('data-ppa-view') || 'composer');
+      }
+    } catch (e) {}
+    headers['X-PPA-View'] = view;
 
     console.info('PPA: POST', action, '→', endpoint);
     return fetch(endpoint, {
@@ -480,6 +614,64 @@
     if (typeof body.preview === 'string') return body.preview;
     if (typeof body.raw === 'string') return body.raw;
     return '';
+  }
+
+  // Extract a reasonable text/body candidate for preview fallback
+  function pickPreviewBodyText(body) {
+    if (!body || typeof body !== 'object') return '';
+    var src = body;
+    if (src.data && typeof src.data === 'object') src = src.data;
+    if (src.result && typeof src.result === 'object') src = src.result;
+
+    // Prefer long-form fields first
+    if (typeof src.body_markdown === 'string') return src.body_markdown;
+    if (typeof src.body === 'string') return src.body;
+    if (typeof src.content === 'string') return src.content;
+    if (typeof src.html === 'string') return src.html;
+    // Then fall back to simpler text shapes
+    if (typeof src.text === 'string') return src.text;
+    if (typeof src.brief === 'string') return src.brief;
+    return '';
+  }
+
+  // Build final HTML for the Preview pane using title + body HTML/text
+  function buildPreviewHtml(body, baseHtml) {
+    var src = body && typeof body === 'object' ? body : {};
+    if (src.data && typeof src.data === 'object') src = src.data;
+    if (src.result && typeof src.result === 'object') src = src.result;
+
+    var title = typeof src.title === 'string' ? src.title : '';
+    var excerpt = typeof src.excerpt === 'string' ? src.excerpt : '';
+
+    var html = baseHtml || '';
+    if (!html && typeof src.html === 'string') html = src.html;
+    if (!html && typeof src.content === 'string') html = src.content;
+
+    // If we still don't have HTML, fall back to any body/text and render it
+    if (!html) {
+      var bodyText = pickPreviewBodyText(body);
+      if (bodyText) {
+        // If bodyText already looks like HTML, use it directly.
+        if (/<[a-z][\s\S]*>/i.test(bodyText)) {
+          html = bodyText;
+        } else {
+          // Prefer markdown-style rendering; falls back to paragraph shaping
+          html = markdownToHtml(bodyText);
+        }
+      }
+    }
+
+    var parts = [];
+    if (title) {
+      parts.push('<h2>' + escHtml(title) + '</h2>');
+    }
+    if (html) {
+      parts.push(html);
+    } else if (excerpt) {
+      parts.push('<p>' + escHtml(excerpt) + '</p>');
+    }
+
+    return parts.join('');
   }
 
   // DevTools hook
@@ -584,6 +776,104 @@
     console.info('PPA: autofill candidates →', { title: !!title, excerpt: !!excerpt, slug: !!slug });
   }
 
+  // ---- Generate helpers (normalize + render) ------------------------------------
+
+  function pickGenerateResult(body) {
+    if (!body || typeof body !== 'object') return null;
+    var src = body;
+    if (src.data && typeof src.data === 'object') src = src.data;
+    if (src.result && typeof src.result === 'object') src = src.result;
+    var title = src && typeof src.title === 'string' ? src.title : '';
+    var outline = src && Object.prototype.toString.call(src.outline) === '[object Array]'
+      ? src.outline.slice()
+      : [];
+    var bodyMd = src && typeof src.body_markdown === 'string'
+      ? src.body_markdown
+      : (typeof src.body === 'string' ? src.body : '');
+    var meta = src && src.meta && typeof src.meta === 'object' ? src.meta : {};
+    if (!title && !bodyMd && outline.length === 0 && !meta) return null;
+    return {
+      title: title,
+      outline: outline,
+      body_markdown: bodyMd,
+      meta: meta
+    };
+  }
+
+  function renderGeneratePreview(gen) {
+    if (!gen) {
+      setPreview('<p>No generate result available.</p>');
+      return;
+    }
+    var parts = [];
+    if (gen.title) {
+      parts.push('<h2>' + escHtml(gen.title) + '</h2>');
+    }
+    if (gen.outline && gen.outline.length) {
+      parts.push('<h3>Outline</h3><ol>');
+      for (var i = 0; i < gen.outline.length; i++) {
+        parts.push('<li>' + escHtml(String(gen.outline[i] || '')) + '</li>');
+      }
+      parts.push('</ol>');
+    }
+    var bodyHtml = markdownToHtml(gen.body_markdown);
+    if (bodyHtml) {
+      parts.push('<h3>Draft</h3>');
+      parts.push(bodyHtml);
+    }
+    var meta = gen.meta || {};
+    var metaItems = [];
+    if (meta.focus_keyphrase) {
+      metaItems.push('<li><strong>Focus keyphrase:</strong> ' + escHtml(meta.focus_keyphrase) + '</li>');
+    }
+    if (meta.meta_description) {
+      metaItems.push('<li><strong>Meta description:</strong> ' + escHtml(meta.meta_description) + '</li>');
+    }
+    if (meta.slug) {
+      metaItems.push('<li><strong>Slug:</strong> ' + escHtml(meta.slug) + '</li>');
+    }
+    if (metaItems.length) {
+      parts.push('<h3>SEO</h3><ul>' + metaItems.join('') + '</ul>');
+    }
+    if (!parts.length) {
+      parts.push('<p>Generate completed, but no structured result fields were found.</p>');
+    }
+    setPreview(parts.join(''));
+  }
+
+  function applyGenerateResult(gen) {
+    if (!gen) return;
+    // Render into preview pane first
+    renderGeneratePreview(gen);
+
+    // Auto-fill core post fields where still empty
+    var meta = gen.meta || {};
+    var title = gen.title || meta.title || '';
+    var slug = meta.slug || '';
+    var excerpt = meta.excerpt || meta.meta_description || '';
+
+    var bodyHtml = markdownToHtml(gen.body_markdown);
+    if (bodyHtml) {
+      setEditorContent(bodyHtml);
+      if (!excerpt) {
+        excerpt = extractExcerptFromHtml(bodyHtml);
+      }
+      if (!slug && title) {
+        slug = sanitizeSlug(title);
+      }
+    }
+
+    setIfEmpty(getElTitle(), title);
+    setIfEmpty(getElExcerpt(), excerpt);
+    setIfEmpty(getElSlug(), slug);
+
+    console.info('PPA: applyGenerateResult →', {
+      titleFilled: !!title,
+      excerptFilled: !!excerpt,
+      slugFilled: !!slug
+    });
+  }
+
   // ---- Events --------------------------------------------------------------
 
   function handleRateLimit(res, which) {
@@ -593,7 +883,13 @@
     if (err && err.details && typeof err.details.retry_after === 'number') {
       retry = Math.max(0, Math.ceil(err.details.retry_after));
     }
-    var btn = which === 'preview' ? btnPreview : which === 'draft' ? btnDraft : btnPublish;
+    var btn = which === 'preview'
+      ? btnPreview
+      : which === 'draft'
+        ? btnDraft
+        : which === 'publish'
+          ? btnPublish
+          : btnGenerate;
     if (btn) btn.disabled = true;
     var sec = retry || 10;
     var t = setInterval(function(){
@@ -627,10 +923,11 @@
           if (handleRateLimit(res, 'preview')) return;
 
           var html = pickHtmlFromResponseBody(res.body);
+          var previewHtml = buildPreviewHtml(res.body, html);
           var serr = pickStructuredError(res.body);
-          var provider = pickProvider(res.body, html);
-          // Debug hook: expose last preview result for quick inspection                                         // CHANGED:
-          try { window.PPA_LAST_PREVIEW = res; } catch (e) {}                                                    // CHANGED:
+          var provider = pickProvider(res.body, previewHtml || html);
+          // Debug hook: expose last preview result for quick inspection
+          try { window.PPA_LAST_PREVIEW = res; } catch (e) {}
           console.info('PPA: provider=' + (provider || '(unknown)'));
 
           if (serr && !res.ok) {
@@ -639,12 +936,12 @@
             return;
           }
 
-          if (html && String(html).trim()) {
-            setPreview(html);
-            var pane = $('#ppa-preview-pane');                                                                  // CHANGED:
-            if (pane) { try { pane.setAttribute('data-ppa-provider', String(provider || '')); } catch (e) {} }  // CHANGED:
+          if (previewHtml && String(previewHtml).trim()) {
+            setPreview(previewHtml);
+            var pane = $('#ppa-preview-pane');
+            if (pane) { try { pane.setAttribute('data-ppa-provider', String(provider || '')); } catch (e) {} }
             clearNotice();
-            autoFillAfterPreview(res.body, html);
+            autoFillAfterPreview(res.body, previewHtml);
             return;
           }
 
@@ -693,10 +990,10 @@
             if (view) pieces.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View Draft</a>');
             if (edit) pieces.push('<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit Draft</a>');
             var linkHtml = pieces.join(' &middot; ');
-            var okHtml = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + ' — ' + linkHtml;
+            var okHtml = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + ' — ' + linkHtml;
             renderNoticeTimedHtml('success', okHtml, 8000);
           } else {
-            var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
+            var okMsg = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
             renderNoticeTimed('success', okMsg, 4000);
           }
           console.info('PPA: draft success', res);
@@ -745,6 +1042,52 @@
           console.info('PPA: publish success', res);
         });
       }, 'publish');
+    });
+  }
+
+  // Generate handler wired to ppa_generate → Django /generate/
+  if (btnGenerate) {
+    btnGenerate.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      if (clickGuard(btnGenerate)) return;
+      console.info('PPA: Generate clicked');
+
+      // Reuse preview payload so subject/brief/genre/tone/word_count all flow through.
+      var probe = buildPreviewPayload();
+      if (!String(probe.title || '').trim() &&
+          !String(probe.text || '').trim() &&
+          !String(probe.content || '').trim()) {
+        renderNotice('warn', 'Add a subject or a brief before generating.');
+        return;
+      }
+
+      withBusy(function () {
+        var payload = probe;
+        return apiPost('ppa_generate', payload).then(function (res) {
+          if (handleRateLimit(res, 'generate')) return;
+          var serr = pickStructuredError(res.body);
+          if (serr && !res.ok) {
+            var emsg = serr.message || 'Generate request failed.';
+            renderNotice('error', '[' + (serr.type || 'error') + '] ' + emsg);
+            console.info('PPA: generate structured error', serr, res);
+            return;
+          }
+
+          var gen = pickGenerateResult(res.body);
+          try { window.PPA_LAST_GENERATE = res; } catch (e) {}
+
+          if (!gen) {
+            var pretty = escHtml(JSON.stringify(res.body, null, 2));
+            setPreview('<pre class="ppa-json">' + pretty + '</pre>');
+            renderNotice('warn', 'Generate completed, but result shape was unexpected; showing JSON.');
+            console.info('PPA: generate unexpected result shape', res);
+            return;
+          }
+
+          applyGenerateResult(gen);
+          renderNoticeTimed('success', 'AI draft generated. Review, tweak, then Save Draft or Publish.', 8000);
+        });
+      }, 'generate');
     });
   }
 
