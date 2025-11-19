@@ -3,6 +3,7 @@
  * Path: inc/admin/ppa-testbed.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-16: Tag requests with X-PPA-View:"testbed" + send mode:"draft" on store for parity with Composer/WP.  // CHANGED:
  * 2025-11-15: Add optional debug headers helper + console API for /postpress-ai/debug/headers/.       // CHANGED:
  *             Uses future 'ppa_debug_headers' AJAX action via existing jsonFetch/api wrapper.          // CHANGED:
  * 2025-11-11: Normalize fallback input → {title, content|text, provider:"testbed"}; add X-Requested-With;  // CHANGED:
@@ -69,7 +70,8 @@
     'Content-Type': 'application/json',
     'X-PPA-Nonce': admin.nonce,          // CSRF/intent nonce validated server-side (admin-post/ajax)
     'X-WP-Nonce': admin.wpNonce,         // REST nonce for wp-json routes (exposed via enqueue.php)
-    'X-Requested-With': 'XMLHttpRequest' // helps some security layers detect AJAX                     // CHANGED:
+    'X-Requested-With': 'XMLHttpRequest', // helps some security layers detect AJAX                     // CHANGED:
+    'X-PPA-View': 'testbed'              // explicit view hint so Django logs can distinguish requests  // CHANGED:
   };
 
   function withTimeout(ms = 10000) {
@@ -150,12 +152,17 @@
 
   async function doStore() {
     try {
-      setStatus('Storing to Draft…', 'info');
-      const payload = parseInput();
+      setStatus('Storing draft via AI store pipeline…', 'info');                                     // CHANGED:
+      const base = parseInput();                                                                     // CHANGED:
+      const payload = {                                                                             // CHANGED:
+        ...base,                                                                                    // CHANGED:
+        provider: base && base.provider ? base.provider : 'testbed',                                // CHANGED:
+        mode: base && base.mode ? base.mode : 'draft'                                               // CHANGED:
+      };                                                                                            // CHANGED:
       if (DEBUG) console.info('Store payload:', payload);
       const data = await api('ppa_store', payload);
       setOutput(data);
-      setStatus('Draft created. Check the success notice for links in the Composer UI.', 'success');
+      setStatus('Draft created via AI store pipeline. Check Composer for links.', 'success');       // CHANGED:
     } catch (err) {
       console.error('Store failed:', err);
       setStatus(`Store failed: ${err?.message || err}`, 'error');

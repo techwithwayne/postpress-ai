@@ -4,6 +4,7 @@
  * Path: inc/admin/ppa-testbed.php
  *
  * ========= CHANGE LOG =========
+ * 2025-11-16: Clarify "Save Draft (Store)" label + note to reflect AI store pipeline behavior.   // CHANGED:
  * 2025-11-15: Add Debug Headers button wired to ppa-testbed.js / ppa_debug_headers for Django diagnostics.   // CHANGED:
  * 2025-11-10: New dedicated Testbed template. No inline assets; IDs aligned with JS;          // CHANGED:
  *             aria-live regions for status/output; minimal, translatable strings.             // CHANGED:
@@ -43,7 +44,7 @@ $current_user = wp_get_current_user();
         </button> <!-- CHANGED: -->
 
         <button id="ppa-testbed-store" class="ppa-btn ppa-btn-secondary" type="button">
-            <?php echo esc_html__( 'Save to Draft', 'postpress-ai' ); ?>
+            <?php echo esc_html__( 'Save Draft (Store)', 'postpress-ai' ); ?> <!-- CHANGED: -->
         </button> <!-- CHANGED: -->
 
         <button id="ppa-testbed-debug" class="ppa-btn ppa-btn-secondary" type="button"> <!-- CHANGED: -->
@@ -51,7 +52,7 @@ $current_user = wp_get_current_user();
         </button> <!-- CHANGED: -->
 
         <span class="ppa-note">
-            <?php echo esc_html__( 'Preview calls the AI backend. “Save to Draft” creates a WordPress draft. “Debug Headers” shows what Django actually receives.', 'postpress-ai' ); ?> <!-- CHANGED: -->
+            <?php echo esc_html__( 'Preview calls the AI backend. “Save Draft (Store)” creates a WordPress draft via the AI store pipeline. “Debug Headers” shows what Django actually receives.', 'postpress-ai' ); ?> <!-- CHANGED: -->
         </span>
     </div>
 

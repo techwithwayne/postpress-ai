@@ -166,7 +166,8 @@
 }
 
 .ppa-form-panel select:focus,
-.ppa-testbed-wrap select:focus {                                                            /* CHANGED */
+.ppa-testbed-wrap select:focus {
+  color: var(--ppa-accent);                                                         /* CHANGED */
   border-color: var(--ppa-accent);
   outline: none;
   box-shadow: 0 0 0 1px var(--ppa-accent);
@@ -178,7 +179,9 @@
   color: #fff;
   background-color: #1c1c1c;
 }
-
+.wp-core-ui .ppa-form-group select:hover {
+    color: #ff6c00;
+}
 /* Improve scrollbar contrast for option lists */
 select::-webkit-scrollbar { width: 8px; }
 select::-webkit-scrollbar-thumb { background-color: #444; border-radius: 4px; }

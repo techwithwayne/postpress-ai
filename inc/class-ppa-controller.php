@@ -7,6 +7,7 @@
  * /wp-content/plugins/postpress-ai/inc/class-ppa-controller.php
  *
  * CHANGE LOG
+ * 2025-11-16 • Add generate proxy (ppa_generate) to Django /generate/ for AssistantRunner-backed content.  // CHANGED:
  * 2025-11-16 • Add mode hint support to store proxy (draft/publish/update + update support).           // CHANGED:
  * 2025-11-15 • Add debug headers AJAX proxy (ppa_debug_headers) to call Django /debug/headers/ and surface info      // CHANGED:
  *              to the Testbed UI; reuse shared key + outgoing header filters with GET semantics.                      // CHANGED:
@@ -33,7 +34,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 	class PPA_Controller {
 
 		/**
-		 * Current endpoint label used by filters/logging (preview|store|debug_headers).                                 // CHANGED:
+		 * Current endpoint label used by filters/logging (preview|store|debug_headers|generate).                       // CHANGED:
 		 *
 		 * @var string
 		 */
@@ -46,6 +47,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			add_action( 'wp_ajax_ppa_preview',        array( __CLASS__, 'ajax_preview' ) );
 			add_action( 'wp_ajax_ppa_store',          array( __CLASS__, 'ajax_store' ) );
 			add_action( 'wp_ajax_ppa_debug_headers',  array( __CLASS__, 'ajax_debug_headers' ) );                         // CHANGED:
+			add_action( 'wp_ajax_ppa_generate',       array( __CLASS__, 'ajax_generate' ) );                              // CHANGED:
 		}
 
 		/* ─────────────────────────────────────────────────────────────────────
@@ -559,6 +561,59 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			error_log( 'PPA: store http ' . $code );                                                                    // CHANGED:
 			wp_send_json_success( $json, $code );
 		}
+
+		/**
+		 * Proxy to Django /generate/ for AI content generation.
+		 * Wraps the AssistantRunner-backed /generate endpoint into the same JSON contract.                            // CHANGED:
+		 */
+		public static function ajax_generate() {                                                                        // CHANGED:
+			self::$endpoint = 'generate';                                                                                // CHANGED:
+
+			if ( ! current_user_can( 'edit_posts' ) ) {                                                                  // CHANGED:
+				wp_send_json_error(                                                                                      // CHANGED:
+					self::error_payload(                                                                                // CHANGED:
+						'forbidden',                                                                                    // CHANGED:
+						403,                                                                                            // CHANGED:
+						array( 'reason' => 'capability_missing' )                                                       // CHANGED:
+					),                                                                                                  // CHANGED:
+					403                                                                                                 // CHANGED:
+				);                                                                                                      // CHANGED:
+			}                                                                                                            // CHANGED:
+
+			self::must_post();                                                                                           // CHANGED:
+			self::verify_nonce_or_forbid();                                                                              // CHANGED:
+
+			$payload = self::read_json_body();                                                                           // CHANGED:
+			$base    = self::django_base();                                                                              // CHANGED:
+
+			$django_url = $base . '/generate/';                                                                          // CHANGED:
+
+			$response = wp_remote_post( $django_url, self::build_args( $payload['raw'] ) );                              // CHANGED:
+
+			if ( is_wp_error( $response ) ) {                                                                            // CHANGED:
+				error_log( 'PPA: generate request_failed' );                                                            // CHANGED:
+				wp_send_json_error(                                                                                    // CHANGED:
+					self::error_payload(                                                                              // CHANGED:
+						'request_failed',                                                                            // CHANGED:
+						500,                                                                                         // CHANGED:
+						array( 'detail' => $response->get_error_message() )                                          // CHANGED:
+					),                                                                                                // CHANGED:
+					500                                                                                               // CHANGED:
+				);                                                                                                      // CHANGED:
+			}                                                                                                            // CHANGED:
+
+			$code      = (int) wp_remote_retrieve_response_code( $response );                                            // CHANGED:
+			$resp_body = (string) wp_remote_retrieve_body( $response );                                                  // CHANGED:
+
+			$json = json_decode( $resp_body, true );                                                                     // CHANGED:
+			if ( json_last_error() !== JSON_ERROR_NONE ) {                                                               // CHANGED:
+				error_log( 'PPA: generate http ' . $code . ' (non-json)' );                                            // CHANGED:
+				wp_send_json_success( array( 'raw' => $resp_body ), $code );                                           // CHANGED:
+			}                                                                                                            // CHANGED:
+
+			error_log( 'PPA: generate http ' . $code );                                                                 // CHANGED:
+			wp_send_json_success( $json, $code );                                                                       // CHANGED:
+		}                                                                                                               // CHANGED:
 
 		/**
 		 * Proxy to Django /debug/headers/ for diagnostics.
