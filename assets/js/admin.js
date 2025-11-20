@@ -787,12 +787,49 @@
     return String(cand || '');
   }
 
-  function pickStructuredError(body) {
-    if (!body || typeof body !== 'object') return null;
-    if (body.error && typeof body.error === 'object') return body.error;
-    if (body.data && body.data.error && typeof body.data.error === 'object') return body.data.error;
-    return null;
-  }
+  function pickStructuredError(body) {                                        // CHANGED:
+    if (!body || typeof body !== 'object') return null;                       // CHANGED:
+
+    // Direct object error { type, message, code, meta, ... }                 // CHANGED:
+    if (body.error && typeof body.error === 'object') return body.error;     // CHANGED:
+    if (body.data && body.data.error && typeof body.data.error === 'object') // CHANGED:
+      return body.data.error;                                                // CHANGED:
+
+    // String error + optional meta/detail → normalize into object            // CHANGED:
+    var errStr  = '';                                                         // CHANGED:
+    var meta    = null;                                                       // CHANGED:
+    var typeStr = '';                                                         // CHANGED:
+
+    if (typeof body.error === 'string') {                                     // CHANGED:
+      errStr  = body.error;                                                  // CHANGED:
+      typeStr = body.error;                                                  // CHANGED:
+      if (body.meta && typeof body.meta === 'object') meta = body.meta;      // CHANGED:
+    } else if (body.data && typeof body.data.error === 'string') {           // CHANGED:
+      errStr  = body.data.error;                                             // CHANGED:
+      typeStr = body.data.error;                                             // CHANGED:
+      if (body.data.meta && typeof body.data.meta === 'object')              // CHANGED:
+        meta = body.data.meta;                                               // CHANGED:
+    }                                                                         // CHANGED:
+
+    if (!errStr && !meta) return null;                                       // CHANGED:
+
+    var msg = '';                                                             // CHANGED:
+    if (meta && typeof meta.detail === 'string') msg = meta.detail;          // CHANGED:
+    if (!msg) msg = errStr;                                                  // CHANGED:
+
+    var code = 0;                                                             // CHANGED:
+    if (meta && typeof meta.code !== 'undefined') code = meta.code;          // CHANGED:
+    else if (typeof body.code !== 'undefined') code = body.code;             // CHANGED:
+    else if (body.data && typeof body.data.code !== 'undefined')             // CHANGED:
+      code = body.data.code;                                                 // CHANGED:
+
+    return {                                                                  // CHANGED:
+      type: typeStr || 'remote_error',                                        // CHANGED:
+      message: msg,                                                           // CHANGED:
+      code: code,                                                             // CHANGED:
+      meta: meta || {}                                                        // CHANGED:
+    };                                                                        // CHANGED:
+  }   
 
   function pickProvider(body, html) {
     if (body && typeof body === 'object') {
@@ -1139,17 +1176,21 @@
         return;
       }
 
-      withBusy(function () {
+       withBusy(function () {
         var payload = probe;
         return apiPost('ppa_generate', payload).then(function (res) {
           if (handleRateLimit(res, 'generate')) return;
-          var serr = pickStructuredError(res.body);
-          if (serr && !res.ok) {
-            var emsg = serr.message || 'Generate request failed.';
-            renderNotice('error', '[' + (serr.type || 'error') + '] ' + emsg);
-            console.info('PPA: generate structured error', serr, res);
-            return;
-          }
+          var serr = pickStructuredError(res.body);                                           // CHANGED:
+          if (!res.ok) {                                                                      // CHANGED:
+            var emsg  = (serr && serr.message) || pickMessage(res.body) || 'Generate request failed.'; // CHANGED:
+            var etype = (serr && serr.type) || 'error';                                       // CHANGED:
+            renderNotice(
+              'error',
+              'Generate failed (' + res.status + ') [' + etype + ']: ' + emsg
+            );                                                                               // CHANGED:
+            console.info('PPA: generate failed', { error: serr, response: res });            // CHANGED:
+            return;                                                                           // CHANGED:
+          }                                                                                   // CHANGED:
 
           var gen = pickGenerateResult(res.body);
           try { window.PPA_LAST_GENERATE = res; } catch (e) {}
