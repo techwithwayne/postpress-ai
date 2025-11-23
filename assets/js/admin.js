@@ -459,7 +459,7 @@
     return payload;
   }
 
-    function hasTitleOrSubject() {
+  function hasTitleOrSubject() {
     var subjectEl = $('#ppa-subject');
     var titleEl   = $('#ppa-title') || $('#title');
 
@@ -468,7 +468,6 @@
 
     return !!(subject || title);
   }
-
 
   // ---- Toolbar Notices & Busy State ---------------------------------------
 
@@ -487,34 +486,34 @@
     }                                                                                 // CHANGED:
   })();                                                                               // CHANGED:
 
-    // NEW: ensure toolbar notice exists and sits above the buttons             // CHANGED:
-   var btnPreview  = $('#ppa-preview');
-  var btnDraft    = $('#ppa-draft');
-  var btnPublish  = $('#ppa-publish');
-  var btnGenerate = $('#ppa-generate'); // CHANGED:
+  // NEW: ensure toolbar notice exists and sits above the buttons             // CHANGED:
+  var btnPreview2  = $('#ppa-preview');
+  var btnDraft2    = $('#ppa-draft');
+  var btnPublish2  = $('#ppa-publish');
+  var btnGenerate2 = $('#ppa-generate'); // CHANGED:
 
   // Ensure we always have a notice container above the main buttons           // CHANGED:
   function noticeContainer() {                                                // CHANGED:
     var el = $('#ppa-toolbar-msg');                                           // CHANGED:
     if (el) return el;                                                        // CHANGED:
-                                                                              // CHANGED:
+
     // Try to anchor it in the same row as the primary buttons                // CHANGED:
     var host = null;                                                          // CHANGED:
-    if (btnGenerate && btnGenerate.parentNode) {                              // CHANGED:
-      host = btnGenerate.parentNode;                                          // CHANGED:
-    } else if (btnPreview && btnPreview.parentNode) {                         // CHANGED:
-      host = btnPreview.parentNode;                                           // CHANGED:
-    } else if (btnDraft && btnDraft.parentNode) {                             // CHANGED:
-      host = btnDraft.parentNode;                                             // CHANGED:
-    } else if (btnPublish && btnPublish.parentNode) {                         // CHANGED:
-      host = btnPublish.parentNode;                                           // CHANGED:
-    }                                                                         // CHANGED:
-                                                                              // CHANGED:
+    if (btnGenerate2 && btnGenerate2.parentNode) {                              // CHANGED:
+      host = btnGenerate2.parentNode;                                          // CHANGED:
+    } else if (btnPreview2 && btnPreview2.parentNode) {                         // CHANGED:
+      host = btnPreview2.parentNode;                                           // CHANGED:
+    } else if (btnDraft2 && btnDraft2.parentNode) {                             // CHANGED:
+      host = btnDraft2.parentNode;                                             // CHANGED:
+    } else if (btnPublish2 && btnPublish2.parentNode) {                         // CHANGED:
+      host = btnPublish2.parentNode;                                           // CHANGED:
+    }
+
     if (!host) {                                                              // CHANGED:
       console.info('PPA: noticeContainer could not find a host for toolbar msg'); // CHANGED:
       return null;                                                            // CHANGED:
-    }                                                                         // CHANGED:
-                                                                              // CHANGED:
+    }
+
     el = document.createElement('div');                                       // CHANGED:
     el.id = 'ppa-toolbar-msg';                                                // CHANGED:
     el.className = 'ppa-notice';                                              // CHANGED:
@@ -522,41 +521,43 @@
       el.setAttribute('role', 'status');                                      // CHANGED:
       el.setAttribute('aria-live', 'polite');                                 // CHANGED:
     } catch (e) {}                                                            // CHANGED:
-                                                                              // CHANGED:
+
     // Insert *above* the buttons                                             // CHANGED:
     host.insertBefore(el, host.firstChild);                                   // CHANGED:
     console.info('PPA: created #ppa-toolbar-msg above buttons');              // CHANGED:
     return el;                                                                // CHANGED:
-  }                                                                           // CHANGED:
+  }
 
-  function renderNotice(type, message) {                                      // CHANGED:
-    var el = noticeContainer();                                               // CHANGED:
-    var text = String(message == null ? '' : message);                        // CHANGED:
-    console.info('PPA: renderNotice', { type: type, message: text, hasEl: !!el }); // CHANGED:
-    if (!el) {                                                                // CHANGED:
-      // Hard fallback so you ALWAYS see something during debugging           // CHANGED:
-      if (type === 'error' || type === 'warn') {                              // CHANGED:
-        alert(text);                                                          // CHANGED:
-      } else {                                                                // CHANGED:
-        console.info('PPA:', type + ':', text);                               // CHANGED:
-      }                                                                       // CHANGED:
-      return;                                                                 // CHANGED:
-    }                                                                         // CHANGED:
-    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;               // CHANGED:
-    el.className = clsBase + ' ' + clsType;                                   // CHANGED:
-    el.textContent = text;                                                    // CHANGED:
-                                                                              // CHANGED:
-    // If for some reason it's still visually hidden, alert as a backup       // CHANGED:
-    try {                                                                     // CHANGED:
-      var visible = el.offsetWidth > 0 && el.offsetHeight > 0;                // CHANGED:
-      if (!visible && (type === 'error' || type === 'warn')) {                // CHANGED:
-        alert(text);                                                          // CHANGED:
-      }                                                                       // CHANGED:
-    } catch (e) {}                                                            // CHANGED:
-  }                                                                           // CHANGED:
+  function renderNotice(type, message) {
+    var el = noticeContainer();
+    var text = String(message == null ? '' : message);
+    console.info('PPA: renderNotice', { type: type, message: text, hasEl: !!el });
+    if (!el) {
+      // Hard fallback so you ALWAYS see something during debugging
+      if (type === 'error' || type === 'warn') {
+        alert(text);
+      } else {
+        console.info('PPA:', type + ':', text);
+      }
+      return;
+    }
+    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;
+    el.className = clsBase + ' ' + clsType;
+    el.textContent = text;
 
+    // If for some reason it's still visually hidden, alert as a backup
+    try {
+      var visible = el.offsetWidth > 0 && el.offsetHeight > 0;
+      if (!visible && (type === 'error' || type === 'warn')) {
+        alert(text);
+      }
+    } catch (e) {}
+  }
 
-  function renderNoticeTimed(type, message, ms) { renderNotice(type, message); if (ms && ms > 0) setTimeout(clearNotice, ms); }
+  function renderNoticeTimed(type, message, ms) {
+    renderNotice(type, message);
+    if (ms && ms > 0) setTimeout(clearNotice, ms);
+  }
 
   function renderNoticeHtml(type, html) {
     var el = noticeContainer();
@@ -566,7 +567,10 @@
     el.innerHTML = String(html || '');
   }
 
-  function renderNoticeTimedHtml(type, html, ms) { renderNoticeHtml(type, html); if (ms && ms > 0) setTimeout(clearNotice, ms); }
+  function renderNoticeTimedHtml(type, html, ms) {
+    renderNoticeHtml(type, html);
+    if (ms && ms > 0) setTimeout(clearNotice, ms);
+  }
 
   function clearNotice() {
     var el = noticeContainer();
@@ -787,49 +791,49 @@
     return String(cand || '');
   }
 
-  function pickStructuredError(body) {                                        // CHANGED:
-    if (!body || typeof body !== 'object') return null;                       // CHANGED:
+  function pickStructuredError(body) {
+    if (!body || typeof body !== 'object') return null;
 
-    // Direct object error { type, message, code, meta, ... }                 // CHANGED:
-    if (body.error && typeof body.error === 'object') return body.error;     // CHANGED:
-    if (body.data && body.data.error && typeof body.data.error === 'object') // CHANGED:
-      return body.data.error;                                                // CHANGED:
+    // Direct object error { type, message, code, meta, ... }
+    if (body.error && typeof body.error === 'object') return body.error;
+    if (body.data && body.data.error && typeof body.data.error === 'object')
+      return body.data.error;
 
-    // String error + optional meta/detail → normalize into object            // CHANGED:
-    var errStr  = '';                                                         // CHANGED:
-    var meta    = null;                                                       // CHANGED:
-    var typeStr = '';                                                         // CHANGED:
+    // String error + optional meta/detail → normalize into object
+    var errStr  = '';
+    var meta    = null;
+    var typeStr = '';
 
-    if (typeof body.error === 'string') {                                     // CHANGED:
-      errStr  = body.error;                                                  // CHANGED:
-      typeStr = body.error;                                                  // CHANGED:
-      if (body.meta && typeof body.meta === 'object') meta = body.meta;      // CHANGED:
-    } else if (body.data && typeof body.data.error === 'string') {           // CHANGED:
-      errStr  = body.data.error;                                             // CHANGED:
-      typeStr = body.data.error;                                             // CHANGED:
-      if (body.data.meta && typeof body.data.meta === 'object')              // CHANGED:
-        meta = body.data.meta;                                               // CHANGED:
-    }                                                                         // CHANGED:
+    if (typeof body.error === 'string') {
+      errStr  = body.error;
+      typeStr = body.error;
+      if (body.meta && typeof body.meta === 'object') meta = body.meta;
+    } else if (body.data && typeof body.data.error === 'string') {
+      errStr  = body.data.error;
+      typeStr = body.data.error;
+      if (body.data.meta && typeof body.data.meta === 'object')
+        meta = body.data.meta;
+    }
 
-    if (!errStr && !meta) return null;                                       // CHANGED:
+    if (!errStr && !meta) return null;
 
-    var msg = '';                                                             // CHANGED:
-    if (meta && typeof meta.detail === 'string') msg = meta.detail;          // CHANGED:
-    if (!msg) msg = errStr;                                                  // CHANGED:
+    var msg = '';
+    if (meta && typeof meta.detail === 'string') msg = meta.detail;
+    if (!msg) msg = errStr;
 
-    var code = 0;                                                             // CHANGED:
-    if (meta && typeof meta.code !== 'undefined') code = meta.code;          // CHANGED:
-    else if (typeof body.code !== 'undefined') code = body.code;             // CHANGED:
-    else if (body.data && typeof body.data.code !== 'undefined')             // CHANGED:
-      code = body.data.code;                                                 // CHANGED:
+    var code = 0;
+    if (meta && typeof meta.code !== 'undefined') code = meta.code;
+    else if (typeof body.code !== 'undefined') code = body.code;
+    else if (body.data && typeof body.data.code !== 'undefined')
+      code = body.data.code;
 
-    return {                                                                  // CHANGED:
-      type: typeStr || 'remote_error',                                        // CHANGED:
-      message: msg,                                                           // CHANGED:
-      code: code,                                                             // CHANGED:
-      meta: meta || {}                                                        // CHANGED:
-    };                                                                        // CHANGED:
-  }   
+    return {
+      type: typeStr || 'remote_error',
+      message: msg,
+      code: code,
+      meta: meta || {}
+    };
+  }
 
   function pickProvider(body, html) {
     if (body && typeof body === 'object') {
@@ -1057,7 +1061,7 @@
     });
   }
 
-    if (btnDraft) {
+  if (btnDraft) {
     btnDraft.addEventListener('click', function (ev) {
       ev.preventDefault();
       if (clickGuard(btnDraft)) return;
@@ -1078,7 +1082,6 @@
         return;
       }
 
-
       withBusy(function () {
         var payload = probe; // use built probe (already has preview fallback)
         return apiPost('ppa_store', payload).then(function (res) {
@@ -1094,12 +1097,25 @@
             return;
           }
 
-          if (view || edit) {
+          // NEW: auto-redirect to the WordPress editor when we have an edit_link
+          if (edit) {
+            var redirectMsg = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + ' Redirecting you to the editor…';
+            renderNoticeHtml('success', redirectMsg);
+            console.info('PPA: draft success, redirecting to editor', { id: pid, edit: edit });
+            setTimeout(function () {
+              try {
+                window.location.href = edit;
+              } catch (e) {
+                console.info('PPA: draft redirect failed; keeping Composer open', e);
+              }
+            }, 800);
+            return;
+          }
+
+          if (view) {
             var pieces = [];
-            if (view) pieces.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View Draft</a>');
-            if (edit) pieces.push('<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit Draft</a>');
-            var linkHtml = pieces.join(' &middot; ');
-            var okHtml = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + ' — ' + linkHtml;
+            pieces.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View Draft</a>');
+            var okHtml = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + ' — ' + pieces.join(' &middot; ');
             renderNoticeTimedHtml('success', okHtml, 8000);
           } else {
             var okMsg = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
@@ -1176,21 +1192,21 @@
         return;
       }
 
-       withBusy(function () {
+      withBusy(function () {
         var payload = probe;
         return apiPost('ppa_generate', payload).then(function (res) {
           if (handleRateLimit(res, 'generate')) return;
-          var serr = pickStructuredError(res.body);                                           // CHANGED:
-          if (!res.ok) {                                                                      // CHANGED:
-            var emsg  = (serr && serr.message) || pickMessage(res.body) || 'Generate request failed.'; // CHANGED:
-            var etype = (serr && serr.type) || 'error';                                       // CHANGED:
+          var serr = pickStructuredError(res.body);
+          if (!res.ok) {
+            var emsg  = (serr && serr.message) || pickMessage(res.body) || 'Generate request failed.';
+            var etype = (serr && serr.type) || 'error';
             renderNotice(
               'error',
               'Generate failed (' + res.status + ') [' + etype + ']: ' + emsg
-            );                                                                               // CHANGED:
-            console.info('PPA: generate failed', { error: serr, response: res });            // CHANGED:
-            return;                                                                           // CHANGED:
-          }                                                                                   // CHANGED:
+            );
+            console.info('PPA: generate failed', { error: serr, response: res });
+            return;
+          }
 
           var gen = pickGenerateResult(res.body);
           try { window.PPA_LAST_GENERATE = res; } catch (e) {}
