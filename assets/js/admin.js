@@ -3,6 +3,7 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-11-18.7: Clean AI-generated titles to strip trailing ellipsis/punctuation before filling WP title. // CHANGED:
  * 2025-11-18.6: Hide Preview button in Composer and rename Generate Draft → Generate Preview.         // CHANGED:
  * 2025-11-18.5: Preview now builds HTML from AI title + body/markdown/text instead of only raw html; // CHANGED:
  *               JSON diagnostic fallback kept only as last resort.                                   // CHANGED:
@@ -65,7 +66,7 @@
     }
   })();
 
-  var PPA_JS_VER = 'admin.v2025-11-18.6'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-11-18.7'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -112,6 +113,20 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
+
+  // Clean AI-generated titles so we never leave trailing ellipsis or dangling punctuation. // CHANGED:
+  function ppaCleanTitle(raw) { // CHANGED:
+    if (!raw) return ''; // CHANGED:
+    var t = String(raw); // CHANGED:
+
+    // Strip trailing "..." with optional surrounding whitespace.                  // CHANGED:
+    t = t.replace(/\s*\.\.\.\s*$/, '');                                           // CHANGED:
+
+    // Strip dangling punctuation or dashes at the very end (":", "-", "–", "—"). // CHANGED:
+    t = t.replace(/\s*[-:–—·|]+\s*$/, '');                                        // CHANGED:
+
+    return t.trim();                                                              // CHANGED:
+  }                                                                               // CHANGED:
 
   // Expanded nonce fallback: data-attr → PPA.nonce → ppaAdmin.nonce → #ppa-nonce
   function getNonce() {
@@ -867,11 +882,15 @@
       return '';
     }
 
-    var title = pickField(body, 'title');
+    var rawTitle = pickField(body, 'title'); // CHANGED:
     var excerpt = pickField(body, 'excerpt');
     var slug = pickField(body, 'slug');
 
+    var title = rawTitle; // CHANGED:
+
     if (!title) title = extractTitleFromHtml(html);
+    // Clean trailing ellipsis/punctuation from the chosen title             // CHANGED:
+    title = ppaCleanTitle(title);                                            // CHANGED:
     if (!excerpt) excerpt = extractExcerptFromHtml(html);
     if (!slug && title) slug = sanitizeSlug(title);
 
@@ -954,7 +973,8 @@
 
     // Auto-fill core post fields where still empty
     var meta = gen.meta || {};
-    var title = gen.title || meta.title || '';
+    var rawTitle = gen.title || meta.title || '';          // CHANGED:
+    var title = ppaCleanTitle(rawTitle);                   // CHANGED:
     var slug = meta.slug || '';
     var excerpt = meta.excerpt || meta.meta_description || '';
 
@@ -1097,7 +1117,7 @@
             return;
           }
 
-          // NEW: auto-redirect to the WordPress editor when we have an edit_link
+          // Auto-redirect to the WordPress editor when we have an edit_link
           if (edit) {
             var redirectMsg = 'Draft saved in WordPress.' + (pid ? ' ID: ' + pid : '') + ' Redirecting you to the editor…';
             renderNoticeHtml('success', redirectMsg);
