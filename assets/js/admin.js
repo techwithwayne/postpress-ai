@@ -3,6 +3,7 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-12-09.1: Expose selected helpers on window.PPAAdmin for safe future modularization (no behavior change). // CHANGED:
  * 2025-11-18.7: Clean AI-generated titles to strip trailing ellipsis/punctuation before filling WP title. // CHANGED:
  * 2025-11-18.6: Hide Preview button in Composer and rename Generate Draft → Generate Preview.         // CHANGED:
  * 2025-11-18.5: Preview now builds HTML from AI title + body/markdown/text instead of only raw html; // CHANGED:
@@ -1245,6 +1246,19 @@
       }, 'generate');
     });
   }
+
+  // Expose a small, read-only helper surface for future modularization.       // CHANGED:
+  if (!window.PPAAdmin) {                                                     // CHANGED:
+    window.PPAAdmin = {                                                       // CHANGED:
+      markdownToHtml: markdownToHtml,                                         // CHANGED:
+      buildPreviewPayload: buildPreviewPayload,                               // CHANGED:
+      buildStorePayload: buildStorePayload,                                   // CHANGED:
+      apiPost: apiPost,                                                       // CHANGED:
+      pickGenerateResult: pickGenerateResult,                                 // CHANGED:
+      renderGeneratePreview: renderGeneratePreview,                           // CHANGED:
+      applyGenerateResult: applyGenerateResult                                // CHANGED:
+    };                                                                        // CHANGED:
+  }                                                                           // CHANGED:
 
   console.info('PPA: admin.js initialized →', PPA_JS_VER);
 })();
