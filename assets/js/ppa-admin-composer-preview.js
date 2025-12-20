@@ -11,6 +11,9 @@
  * - Exposes: window.PPAAdminModules.composerPreview
  * - Does NOT assume specific DOM IDs. Caller can pass a container selector/element.
  * - If no container is found, it fails safely (returns { ok:false }).
+ *
+ * ========= CHANGE LOG =========
+ * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; add module ver; add defensive generateView.renderPreview checks; no behavior change. // CHANGED:
  */
 
 (function (window, document) {
@@ -19,9 +22,10 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  if (window.PPAAdminModules.composerPreview) {
-    return;
-  }
+  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
+  // Late scripts may pre-create namespace objects; we must still attach functions.
+  var MOD_VER = "ppa-admin-composer-preview.v2025-12-20.2"; // CHANGED:
+  var composerPreview = window.PPAAdminModules.composerPreview || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function toStr(val) {
@@ -111,11 +115,13 @@
       return { ok: false, error: "preview_container_not_found" };
     }
 
-    if (!window.PPAAdminModules.generateView) {
-      return { ok: false, error: "generate_view_module_missing" };
-    }
+    // CHANGED: Be stricter — require generateView.renderPreview to exist.
+    var gv = window.PPAAdminModules.generateView; // CHANGED:
+    if (!gv || typeof gv.renderPreview !== "function") { // CHANGED:
+      return { ok: false, error: "generate_view_module_missing" }; // CHANGED:
+    } // CHANGED:
 
-    var rendered = window.PPAAdminModules.generateView.renderPreview(container, result, {
+    var rendered = gv.renderPreview(container, result, {
       allowMarked: !!options.allowMarked,
       mode: options.mode || "replace"
     });
@@ -147,14 +153,16 @@
     return { ok: true };
   }
 
-  // ---- Public export ---------------------------------------------------------
-  window.PPAAdminModules.composerPreview = {
-    resolvePreviewContainer: resolvePreviewContainer,
-    render: render,
-    clear: clear,
+  // ---- Public export (merge) -------------------------------------------------
+  composerPreview.ver = MOD_VER; // CHANGED:
+  composerPreview.resolvePreviewContainer = resolvePreviewContainer; // CHANGED:
+  composerPreview.render = render; // CHANGED:
+  composerPreview.clear = clear; // CHANGED:
 
-    // low-level helper (kept for future wiring)
-    _findPreviewContainerFallback: findPreviewContainerFallback
-  };
+  // low-level helper (kept for future wiring)
+  composerPreview._findPreviewContainerFallback = findPreviewContainerFallback; // CHANGED:
+  composerPreview._toStr = toStr; // CHANGED: exposed for future debug parity
+
+  window.PPAAdminModules.composerPreview = composerPreview; // CHANGED:
 
 })(window, document);
