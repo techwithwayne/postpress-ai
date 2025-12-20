@@ -8,6 +8,7 @@
  * - Avoid touching admin.js until we have stable modules in place
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.3: Prefer PPAAdmin.core helpers (getAjaxUrl/getNonce) when present for single-source behavior; keep linked apiPost getter for strict equality + safe cutover; remain merge-safe. // CHANGED:
  * 2025-12-20.2: Do not overwrite PPAAdminModules.api; expose apiPost as a linked getter to window.PPAAdmin.apiPost for strict equality + safe cutover. // CHANGED:
  * 2025-12-20.1: Create Admin API module with apiPost(), nonce resolution, and JSON parsing helpers. // CHANGED:
  */
@@ -18,14 +19,30 @@
   // Namespace for modular admin JS (avoid touching window.PPAAdmin until admin.js is refactored) // CHANGED:
   if (!win.PPAAdminModules) { win.PPAAdminModules = {}; }                                        // CHANGED:
 
-  var MOD_VER = 'ppa-admin-api.v2025-12-20.2'; // CHANGED:
+  var MOD_VER = 'ppa-admin-api.v2025-12-20.3'; // CHANGED:
 
   // IMPORTANT: Do NOT overwrite the module object. Merge into existing to avoid late-script clobbering. // CHANGED:
   var api = win.PPAAdminModules.api || {}; // CHANGED:
 
   // --- Internal helpers ------------------------------------------------------
 
+  function getCore() { // CHANGED:
+    try { // CHANGED:
+      if (win.PPAAdmin && win.PPAAdmin.core && typeof win.PPAAdmin.core === 'object') return win.PPAAdmin.core; // CHANGED:
+    } catch (e) {} // CHANGED:
+    return null; // CHANGED:
+  } // CHANGED:
+
   function getAjaxUrl() { // CHANGED:
+    // CHANGED: Prefer PPAAdmin.core.getAjaxUrl() when present (single source of truth).
+    try { // CHANGED:
+      var core = getCore(); // CHANGED:
+      if (core && typeof core.getAjaxUrl === 'function') { // CHANGED:
+        var u = core.getAjaxUrl(); // CHANGED:
+        if (u) return u; // CHANGED:
+      } // CHANGED:
+    } catch (e0) {} // CHANGED:
+
     if (win.PPA && win.PPA.ajaxUrl) return win.PPA.ajaxUrl;                                       // CHANGED:
     if (win.PPA && win.PPA.ajax) return win.PPA.ajax;                                             // CHANGED:
     if (win.ppaAdmin && win.ppaAdmin.ajaxurl) return win.ppaAdmin.ajaxurl;                         // CHANGED:
@@ -35,20 +52,29 @@
 
   // Prefer the admin-ajax nonce localized via wp_localize_script (ppaAdmin.nonce)                // CHANGED:
   function getNonce() { // CHANGED:
+    // CHANGED: Prefer PPAAdmin.core.getNonce() when present (single source of truth).
+    try { // CHANGED:
+      var core = getCore(); // CHANGED:
+      if (core && typeof core.getNonce === 'function') { // CHANGED:
+        var n0 = core.getNonce(); // CHANGED:
+        if (n0) return String(n0).trim(); // CHANGED:
+      } // CHANGED:
+    } catch (e00) {} // CHANGED:
+
     if (win.ppaAdmin && win.ppaAdmin.nonce) return String(win.ppaAdmin.nonce).trim();              // CHANGED:
 
     // Fallback: allow template-provided nonce via data attr (ONLY as fallback)                   // CHANGED:
     var root = doc.getElementById('ppa-composer');                                                 // CHANGED:
     if (root) {                                                                                    // CHANGED:
-      var dn = root.getAttribute('data-ppa-nonce');                                                 // CHANGED:
-      if (dn) return String(dn).trim();                                                             // CHANGED:
-    }                                                                                               // CHANGED:
+      var dn = root.getAttribute('data-ppa-nonce');                                                // CHANGED:
+      if (dn) return String(dn).trim();                                                            // CHANGED:
+    }                                                                                              // CHANGED:
 
     // Legacy fallbacks (rare)                                                                     // CHANGED:
-    if (win.PPA && win.PPA.nonce) return String(win.PPA.nonce).trim();                              // CHANGED:
-    var el = doc.getElementById('ppa-nonce');                                                       // CHANGED:
-    if (el) return String(el.value || '').trim();                                                   // CHANGED:
-    return '';                                                                                      // CHANGED:
+    if (win.PPA && win.PPA.nonce) return String(win.PPA.nonce).trim();                             // CHANGED:
+    var el = doc.getElementById('ppa-nonce');                                                      // CHANGED:
+    if (el) return String(el.value || '').trim();                                                  // CHANGED:
+    return '';                                                                                     // CHANGED:
   } // CHANGED:
 
   function jsonTryParse(text) { // CHANGED:
@@ -63,9 +89,9 @@
   function getViewTag() { // CHANGED:
     var view = 'composer';                                                                          // CHANGED:
     try {                                                                                           // CHANGED:
-      var root = doc.getElementById('ppa-composer');                                                // CHANGED:
-      if (root && root.getAttribute('data-ppa-view')) {                                             // CHANGED:
-        view = String(root.getAttribute('data-ppa-view') || 'composer');                            // CHANGED:
+      var root2 = doc.getElementById('ppa-composer');                                               // CHANGED:
+      if (root2 && root2.getAttribute('data-ppa-view')) {                                          // CHANGED:
+        view = String(root2.getAttribute('data-ppa-view') || 'composer');                           // CHANGED:
       }                                                                                             // CHANGED:
     } catch (e) {}                                                                                  // CHANGED:
     return view;                                                                                    // CHANGED:
@@ -95,20 +121,20 @@
       for (var k in options.headers) {                                                              // CHANGED:
         if (Object.prototype.hasOwnProperty.call(options.headers, k)) {                             // CHANGED:
           headers[k] = options.headers[k];                                                          // CHANGED:
-        }                                                                                            // CHANGED:
-      }                                                                                              // CHANGED:
-    }                                                                                                // CHANGED:
+        }                                                                                           // CHANGED:
+      }                                                                                             // CHANGED:
+    }                                                                                               // CHANGED:
 
-    return win.fetch(endpoint, {                                                                     // CHANGED:
+    return win.fetch(endpoint, {                                                                    // CHANGED:
       method: 'POST',                                                                               // CHANGED:
       headers: headers,                                                                             // CHANGED:
-      body: JSON.stringify(data || {}),                                                              // CHANGED:
-      credentials: 'same-origin'                                                                     // CHANGED:
+      body: JSON.stringify(data || {}),                                                             // CHANGED:
+      credentials: 'same-origin'                                                                    // CHANGED:
     })                                                                                              // CHANGED:
     .then(function (res) {                                                                          // CHANGED:
-      var ct = (res.headers.get('content-type') || '').toLowerCase();                                // CHANGED:
-      return res.text().then(function (text) {                                                       // CHANGED:
-        var body = jsonTryParse(text);                                                               // CHANGED:
+      var ct = (res.headers.get('content-type') || '').toLowerCase();                               // CHANGED:
+      return res.text().then(function (text) {                                                      // CHANGED:
+        var body = jsonTryParse(text);                                                              // CHANGED:
         return {                                                                                    // CHANGED:
           ok: res.ok,                                                                               // CHANGED:
           status: res.status,                                                                       // CHANGED:
@@ -135,9 +161,9 @@
   // If admin.js has already defined window.PPAAdmin.apiPost, we *use that exact function* so strict equality passes. // CHANGED:
   function resolveApiPostRef() { // CHANGED:
     try {                                                                                            // CHANGED:
-      if (win.PPAAdmin && typeof win.PPAAdmin.apiPost === 'function') return win.PPAAdmin.apiPost;   // CHANGED:
+      if (win.PPAAdmin && typeof win.PPAAdmin.apiPost === 'function') return win.PPAAdmin.apiPost;  // CHANGED:
     } catch (e) {}                                                                                   // CHANGED:
-    return apiPostImpl;                                                                              // CHANGED:
+    return apiPostImpl;                                                                             // CHANGED:
   } // CHANGED:
 
   // Export module surface (merged into existing object; no behavior change intended).              // CHANGED:
@@ -160,13 +186,13 @@
         if (typeof fn === 'function') {                                                              // CHANGED:
           apiPostImpl = fn;                                                                          // CHANGED:
           // Keep admin namespace aligned if present (helps during transitional wiring).             // CHANGED:
-          try {                                                                                       // CHANGED:
+          try {                                                                                      // CHANGED:
             if (win.PPAAdmin && typeof win.PPAAdmin === 'object') { win.PPAAdmin.apiPost = fn; }     // CHANGED:
-          } catch (e) {}                                                                              // CHANGED:
-        }                                                                                             // CHANGED:
-      }                                                                                               // CHANGED:
+          } catch (e2) {}                                                                            // CHANGED:
+        }                                                                                            // CHANGED:
+      }                                                                                              // CHANGED:
     });                                                                                              // CHANGED:
-  } catch (e) {                                                                                      // CHANGED:
+  } catch (e3) {                                                                                     // CHANGED:
     // Fallback: direct assignment (older environments). Equality may depend on load order.          // CHANGED:
     api.apiPost = resolveApiPostRef();                                                               // CHANGED:
   }                                                                                                  // CHANGED:
