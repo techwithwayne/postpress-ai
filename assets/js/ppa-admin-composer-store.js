@@ -16,6 +16,9 @@
  *
  * Output:
  * - Normalizes the transport + WP envelope (when present) into a stable object.
+ *
+ * ========= CHANGE LOG =========
+ * 2025-12-20.2: Merge export (no early return); preserve unknown keys in fallback payload build; strip common *El helper keys from outgoing payload to avoid leaking DOM refs/selectors. // CHANGED:
  */
 
 (function (window, document) {
@@ -24,9 +27,10 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  if (window.PPAAdminModules.composerStore) {
-    return;
-  }
+  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
+  // Late scripts may pre-create namespace objects; we must still attach functions.
+  var MOD_VER = "ppa-admin-composer-store.v2025-12-20.2"; // CHANGED:
+  var composerStore = window.PPAAdminModules.composerStore || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function hasOwn(obj, key) {
@@ -36,6 +40,18 @@
   function isObject(val) {
     return !!val && (typeof val === "object");
   }
+
+  // CHANGED: shallow clone helper to preserve unknown keys (no stripping).
+  function shallowClone(obj) { // CHANGED:
+    var out = {}; // CHANGED:
+    if (!obj || typeof obj !== "object") return out; // CHANGED:
+    for (var k in obj) { // CHANGED:
+      if (Object.prototype.hasOwnProperty.call(obj, k)) { // CHANGED:
+        out[k] = obj[k]; // CHANGED:
+      } // CHANGED:
+    } // CHANGED:
+    return out; // CHANGED:
+  } // CHANGED:
 
   // ---- WP ajax envelope helpers ---------------------------------------------
   function unwrapWpAjax(body) {
@@ -62,14 +78,48 @@
     var payloads = window.PPAAdminModules.payloads;
 
     if (payloads && typeof payloads.buildStorePayload === "function") {
-      return payloads.buildStorePayload(input);
+      var built = payloads.buildStorePayload(input); // CHANGED:
+
+      // CHANGED: Never leak convenience DOM keys into outgoing payload.
+      // Payload modules preserve unknown keys during cutover; we must strip DOM refs/selectors.
+      if (built && typeof built === "object") { // CHANGED:
+        // Common patterns we may introduce later (safe to delete if absent).
+        try { delete built.subjectEl; } catch (e1) {}  // CHANGED:
+        try { delete built.briefEl; } catch (e2) {}    // CHANGED:
+        try { delete built.contentEl; } catch (e3) {}  // CHANGED:
+
+        try { delete built.postIdEl; } catch (e4) {}   // CHANGED:
+        try { delete built.statusEl; } catch (e5) {}   // CHANGED:
+        try { delete built.titleEl; } catch (e6) {}    // CHANGED:
+        try { delete built.excerptEl; } catch (e7) {}  // CHANGED:
+        try { delete built.slugEl; } catch (e8) {}     // CHANGED:
+        try { delete built.metaEl; } catch (e9) {}     // CHANGED:
+      } // CHANGED:
+
+      return built; // CHANGED:
     }
 
     // Minimal fallback (do not enforce required-ness here)
     input = input || {};
+
+    // CHANGED: Preserve unknown keys in fallback mode too (no stripping).
+    var payload = shallowClone(input); // CHANGED:
+
+    // CHANGED: Strip DOM helper keys if present.
+    try { delete payload.subjectEl; } catch (e10) {} // CHANGED:
+    try { delete payload.briefEl; } catch (e11) {}   // CHANGED:
+    try { delete payload.contentEl; } catch (e12) {} // CHANGED:
+
+    try { delete payload.postIdEl; } catch (e13) {}  // CHANGED:
+    try { delete payload.statusEl; } catch (e14) {}  // CHANGED:
+    try { delete payload.titleEl; } catch (e15) {}   // CHANGED:
+    try { delete payload.excerptEl; } catch (e16) {} // CHANGED:
+    try { delete payload.slugEl; } catch (e17) {}    // CHANGED:
+    try { delete payload.metaEl; } catch (e18) {}    // CHANGED:
+
     // Common keys that might be used by the WP controller:
     // post_id, status, title, content, excerpt, slug, meta
-    return input;
+    return payload; // CHANGED:
   }
 
   // ---- Public API ------------------------------------------------------------
@@ -114,6 +164,7 @@
 
     var payload = buildStorePayload(input);
 
+    // NOTE: If apiPost only accepts (action, data), the 3rd arg is safely ignored in JS.
     var p = api.apiPost("ppa_store", payload, options.apiOptions || {});
 
     if (p && typeof p.then === "function") {
@@ -190,13 +241,12 @@
     };
   }
 
-  // Export
-  window.PPAAdminModules.composerStore = {
-    store: store,
+  // Export (merge)
+  composerStore.ver = MOD_VER; // CHANGED:
+  composerStore.store = store;
+  composerStore._unwrapWpAjax = unwrapWpAjax;
+  composerStore._buildStorePayload = buildStorePayload;
 
-    // exposed internals for debugging/testing later
-    _unwrapWpAjax: unwrapWpAjax,
-    _buildStorePayload: buildStorePayload
-  };
+  window.PPAAdminModules.composerStore = composerStore; // CHANGED:
 
 })(window, document);
