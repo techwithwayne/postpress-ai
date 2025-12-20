@@ -12,6 +12,9 @@
  *   - { title, outline:[], body_markdown, meta:{...} }
  *   - { result:{...} }
  *   - { data:{ result:{...} } } (common WP ajax wrapper)
+ *
+ * ========= CHANGE LOG =========
+ * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
  */
 
 (function (window, document) {
@@ -20,9 +23,10 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  if (window.PPAAdminModules.generateView) {
-    return;
-  }
+  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
+  // Late scripts may pre-create namespace objects; we must still attach functions.
+  var MOD_VER = "ppa-admin-generate-view.v2025-12-20.2"; // CHANGED:
+  var generateView = window.PPAAdminModules.generateView || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function hasOwn(obj, key) {
@@ -266,15 +270,16 @@
     };
   }
 
-  // ---- Public export ---------------------------------------------------------
-  window.PPAAdminModules.generateView = {
-    normalizeGenerateResult: normalizeGenerateResult,
-    buildPreviewHtml: buildPreviewHtml,
-    renderPreview: renderPreview,
+  // ---- Public export (merge) -------------------------------------------------
+  generateView.ver = MOD_VER; // CHANGED:
+  generateView.normalizeGenerateResult = normalizeGenerateResult; // CHANGED:
+  generateView.buildPreviewHtml = buildPreviewHtml; // CHANGED:
+  generateView.renderPreview = renderPreview; // CHANGED:
 
-    // low-level helpers (kept for future wiring)
-    _escapeHtml: escapeHtml,
-    _unwrapResultShape: unwrapResultShape
-  };
+  // low-level helpers (kept for future wiring)
+  generateView._escapeHtml = escapeHtml; // CHANGED:
+  generateView._unwrapResultShape = unwrapResultShape; // CHANGED:
+
+  window.PPAAdminModules.generateView = generateView; // CHANGED:
 
 })(window, document);
