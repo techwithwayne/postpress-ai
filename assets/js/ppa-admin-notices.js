@@ -11,6 +11,9 @@
  * - Safe by default (text nodes, not HTML)
  * - Flexible containers (caller can pass selector/element)
  * - WP-native notice classes: notice, notice-error, notice-warning, notice-success, notice-info
+ *
+ * ========= CHANGE LOG =========
+ * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
  */
 
 (function (window, document) {
@@ -19,9 +22,10 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  if (window.PPAAdminModules.notices) {
-    return;
-  }
+  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
+  // Late scripts may pre-create namespace objects; we must still attach functions.
+  var MOD_VER = "ppa-admin-notices.v2025-12-20.2"; // CHANGED:
+  var notices = window.PPAAdminModules.notices || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function hasOwn(obj, key) {
@@ -234,15 +238,22 @@
     return show(type, message, options);
   }
 
-  // Export
-  window.PPAAdminModules.notices = {
-    show: show,
-    clear: clear,
-    replace: replace,
-    // low-level helpers exposed for advanced use later
-    _buildNoticeEl: buildNoticeEl,
-    _resolveContainer: resolveContainer,
-    _typeToClass: typeToClass
-  };
+  // Export (merge) // CHANGED:
+  notices.ver = MOD_VER; // CHANGED:
+  notices.show = show;
+  notices.clear = clear;
+  notices.replace = replace;
+
+  // low-level helpers exposed for advanced use later
+  notices._buildNoticeEl = buildNoticeEl;
+  notices._resolveContainer = resolveContainer;
+  notices._typeToClass = typeToClass;
+
+  // Re-attach merged module
+  window.PPAAdminModules.notices = notices; // CHANGED:
+
+  // (removeAllChildren intentionally kept for future use; no side effects)
+  void hasOwn; // no-op to avoid lint unused in some setups (safe ES5) // CHANGED:
+  void removeAllChildren; // CHANGED:
 
 })(window, document);
