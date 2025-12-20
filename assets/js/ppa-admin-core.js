@@ -3,6 +3,7 @@
  * Path: assets/js/ppa-admin-core.js
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.3: Harden core export for modular cutover — merge into existing PPAAdmin.core and only overwrite when missing or non-function; always set core.ver. Keeps nonce priority fix intact. // CHANGED:
  * 2025-12-20.2: Nonce priority fix — prefer window.ppaAdmin.nonce before #ppa-composer[data-ppa-nonce] to avoid wp_rest nonce being used for admin-ajax actions. // CHANGED:
  * 2025-12-09.1: Initial core module. Define window.PPAAdmin namespace and core helpers
  *               ($, $all, escHtml, escAttr, getAjaxUrl, getNonce) for reuse by other
@@ -16,7 +17,7 @@
   var global = window;
   var PPAAdmin = global.PPAAdmin = global.PPAAdmin || {};
 
-  var MOD_VER = 'ppa-admin-core.v2025-12-20.2'; // CHANGED:
+  var MOD_VER = 'ppa-admin-core.v2025-12-20.3'; // CHANGED:
 
   /**
    * Core DOM helpers
@@ -155,46 +156,42 @@
   }
 
   /**
-   * Attach helpers under PPAAdmin.core without clobbering any existing keys.
-   * This allows future modules to reference a stable surface:
-   *
-   *   PPAAdmin.core.$
-   *   PPAAdmin.core.escHtml
-   *   PPAAdmin.core.getAjaxUrl()
+   * Attach helpers under PPAAdmin.core with cutover-safe merging.
+   * During modular cutover, objects may be pre-created or partially overwritten.
+   * We only overwrite when missing OR when the existing key is not a function. // CHANGED:
    */
-  if (!PPAAdmin.core) {
-    PPAAdmin.core = {};
+  if (!PPAAdmin.core || typeof PPAAdmin.core !== 'object') {
+    PPAAdmin.core = {}; // CHANGED:
   }
 
-  if (!PPAAdmin.core.ver) { // CHANGED:
-    PPAAdmin.core.ver = MOD_VER; // CHANGED:
+  // CHANGED: Always set core.ver to the current module version.
+  PPAAdmin.core.ver = MOD_VER; // CHANGED:
+
+  if (typeof PPAAdmin.core.$ !== 'function') { // CHANGED:
+    PPAAdmin.core.$ = $; // CHANGED:
+  }
+  if (typeof PPAAdmin.core.$all !== 'function') { // CHANGED:
+    PPAAdmin.core.$all = $all; // CHANGED:
+  }
+  if (typeof PPAAdmin.core.escHtml !== 'function') { // CHANGED:
+    PPAAdmin.core.escHtml = escHtml; // CHANGED:
+  }
+  if (typeof PPAAdmin.core.escAttr !== 'function') { // CHANGED:
+    PPAAdmin.core.escAttr = escAttr; // CHANGED:
+  }
+  if (typeof PPAAdmin.core.getAjaxUrl !== 'function') { // CHANGED:
+    PPAAdmin.core.getAjaxUrl = getAjaxUrl; // CHANGED:
+  }
+  if (typeof PPAAdmin.core.getNonce !== 'function') { // CHANGED:
+    PPAAdmin.core.getNonce = getNonce; // CHANGED:
   }
 
-  if (!PPAAdmin.core.$) {
-    PPAAdmin.core.$ = $;
+  // Optional convenience aliases at top-level namespace (non-breaking, only if absent/non-function)
+  if (typeof PPAAdmin.$ !== 'function') { // CHANGED:
+    PPAAdmin.$ = $; // CHANGED:
   }
-  if (!PPAAdmin.core.$all) {
-    PPAAdmin.core.$all = $all;
-  }
-  if (!PPAAdmin.core.escHtml) {
-    PPAAdmin.core.escHtml = escHtml;
-  }
-  if (!PPAAdmin.core.escAttr) {
-    PPAAdmin.core.escAttr = escAttr;
-  }
-  if (!PPAAdmin.core.getAjaxUrl) {
-    PPAAdmin.core.getAjaxUrl = getAjaxUrl;
-  }
-  if (!PPAAdmin.core.getNonce) {
-    PPAAdmin.core.getNonce = getNonce;
-  }
-
-  // Optional convenience aliases at top-level namespace (non-breaking, only if absent)
-  if (!PPAAdmin.$) {
-    PPAAdmin.$ = $;
-  }
-  if (!PPAAdmin.$all) {
-    PPAAdmin.$all = $all;
+  if (typeof PPAAdmin.$all !== 'function') { // CHANGED:
+    PPAAdmin.$all = $all; // CHANGED:
   }
 
   console.info('PPA: ppa-admin-core.js initialized (core helpers ready)', { ver: MOD_VER }); // CHANGED:
