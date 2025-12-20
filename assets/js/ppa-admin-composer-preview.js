@@ -13,7 +13,7 @@
  * - If no container is found, it fails safely (returns { ok:false }).
  *
  * ========= CHANGE LOG =========
- * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; add module ver; add defensive generateView.renderPreview checks; no behavior change. // CHANGED:
+ * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
  */
 
 (function (window, document) {
@@ -28,10 +28,6 @@
   var composerPreview = window.PPAAdminModules.composerPreview || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
-  function toStr(val) {
-    return (val === undefined || val === null) ? "" : String(val);
-  }
-
   function isEl(node) {
     return !!(node && (node.nodeType === 1 || node.nodeType === 9));
   }
@@ -115,13 +111,11 @@
       return { ok: false, error: "preview_container_not_found" };
     }
 
-    // CHANGED: Be stricter — require generateView.renderPreview to exist.
-    var gv = window.PPAAdminModules.generateView; // CHANGED:
-    if (!gv || typeof gv.renderPreview !== "function") { // CHANGED:
-      return { ok: false, error: "generate_view_module_missing" }; // CHANGED:
-    } // CHANGED:
+    if (!window.PPAAdminModules.generateView || typeof window.PPAAdminModules.generateView.renderPreview !== "function") {
+      return { ok: false, error: "generate_view_module_missing" };
+    }
 
-    var rendered = gv.renderPreview(container, result, {
+    var rendered = window.PPAAdminModules.generateView.renderPreview(container, result, {
       allowMarked: !!options.allowMarked,
       mode: options.mode || "replace"
     });
@@ -161,7 +155,6 @@
 
   // low-level helper (kept for future wiring)
   composerPreview._findPreviewContainerFallback = findPreviewContainerFallback; // CHANGED:
-  composerPreview._toStr = toStr; // CHANGED: exposed for future debug parity
 
   window.PPAAdminModules.composerPreview = composerPreview; // CHANGED:
 
