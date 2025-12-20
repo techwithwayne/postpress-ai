@@ -3,6 +3,7 @@
  * Path: assets/js/ppa-admin-core.js
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.2: Nonce priority fix — prefer window.ppaAdmin.nonce before #ppa-composer[data-ppa-nonce] to avoid wp_rest nonce being used for admin-ajax actions. // CHANGED:
  * 2025-12-09.1: Initial core module. Define window.PPAAdmin namespace and core helpers
  *               ($, $all, escHtml, escAttr, getAjaxUrl, getNonce) for reuse by other
  *               admin modules and future refactors. No behavior changes to Composer.
@@ -14,6 +15,8 @@
   // Ensure global namespace exists
   var global = window;
   var PPAAdmin = global.PPAAdmin = global.PPAAdmin || {};
+
+  var MOD_VER = 'ppa-admin-core.v2025-12-20.2'; // CHANGED:
 
   /**
    * Core DOM helpers
@@ -99,16 +102,26 @@
 
   /**
    * Resolve nonce from:
-   * - #ppa-composer[data-ppa-nonce]
+   * - window.ppaAdmin.nonce  (preferred admin-ajax nonce)                                            // CHANGED:
+   * - #ppa-composer[data-ppa-nonce] (fallback only)                                                   // CHANGED:
    * - window.PPA.nonce
-   * - window.ppaAdmin.nonce
    * - #ppa-nonce input value
    *
-   * Mirrors current admin.js behavior.
+   * Mirrors current admin.js behavior (nonce priority fix).
    *
    * @returns {string}
    */
-  function getNonce() {
+  function getNonce() { // CHANGED:
+    // CHANGED: Prefer wp_localize_script nonce for admin-ajax actions first.
+    try { // CHANGED:
+      if (global.ppaAdmin && global.ppaAdmin.nonce) { // CHANGED:
+        return String(global.ppaAdmin.nonce).trim(); // CHANGED:
+      } // CHANGED:
+    } catch (e0) { // CHANGED:
+      // ignore and continue fallback chain
+    } // CHANGED:
+
+    // Fallback: template-provided nonce on the Composer root (ONLY as fallback)
     try {
       var composer = document.getElementById('ppa-composer');
       if (composer) {
@@ -126,14 +139,6 @@
         return String(global.PPA.nonce).trim();
       }
     } catch (e2) {
-      // ignore
-    }
-
-    try {
-      if (global.ppaAdmin && global.ppaAdmin.nonce) {
-        return String(global.ppaAdmin.nonce).trim();
-      }
-    } catch (e3) {
       // ignore
     }
 
@@ -159,6 +164,10 @@
    */
   if (!PPAAdmin.core) {
     PPAAdmin.core = {};
+  }
+
+  if (!PPAAdmin.core.ver) { // CHANGED:
+    PPAAdmin.core.ver = MOD_VER; // CHANGED:
   }
 
   if (!PPAAdmin.core.$) {
@@ -188,5 +197,5 @@
     PPAAdmin.$all = $all;
   }
 
-  console.info('PPA: ppa-admin-core.js initialized (core helpers ready)');
+  console.info('PPA: ppa-admin-core.js initialized (core helpers ready)', { ver: MOD_VER }); // CHANGED:
 })();
