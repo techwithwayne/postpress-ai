@@ -15,6 +15,7 @@
  *   matching the existing Composer behavior expectation.
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.3: Strip ANY *El helper keys from outgoing payload (generic) to prevent leaking DOM refs/selectors while payload builders preserve unknown keys. // CHANGED:
  * 2025-12-20.2: Merge export (no early return); preserve unknown keys in fallback payload build; strip *El helper keys from outgoing payload to avoid leaking DOM refs/selectors. // CHANGED:
  */
 
@@ -24,10 +25,10 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
+  // Do NOT early-return if object pre-exists; merge into it.
   // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-composer-generate.v2025-12-20.2"; // CHANGED:
-  var composerGenerate = window.PPAAdminModules.composerGenerate || {}; // CHANGED:
+  var MOD_VER = "ppa-admin-composer-generate.v2025-12-20.3"; // CHANGED:
+  var composerGenerate = window.PPAAdminModules.composerGenerate || {};
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function hasOwn(obj, key) {
@@ -42,16 +43,30 @@
     return !!val && (typeof val === "object");
   }
 
-  // CHANGED: shallow clone helper to preserve unknown keys (no stripping).
-  function shallowClone(obj) { // CHANGED:
-    var out = {}; // CHANGED:
-    if (!obj || typeof obj !== "object") return out; // CHANGED:
+  // shallow clone helper to preserve unknown keys (no stripping).
+  function shallowClone(obj) {
+    var out = {};
+    if (!obj || typeof obj !== "object") return out;
+    for (var k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        out[k] = obj[k];
+      }
+    }
+    return out;
+  }
+
+  // CHANGED: Strip any helper keys that end in "El" (subjectEl, briefEl, contentEl, etc.)
+  // This prevents DOM nodes/selectors from being sent to WP/Django while we preserve unknown keys.
+  function stripElKeys(obj) { // CHANGED:
+    if (!obj || typeof obj !== "object") return obj; // CHANGED:
     for (var k in obj) { // CHANGED:
       if (Object.prototype.hasOwnProperty.call(obj, k)) { // CHANGED:
-        out[k] = obj[k]; // CHANGED:
+        if (k && k.length >= 2 && k.slice(-2) === "El") { // CHANGED:
+          try { delete obj[k]; } catch (e) {} // CHANGED:
+        } // CHANGED:
       } // CHANGED:
     } // CHANGED:
-    return out; // CHANGED:
+    return obj; // CHANGED:
   } // CHANGED:
 
   // ---- WP ajax envelope helpers ---------------------------------------------
@@ -97,35 +112,28 @@
     var payloads = window.PPAAdminModules.payloads;
 
     if (payloads && typeof payloads.buildGeneratePayload === "function") {
-      var built = payloads.buildGeneratePayload(input); // CHANGED:
+      var built = payloads.buildGeneratePayload(input);
 
-      // CHANGED: Never leak convenience DOM keys into outgoing payload.
-      // Even if payloads preserves unknown keys, we must not send selector/node refs to WP/Django.
-      if (built && typeof built === "object") { // CHANGED:
-        try { delete built.subjectEl; } catch (e1) {} // CHANGED:
-        try { delete built.briefEl; } catch (e2) {}   // CHANGED:
-        try { delete built.contentEl; } catch (e3) {} // CHANGED:
-      } // CHANGED:
+      // Never leak convenience DOM keys into outgoing payload (generic strip).
+      stripElKeys(built); // CHANGED:
 
-      return built; // CHANGED:
+      return built;
     }
 
     // Minimal fallback (do not enforce required-ness here)
     input = input || {};
 
-    // CHANGED: Preserve unknown keys in fallback mode too (no stripping).
-    var payload = shallowClone(input); // CHANGED:
+    // Preserve unknown keys in fallback mode too (no stripping).
+    var payload = shallowClone(input);
 
-    payload.subject = toStr(input.subject || ""); // CHANGED:
-    payload.brief   = toStr(input.brief || "");   // CHANGED:
-    payload.content = toStr(input.content || ""); // CHANGED:
+    payload.subject = toStr(input.subject || "");
+    payload.brief   = toStr(input.brief || "");
+    payload.content = toStr(input.content || "");
 
-    // CHANGED: Strip DOM helper keys if present.
-    try { delete payload.subjectEl; } catch (e4) {} // CHANGED:
-    try { delete payload.briefEl; } catch (e5) {}   // CHANGED:
-    try { delete payload.contentEl; } catch (e6) {} // CHANGED:
+    // Strip DOM helper keys if present (generic strip).
+    stripElKeys(payload); // CHANGED:
 
-    return payload; // CHANGED:
+    return payload;
   }
 
   // ---- Result normalization --------------------------------------------------
@@ -187,7 +195,7 @@
     var payload = buildGeneratePayload(input);
 
     // Call WP ajax action: ppa_generate (WP proxy -> Django /generate/)
-    // NOTE: If apiPost only accepts (action, data), the 3rd arg is safely ignored in JS.
+    // If apiPost only accepts (action, data), the 3rd arg is safely ignored in JS.
     var p = api.apiPost("ppa_generate", payload, options.apiOptions || {});
 
     // p may be Promise or jQuery Deferred promise; normalize via then() where possible.
@@ -277,13 +285,13 @@
   }
 
   // Export (merge)
-  composerGenerate.ver = MOD_VER; // CHANGED:
+  composerGenerate.ver = MOD_VER;
   composerGenerate.generate = generate;
   composerGenerate._unwrapWpAjax = unwrapWpAjax;
   composerGenerate._pickDjangoResultShape = pickDjangoResultShape;
   composerGenerate._buildGeneratePayload = buildGeneratePayload;
   composerGenerate._normalizeResultModel = normalizeResultModel;
 
-  window.PPAAdminModules.composerGenerate = composerGenerate; // CHANGED:
+  window.PPAAdminModules.composerGenerate = composerGenerate;
 
 })(window, document);
