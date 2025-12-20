@@ -13,7 +13,7 @@
  * - WP-native notice classes: notice, notice-error, notice-warning, notice-success, notice-info
  *
  * ========= CHANGE LOG =========
- * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
+ * 2025-12-20.2: Merge export (no early return) to avoid clobber issues during modular cutover. // CHANGED:
  */
 
 (function (window, document) {
@@ -240,20 +240,14 @@
 
   // Export (merge) // CHANGED:
   notices.ver = MOD_VER; // CHANGED:
-  notices.show = show;
-  notices.clear = clear;
-  notices.replace = replace;
-
+  notices.show = show; // CHANGED:
+  notices.clear = clear; // CHANGED:
+  notices.replace = replace; // CHANGED:
   // low-level helpers exposed for advanced use later
-  notices._buildNoticeEl = buildNoticeEl;
-  notices._resolveContainer = resolveContainer;
-  notices._typeToClass = typeToClass;
+  notices._buildNoticeEl = buildNoticeEl; // CHANGED:
+  notices._resolveContainer = resolveContainer; // CHANGED:
+  notices._typeToClass = typeToClass; // CHANGED:
 
-  // Re-attach merged module
   window.PPAAdminModules.notices = notices; // CHANGED:
-
-  // (removeAllChildren intentionally kept for future use; no side effects)
-  void hasOwn; // no-op to avoid lint unused in some setups (safe ES5) // CHANGED:
-  void removeAllChildren; // CHANGED:
 
 })(window, document);
