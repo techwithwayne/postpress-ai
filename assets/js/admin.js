@@ -3,6 +3,9 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.2: Fix PPAAdmin export merge so new helpers always exist (postGenerate no longer undefined); // CHANGED:
+ *               add robust module bridge polling + on-demand patch so module apiPost equals legacy apiPost. // CHANGED:
+ * 2025-12-20.1: Nonce priority fix — prefer ppaAdmin.nonce before data-ppa-nonce to prevent wp_rest nonce being sent to admin-ajax actions. // CHANGED:
  * 2025-12-09.1: Expose selected helpers on window.PPAAdmin for safe future modularization (no behavior change). // CHANGED:
  * 2025-11-18.7: Clean AI-generated titles to strip trailing ellipsis/punctuation before filling WP title. // CHANGED:
  * 2025-11-18.6: Hide Preview button in Composer and rename Generate Draft → Generate Preview.         // CHANGED:
@@ -67,7 +70,7 @@
     }
   })();
 
-  var PPA_JS_VER = 'admin.v2025-11-18.7'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-12-20.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -129,15 +132,20 @@
     return t.trim();                                                              // CHANGED:
   }                                                                               // CHANGED:
 
-  // Expanded nonce fallback: data-attr → PPA.nonce → ppaAdmin.nonce → #ppa-nonce
-  function getNonce() {
-    var r = document.getElementById('ppa-composer');
-    if (r) {
-      var dn = r.getAttribute('data-ppa-nonce');
-      if (dn) return String(dn).trim();
-    }
+  // Expanded nonce fallback: ppaAdmin.nonce → data-attr → PPA.nonce → #ppa-nonce
+  function getNonce() {                                                                 // CHANGED:
+    // 1) Prefer the admin-ajax nonce localized via wp_localize_script (action: 'ppa-admin') // CHANGED:
+    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce).trim(); // CHANGED:
+
+    // 2) Allow template-provided nonce via data attr (but ONLY as fallback)      // CHANGED:
+    var r = document.getElementById('ppa-composer');                                // CHANGED:
+    if (r) {                                                                        // CHANGED:
+      var dn = r.getAttribute('data-ppa-nonce');                                    // CHANGED:
+      if (dn) return String(dn).trim();                                             // CHANGED:
+    }                                                                               // CHANGED:
+
+    // 3) Legacy fallbacks (rare)                                                  // CHANGED:
     if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce).trim();
-    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce).trim();
     var el = $('#ppa-nonce');
     if (el) return String(el.value || '').trim();
     return '';
@@ -683,6 +691,102 @@
     });
   }
 
+  // ---- Modularization Bridge (NO behavior change) -------------------------- // CHANGED:
+  // Problem we are solving:
+  // - Modules may load before/after admin.js.
+  // - window.PPAAdmin may already exist (older export) and must be MERGED.
+  // - Module apiPost must be forced to use this proven JSON+headers transport.
+  var __ppaBridgeTimer = null; // CHANGED:
+
+  function ensureModuleBridge() { // CHANGED:
+    try { // CHANGED:
+      var mods = window.PPAAdminModules; // CHANGED:
+      if (!mods || typeof mods !== 'object') return false; // CHANGED:
+
+      var apiPatched = false; // CHANGED:
+      var payloadPatched = false; // CHANGED:
+
+      if (mods.api && typeof mods.api === 'object') { // CHANGED:
+        // Force apiPost transport to the legacy, working implementation. // CHANGED:
+        if (mods.api.apiPost !== apiPost) { mods.api.apiPost = apiPost; } // CHANGED:
+        // Keep nonce + ajax url parity (prevents wrong nonce selection). // CHANGED:
+        if (mods.api.getNonce !== getNonce) { mods.api.getNonce = getNonce; } // CHANGED:
+        if (mods.api.getAjaxUrl !== getAjaxUrl) { mods.api.getAjaxUrl = getAjaxUrl; } // CHANGED:
+        apiPatched = (mods.api.apiPost === apiPost); // CHANGED:
+      } // CHANGED:
+
+      // IMPORTANT: composerGenerate must NOT strip keys during cutover.
+      // If payloads module exists, force its buildGeneratePayload to pass-through for now.
+      if (mods.payloads && typeof mods.payloads === 'object') { // CHANGED:
+        if (!mods.payloads.__ppa_generate_passthru) { // CHANGED:
+          mods.payloads.buildGeneratePayload = function (input) { return input || {}; }; // CHANGED:
+          mods.payloads.__ppa_generate_passthru = true; // CHANGED:
+        } // CHANGED:
+        payloadPatched = (mods.payloads.__ppa_generate_passthru === true); // CHANGED:
+      } // CHANGED:
+
+      // Store a tiny bridge status for debugging. // CHANGED:
+      mods.__ppa_bridge = mods.__ppa_bridge || {}; // CHANGED:
+      mods.__ppa_bridge.apiPatched = apiPatched; // CHANGED:
+      mods.__ppa_bridge.payloadPatched = payloadPatched; // CHANGED:
+      mods.__ppa_bridge.at = Date.now(); // CHANGED:
+
+      // Return true when the api side is patched (payload patch may not exist yet if payloads module isn't loaded). // CHANGED:
+      return apiPatched; // CHANGED:
+    } catch (e) { // CHANGED:
+      console.info('PPA: ensureModuleBridge error', e); // CHANGED:
+      return false; // CHANGED:
+    } // CHANGED:
+  } // CHANGED:
+
+  (function startModuleBridgePolling(){ // CHANGED:
+    // Poll longer than before so late-loading module scripts still get patched.
+    var tries = 0; // CHANGED:
+    var maxTries = 120; // CHANGED: 120 * 250ms = 30s
+    var intervalMs = 250; // CHANGED:
+
+    if (__ppaBridgeTimer) return; // CHANGED:
+
+    __ppaBridgeTimer = setInterval(function () { // CHANGED:
+      tries++; // CHANGED:
+      var ok = ensureModuleBridge(); // CHANGED:
+      // Stop early once api patch is confirmed. // CHANGED:
+      if (ok || tries >= maxTries) { // CHANGED:
+        clearInterval(__ppaBridgeTimer); // CHANGED:
+        __ppaBridgeTimer = null; // CHANGED:
+        if (ok) console.info('PPA: module bridge patched'); // CHANGED:
+        else console.info('PPA: module bridge polling ended (modules may not be present)'); // CHANGED:
+      } // CHANGED:
+    }, intervalMs); // CHANGED:
+  })(); // CHANGED:
+
+  // Guarded module path for Generate (falls back to legacy apiPost; payload/UX unchanged). // CHANGED:
+  function postGenerate(payload) { // CHANGED:
+    // On-demand patch attempt (fixes "false" console check even if modules load late). // CHANGED:
+    ensureModuleBridge(); // CHANGED:
+
+    try { // CHANGED:
+      var mods = window.PPAAdminModules; // CHANGED:
+      if (!mods || typeof mods !== 'object') return apiPost('ppa_generate', payload); // CHANGED:
+
+      // Only use module path if api patch is in effect AND composerGenerate exists.
+      // NOTE: We are NOT changing payload shape here; payloads pass-through patch ensures no key stripping if payloads module exists.
+      var hasApiPatch = !!(mods.api && mods.api.apiPost === apiPost); // CHANGED:
+      var cg = mods.composerGenerate; // CHANGED:
+
+      if (hasApiPatch && cg && typeof cg.generate === 'function') { // CHANGED:
+        // composerGenerate returns an envelope; we convert back to the legacy transport object for unchanged downstream code.
+        return cg.generate(payload, { storeDebug: false }).then(function (out) { // CHANGED:
+          return (out && out.transport) ? out.transport : out; // CHANGED:
+        }); // CHANGED:
+      } // CHANGED:
+    } catch (e) { // CHANGED:
+      console.info('PPA: postGenerate module path failed, falling back', e); // CHANGED:
+    } // CHANGED:
+
+    return apiPost('ppa_generate', payload); // CHANGED:
+  } // CHANGED:
+
   // ---- Response Shape Helpers ---------------------------------------------
 
   function pickHtmlFromResponseBody(body) {
@@ -1215,7 +1319,7 @@
 
       withBusy(function () {
         var payload = probe;
-        return apiPost('ppa_generate', payload).then(function (res) {
+        return postGenerate(payload).then(function (res) { // CHANGED:
           if (handleRateLimit(res, 'generate')) return;
           var serr = pickStructuredError(res.body);
           if (!res.ok) {
@@ -1247,18 +1351,17 @@
     });
   }
 
-  // Expose a small, read-only helper surface for future modularization.       // CHANGED:
-  if (!window.PPAAdmin) {                                                     // CHANGED:
-    window.PPAAdmin = {                                                       // CHANGED:
-      markdownToHtml: markdownToHtml,                                         // CHANGED:
-      buildPreviewPayload: buildPreviewPayload,                               // CHANGED:
-      buildStorePayload: buildStorePayload,                                   // CHANGED:
-      apiPost: apiPost,                                                       // CHANGED:
-      pickGenerateResult: pickGenerateResult,                                 // CHANGED:
-      renderGeneratePreview: renderGeneratePreview,                           // CHANGED:
-      applyGenerateResult: applyGenerateResult                                // CHANGED:
-    };                                                                        // CHANGED:
-  }                                                                           // CHANGED:
+  // Expose a small, read-only helper surface for future modularization (MERGE, do not only-set-if-missing). // CHANGED:
+  window.PPAAdmin = window.PPAAdmin || {}; // CHANGED:
+  window.PPAAdmin.markdownToHtml = markdownToHtml; // CHANGED:
+  window.PPAAdmin.buildPreviewPayload = buildPreviewPayload; // CHANGED:
+  window.PPAAdmin.buildStorePayload = buildStorePayload; // CHANGED:
+  window.PPAAdmin.apiPost = apiPost; // CHANGED:
+  window.PPAAdmin.pickGenerateResult = pickGenerateResult; // CHANGED:
+  window.PPAAdmin.renderGeneratePreview = renderGeneratePreview; // CHANGED:
+  window.PPAAdmin.applyGenerateResult = applyGenerateResult; // CHANGED:
+  window.PPAAdmin.postGenerate = postGenerate; // CHANGED:
+  window.PPAAdmin.ensureModuleBridge = ensureModuleBridge; // CHANGED:
 
   console.info('PPA: admin.js initialized →', PPA_JS_VER);
 })();
