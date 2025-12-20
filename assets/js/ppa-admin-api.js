@@ -8,6 +8,7 @@
  * - Avoid touching admin.js until we have stable modules in place
  *
  * ========= CHANGE LOG =========
+ * 2025-12-20.2: Do not overwrite PPAAdminModules.api; expose apiPost as a linked getter to window.PPAAdmin.apiPost for strict equality + safe cutover. // CHANGED:
  * 2025-12-20.1: Create Admin API module with apiPost(), nonce resolution, and JSON parsing helpers. // CHANGED:
  */
 
@@ -17,7 +18,10 @@
   // Namespace for modular admin JS (avoid touching window.PPAAdmin until admin.js is refactored) // CHANGED:
   if (!win.PPAAdminModules) { win.PPAAdminModules = {}; }                                        // CHANGED:
 
-  var MOD_VER = 'ppa-admin-api.v2025-12-20.1'; // CHANGED:
+  var MOD_VER = 'ppa-admin-api.v2025-12-20.2'; // CHANGED:
+
+  // IMPORTANT: Do NOT overwrite the module object. Merge into existing to avoid late-script clobbering. // CHANGED:
+  var api = win.PPAAdminModules.api || {}; // CHANGED:
 
   // --- Internal helpers ------------------------------------------------------
 
@@ -67,28 +71,33 @@
     return view;                                                                                    // CHANGED:
   } // CHANGED:
 
-  /**
-   * apiPost(action, data)
-   * - Sends JSON payload to admin-ajax endpoint: ?action=<action>
-   * - Mirrors admin.js headers (X-PPA-Nonce, X-WP-Nonce, X-Requested-With, X-PPA-View)
-   * - Returns: Promise<{ ok, status, body, raw, contentType, headers }>
-   */ // CHANGED:
-  function apiPost(action, data) { // CHANGED:
-    var url = getAjaxUrl();                                                                         // CHANGED:
-    var nonce = getNonce();                                                                         // CHANGED:
-    var qs = url.indexOf('?') === -1 ? '?' : '&';                                                    // CHANGED:
-    var endpoint = url + qs + 'action=' + encodeURIComponent(action);                                // CHANGED:
+  // Internal implementation (used when window.PPAAdmin.apiPost is not present yet).                // CHANGED:
+  var apiPostImpl = function apiPostImpl(action, data, options) { // CHANGED:
+    options = options || {};                                                                        // CHANGED:
 
-    var headers = { 'Content-Type': 'application/json' };                                            // CHANGED:
+    var url = options.ajaxUrl || getAjaxUrl();                                                      // CHANGED:
+    var nonce = (typeof options.nonce === 'string' && options.nonce.trim()) ? options.nonce.trim() : getNonce(); // CHANGED:
+    var viewTag = (typeof options.view === 'string' && options.view.trim()) ? options.view.trim() : getViewTag(); // CHANGED:
+
+    var qs = url.indexOf('?') === -1 ? '?' : '&';                                                   // CHANGED:
+    var endpoint = url + qs + 'action=' + encodeURIComponent(action);                               // CHANGED:
+
+    var headers = { 'Content-Type': 'application/json' };                                           // CHANGED:
     if (nonce) {                                                                                    // CHANGED:
-      headers['X-PPA-Nonce'] = nonce;                                                                // CHANGED:
-      headers['X-WP-Nonce'] = nonce;                                                                 // CHANGED:
+      headers['X-PPA-Nonce'] = nonce;                                                               // CHANGED:
+      headers['X-WP-Nonce'] = nonce;                                                                // CHANGED:
     }                                                                                               // CHANGED:
-    headers['X-Requested-With'] = 'XMLHttpRequest';                                                  // CHANGED:
-    headers['X-PPA-View'] = getViewTag();                                                            // CHANGED:
+    headers['X-Requested-With'] = 'XMLHttpRequest';                                                 // CHANGED:
+    headers['X-PPA-View'] = viewTag;                                                                // CHANGED:
 
-    // NOTE: Keep the logging light; admin.js remains canonical right now.                          // CHANGED:
-    // console.info('PPA: apiPost', action, '→', endpoint);                                          // CHANGED:
+    // Allow callers to add/override headers (kept minimal; admin.js still canonical).              // CHANGED:
+    if (options.headers && typeof options.headers === 'object') {                                   // CHANGED:
+      for (var k in options.headers) {                                                              // CHANGED:
+        if (Object.prototype.hasOwnProperty.call(options.headers, k)) {                             // CHANGED:
+          headers[k] = options.headers[k];                                                          // CHANGED:
+        }                                                                                            // CHANGED:
+      }                                                                                              // CHANGED:
+    }                                                                                                // CHANGED:
 
     return win.fetch(endpoint, {                                                                     // CHANGED:
       method: 'POST',                                                                               // CHANGED:
@@ -117,19 +126,53 @@
         body: { error: String(err) },                                                               // CHANGED:
         raw: '',                                                                                    // CHANGED:
         contentType: '',                                                                            // CHANGED:
-        headers: new win.Headers()                                                                  // CHANGED:
+        headers: (win.Headers ? new win.Headers() : {})                                             // CHANGED:
       };                                                                                            // CHANGED:
     });                                                                                             // CHANGED:
+  }; // CHANGED:
+
+  // Resolve the authoritative apiPost reference.
+  // If admin.js has already defined window.PPAAdmin.apiPost, we *use that exact function* so strict equality passes. // CHANGED:
+  function resolveApiPostRef() { // CHANGED:
+    try {                                                                                            // CHANGED:
+      if (win.PPAAdmin && typeof win.PPAAdmin.apiPost === 'function') return win.PPAAdmin.apiPost;   // CHANGED:
+    } catch (e) {}                                                                                   // CHANGED:
+    return apiPostImpl;                                                                              // CHANGED:
   } // CHANGED:
 
-  // Export module surface (no behavior change yet; admin.js still owns runtime wiring)             // CHANGED:
-  win.PPAAdminModules.api = {                                                                       // CHANGED:
-    ver: MOD_VER,                                                                                   // CHANGED:
-    getAjaxUrl: getAjaxUrl,                                                                         // CHANGED:
-    getNonce: getNonce,                                                                             // CHANGED:
-    apiPost: apiPost,                                                                               // CHANGED:
-    jsonTryParse: jsonTryParse                                                                       // CHANGED:
-  };                                                                                                // CHANGED:
+  // Export module surface (merged into existing object; no behavior change intended).              // CHANGED:
+  api.ver = MOD_VER;                                                                                // CHANGED:
+  api.getAjaxUrl = getAjaxUrl;                                                                      // CHANGED:
+  api.getNonce = getNonce;                                                                          // CHANGED:
+  api.jsonTryParse = jsonTryParse;                                                                  // CHANGED:
+
+  // Define apiPost as a linked getter so:
+  // window.PPAAdminModules.api.apiPost === window.PPAAdmin.apiPost  (when PPAAdmin.apiPost exists) // CHANGED:
+  // This allows us to remove admin.js bridge hacks later, safely.                                   // CHANGED:
+  try {                                                                                              // CHANGED:
+    Object.defineProperty(api, 'apiPost', {                                                          // CHANGED:
+      configurable: true,                                                                            // CHANGED:
+      enumerable: true,                                                                              // CHANGED:
+      get: function () {                                                                             // CHANGED:
+        return resolveApiPostRef();                                                                  // CHANGED:
+      },                                                                                             // CHANGED:
+      set: function (fn) {                                                                           // CHANGED:
+        if (typeof fn === 'function') {                                                              // CHANGED:
+          apiPostImpl = fn;                                                                          // CHANGED:
+          // Keep admin namespace aligned if present (helps during transitional wiring).             // CHANGED:
+          try {                                                                                       // CHANGED:
+            if (win.PPAAdmin && typeof win.PPAAdmin === 'object') { win.PPAAdmin.apiPost = fn; }     // CHANGED:
+          } catch (e) {}                                                                              // CHANGED:
+        }                                                                                             // CHANGED:
+      }                                                                                               // CHANGED:
+    });                                                                                              // CHANGED:
+  } catch (e) {                                                                                      // CHANGED:
+    // Fallback: direct assignment (older environments). Equality may depend on load order.          // CHANGED:
+    api.apiPost = resolveApiPostRef();                                                               // CHANGED:
+  }                                                                                                  // CHANGED:
+
+  // Re-attach merged module object to namespace (no clobber).                                       // CHANGED:
+  win.PPAAdminModules.api = api;                                                                     // CHANGED:
 
   console.info('PPA: ppa-admin-api.js loaded →', MOD_VER); // CHANGED:
 })(window, document);
