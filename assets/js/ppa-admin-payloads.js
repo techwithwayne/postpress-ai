@@ -12,6 +12,7 @@
  * - This module only helps standardize + sanitize values (trim, normalize newlines, etc.).
  *
  * ========= CHANGE LOG =========
+ * 2025-12-21.1: Add buildPreviewPayload + preserve nested meta keys while normalizing known meta fields (no stripping). // CHANGED:
  * 2025-12-20.2: Preserve unknown keys in buildGeneratePayload/buildStorePayload (no stripping); merge exports (no early-return) to avoid clobber issues during modular cutover. // CHANGED:
  */
 
@@ -23,7 +24,7 @@
 
   // CHANGED: Do NOT early-return if the namespace already exists.
   // During modular cutover, late scripts can pre-create objects; we merge instead of bailing.
-  var MOD_VER = "ppa-admin-payloads.v2025-12-20.2"; // CHANGED:
+  var MOD_VER = "ppa-admin-payloads.v2025-12-21.1"; // CHANGED:
   var payloads = window.PPAAdminModules.payloads || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
@@ -94,6 +95,16 @@
     return out; // CHANGED:
   } // CHANGED:
 
+  // CHANGED: preserve meta keys while normalizing only known meta fields.
+  function normalizeMetaPreserve(meta) { // CHANGED:
+    if (!meta || typeof meta !== "object") return meta; // CHANGED:
+    var m = shallowClone(meta); // CHANGED:
+    if (m.focus_keyphrase !== undefined) m.focus_keyphrase = safeText(m.focus_keyphrase); // CHANGED:
+    if (m.meta_description !== undefined) m.meta_description = safeText(m.meta_description); // CHANGED:
+    if (m.slug !== undefined) m.slug = safeText(m.slug); // CHANGED:
+    return m; // CHANGED:
+  } // CHANGED:
+
   // ---- Optional DOM helper (safe; no assumptions) ---------------------------
   function getEl(selectorOrEl) {
     if (!selectorOrEl) return null;
@@ -157,17 +168,60 @@
     payload.content = safeMultiline(content);
 
     // Optional scalars (normalize if present)
-    if (payload.tone !== undefined) payload.tone = safeText(payload.tone);           // CHANGED:
+    if (payload.tone !== undefined) payload.tone = safeText(payload.tone);             // CHANGED:
     if (payload.audience !== undefined) payload.audience = safeText(payload.audience); // CHANGED:
-    if (payload.length !== undefined) payload.length = safeText(payload.length);     // CHANGED:
+    if (payload.length !== undefined) payload.length = safeText(payload.length);       // CHANGED:
     if (payload.category !== undefined) payload.category = safeText(payload.category); // CHANGED:
 
     // Optional tags/keywords as array (kept as plain strings)
     if (payload.keywords !== undefined) payload.keywords = filterNonEmpty(toArray(payload.keywords)); // CHANGED:
     if (payload.tags !== undefined) payload.tags = filterNonEmpty(toArray(payload.tags));             // CHANGED:
 
+    // Optional meta (preserve keys, normalize known fields) // CHANGED:
+    if (payload.meta && typeof payload.meta === "object") { // CHANGED:
+      payload.meta = normalizeMetaPreserve(payload.meta); // CHANGED:
+    } // CHANGED:
+
     return payload; // CHANGED:
   }
+
+  /**
+   * buildPreviewPayload(input)
+   *
+   * Intended for the Preview action (Django preview endpoint via WP proxy).
+   *
+   * We keep this builder permissive and contract-safe:
+   * - Preserve ALL keys from input (no stripping).
+   * - Normalize common preview fields when present: title, outline, body, content.
+   * - Preserve nested meta keys while normalizing known meta fields.
+   *
+   * NOTE:
+   * - Wiring will decide the exact mapping later; this is a safe shared helper only.
+   */
+  function buildPreviewPayload(input) { // CHANGED:
+    input = input || {}; // CHANGED:
+    var payload = shallowClone(input); // CHANGED:
+
+    // Support either direct values or *El (selector/node) convenience inputs. // CHANGED:
+    var title   = (input.title !== undefined) ? input.title : readValue(input.titleEl); // CHANGED:
+    var outline = (input.outline !== undefined) ? input.outline : readValue(input.outlineEl); // CHANGED:
+    var body    = (input.body !== undefined) ? input.body : readValue(input.bodyEl); // CHANGED:
+
+    // Normalize only when fields are present/used. // CHANGED:
+    if (title !== undefined && title !== "") payload.title = safeText(title); // CHANGED:
+    if (outline !== undefined && outline !== "") payload.outline = safeMultiline(outline); // CHANGED:
+    if (body !== undefined && body !== "") payload.body = safeMultiline(body); // CHANGED:
+
+    // Some call sites may use "content" instead of "body". Normalize if present. // CHANGED:
+    if (payload.content !== undefined) payload.content = safeMultiline(payload.content); // CHANGED:
+
+    // Preserve + normalize meta when present. // CHANGED:
+    if (payload.meta && typeof payload.meta === "object") { // CHANGED:
+      payload.meta = normalizeMetaPreserve(payload.meta); // CHANGED:
+    } // CHANGED:
+
+    return payload; // CHANGED:
+  } // CHANGED:
 
   /**
    * buildStorePayload(input)
@@ -192,14 +246,10 @@
     if (payload.excerpt !== undefined) payload.excerpt = safeMultiline(payload.excerpt);     // CHANGED:
     if (payload.slug !== undefined) payload.slug = safeText(payload.slug);                   // CHANGED:
 
-    // Optional Yoast-ish meta (kept nested)
+    // Optional meta (preserve keys, normalize known fields)                                  // CHANGED:
     if (payload.meta && typeof payload.meta === "object") {                                  // CHANGED:
-      payload.meta = {                                                                       // CHANGED:
-        focus_keyphrase: safeText(payload.meta.focus_keyphrase),
-        meta_description: safeText(payload.meta.meta_description),
-        slug: safeText(payload.meta.slug)
-      };
-    }
+      payload.meta = normalizeMetaPreserve(payload.meta);                                    // CHANGED:
+    }                                                                                        // CHANGED:
 
     return payload; // CHANGED:
   }
@@ -217,7 +267,13 @@
 
   // payload builders
   payloads.buildGeneratePayload = buildGeneratePayload; // CHANGED:
+  payloads.buildPreviewPayload = buildPreviewPayload;   // CHANGED:
   payloads.buildStorePayload = buildStorePayload;       // CHANGED:
+
+  // Friendly aliases (non-breaking, optional)                                    // CHANGED:
+  if (!payloads.buildPreview) payloads.buildPreview = buildPreviewPayload;       // CHANGED:
+  if (!payloads.buildGenerate) payloads.buildGenerate = buildGeneratePayload;    // CHANGED:
+  if (!payloads.buildStore) payloads.buildStore = buildStorePayload;             // CHANGED:
 
   // Re-attach merged module
   window.PPAAdminModules.payloads = payloads; // CHANGED:
