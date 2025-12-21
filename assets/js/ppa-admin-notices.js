@@ -3,7 +3,9 @@
  * PostPress AI — Admin Notices Module (ES5-safe)
  *
  * Purpose:
- * - Provide reusable notice helpers (render/clear) for WP Admin screens.
+ * - Provide reusable notice helpers for WP Admin screens.
+ *   1) WP-native notices inserted into a container (.wrap, #ppa-notice-area, etc.)
+ *   2) Composer toolbar message area (#ppa-toolbar-msg) used by admin.js (ppa-notice). // CHANGED:
  * - NO side effects on load. Only acts when its exported methods are called.
  * - Not wired into admin.js yet (one-file rule).
  *
@@ -13,6 +15,7 @@
  * - WP-native notice classes: notice, notice-error, notice-warning, notice-success, notice-info
  *
  * ========= CHANGE LOG =========
+ * 2025-12-21.1: Add Composer toolbar notice + busy helpers (mirror admin.js API) without changing existing WP notice helpers. // CHANGED:
  * 2025-12-20.2: Merge export (no early return) to avoid clobber issues during modular cutover. // CHANGED:
  */
 
@@ -24,7 +27,7 @@
 
   // CHANGED: Do NOT early-return if object pre-exists; merge into it.
   // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-notices.v2025-12-20.2"; // CHANGED:
+  var MOD_VER = "ppa-admin-notices.v2025-12-21.1"; // CHANGED:
   var notices = window.PPAAdminModules.notices || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
@@ -67,7 +70,7 @@
     }
   }
 
-  // ---- Container resolution -------------------------------------------------
+  // ---- Container resolution (WP notices) ------------------------------------
   function getDefaultContainer() {
     // Conservative default: if a dedicated container exists, use it.
     // We avoid guessing too hard; wiring can pass an explicit container later.
@@ -93,7 +96,7 @@
     return el || getDefaultContainer();
   }
 
-  // ---- Notice building -------------------------------------------------------
+  // ---- Notice building (WP notices) -----------------------------------------
   function typeToClass(type) {
     // WP notice types: error, warning, success, info
     // Normalize aliases safely.
@@ -155,7 +158,7 @@
     return notice;
   }
 
-  // ---- Public API ------------------------------------------------------------
+  // ---- Public API (WP notices) ----------------------------------------------
   /**
    * clear(options)
    *
@@ -238,7 +241,168 @@
     return show(type, message, options);
   }
 
-  // Export (merge) // CHANGED:
+  // ---- Composer toolbar notice helpers (admin.js parity) -------------------- // CHANGED:
+  // These helpers are intentionally conservative and mirror the stable behavior // CHANGED:
+  // in assets/js/admin.js (no contract/UI changes).                             // CHANGED:
+
+  function getToolbarButtons() {                                                // CHANGED:
+    // Mirrors admin.js IDs: #ppa-preview, #ppa-draft, #ppa-publish, #ppa-generate // CHANGED:
+    return [                                                                    // CHANGED:
+      getEl("#ppa-preview"),                                                    // CHANGED:
+      getEl("#ppa-draft"),                                                      // CHANGED:
+      getEl("#ppa-publish"),                                                    // CHANGED:
+      getEl("#ppa-generate")                                                    // CHANGED:
+    ];                                                                          // CHANGED:
+  }                                                                             // CHANGED:
+
+  function noticeContainer() {                                                  // CHANGED:
+    // Toolbar message area used by the Composer screen.                         // CHANGED:
+    var el = getEl("#ppa-toolbar-msg");                                          // CHANGED:
+    if (el) return el;                                                          // CHANGED:
+
+    // Try to anchor it in the same row as the primary buttons (admin.js parity). // CHANGED:
+    var host = null;                                                            // CHANGED:
+    var buttons = getToolbarButtons();                                          // CHANGED:
+    for (var i = 0; i < buttons.length; i++) {                                  // CHANGED:
+      if (buttons[i] && buttons[i].parentNode) {                                // CHANGED:
+        host = buttons[i].parentNode;                                           // CHANGED:
+        break;                                                                  // CHANGED:
+      }                                                                         // CHANGED:
+    }                                                                           // CHANGED:
+
+    if (!host) {                                                                // CHANGED:
+      try { console.info("PPA: noticeContainer could not find a host for toolbar msg"); } catch (e) {} // CHANGED:
+      return null;                                                              // CHANGED:
+    }                                                                           // CHANGED:
+
+    el = document.createElement("div");                                         // CHANGED:
+    el.id = "ppa-toolbar-msg";                                                  // CHANGED:
+    el.className = "ppa-notice";                                                // CHANGED:
+    try {                                                                       // CHANGED:
+      el.setAttribute("role", "status");                                        // CHANGED:
+      el.setAttribute("aria-live", "polite");                                   // CHANGED:
+    } catch (e2) {}                                                             // CHANGED:
+
+    // Insert *above* the buttons (admin.js parity).                             // CHANGED:
+    host.insertBefore(el, host.firstChild);                                     // CHANGED:
+    try { console.info("PPA: created #ppa-toolbar-msg above buttons"); } catch (e3) {} // CHANGED:
+    return el;                                                                  // CHANGED:
+  }                                                                             // CHANGED:
+
+  function renderNotice(type, message) {                                        // CHANGED:
+    var el = noticeContainer();                                                 // CHANGED:
+    var text = String(message == null ? "" : message);                          // CHANGED:
+    try { console.info("PPA: renderNotice", { type: type, message: text, hasEl: !!el }); } catch (e0) {} // CHANGED:
+    if (!el) {                                                                  // CHANGED:
+      // Hard fallback so you ALWAYS see something during debugging (admin.js parity). // CHANGED:
+      if (type === "error" || type === "warn") {                                // CHANGED:
+        try { window.alert(text); } catch (e1) {}                               // CHANGED:
+      } else {                                                                  // CHANGED:
+        try { console.info("PPA:", type + ":", text); } catch (e2) {}           // CHANGED:
+      }                                                                         // CHANGED:
+      return;                                                                   // CHANGED:
+    }                                                                           // CHANGED:
+    var clsBase = "ppa-notice", clsType = "ppa-notice-" + type;                 // CHANGED:
+    el.className = clsBase + " " + clsType;                                     // CHANGED:
+    el.textContent = text;                                                      // CHANGED:
+
+    // If for some reason it's still visually hidden, alert as a backup (admin.js parity). // CHANGED:
+    try {                                                                       // CHANGED:
+      var visible = el.offsetWidth > 0 && el.offsetHeight > 0;                  // CHANGED:
+      if (!visible && (type === "error" || type === "warn")) {                  // CHANGED:
+        window.alert(text);                                                     // CHANGED:
+      }                                                                         // CHANGED:
+    } catch (e3) {}                                                             // CHANGED:
+  }                                                                             // CHANGED:
+
+  function renderNoticeTimed(type, message, ms) {                               // CHANGED:
+    renderNotice(type, message);                                                // CHANGED:
+    if (ms && ms > 0) setTimeout(clearNotice, ms);                              // CHANGED:
+  }                                                                             // CHANGED:
+
+  function renderNoticeHtml(type, html) {                                       // CHANGED:
+    var el = noticeContainer();                                                 // CHANGED:
+    if (!el) {                                                                  // CHANGED:
+      try { console.info("PPA:", type + ":", html); } catch (e0) {}             // CHANGED:
+      return;                                                                   // CHANGED:
+    }                                                                           // CHANGED:
+    var clsBase = "ppa-notice", clsType = "ppa-notice-" + type;                 // CHANGED:
+    el.className = clsBase + " " + clsType;                                     // CHANGED:
+    el.innerHTML = String(html || "");                                          // CHANGED:
+  }                                                                             // CHANGED:
+
+  function renderNoticeTimedHtml(type, html, ms) {                              // CHANGED:
+    renderNoticeHtml(type, html);                                               // CHANGED:
+    if (ms && ms > 0) setTimeout(clearNotice, ms);                              // CHANGED:
+  }                                                                             // CHANGED:
+
+  function clearNotice() {                                                     // CHANGED:
+    var el = noticeContainer();                                                 // CHANGED:
+    if (el) { el.className = "ppa-notice"; el.textContent = ""; }               // CHANGED:
+  }                                                                             // CHANGED:
+
+  function setButtonsDisabled(disabled) {                                       // CHANGED:
+    var arr = getToolbarButtons();                                              // CHANGED:
+    for (var i = 0; i < arr.length; i++) {                                      // CHANGED:
+      var b = arr[i];                                                          // CHANGED:
+      if (!b) continue;                                                        // CHANGED:
+      b.disabled = !!disabled;                                                  // CHANGED:
+      if (disabled) { b.setAttribute("aria-busy", "true"); }                    // CHANGED:
+      else { b.removeAttribute("aria-busy"); }                                  // CHANGED:
+    }                                                                           // CHANGED:
+  }                                                                             // CHANGED:
+
+  function withBusy(promiseFactory, label) {                                    // CHANGED:
+    setButtonsDisabled(true);                                                   // CHANGED:
+    clearNotice();                                                             // CHANGED:
+    var tag = label || "request";                                               // CHANGED:
+    try { console.info("PPA: busy start →", tag); } catch (e0) {}               // CHANGED:
+    try {                                                                       // CHANGED:
+      // Match admin.js behavior: wrap promiseFactory(), show generic error notices, always re-enable buttons. // CHANGED:
+      var p = promiseFactory();                                                 // CHANGED:
+      var chain = (window.Promise ? window.Promise.resolve(p) : p);             // CHANGED:
+
+      // If promiseFactory doesn't return a thenable, normalize to a resolved promise (best-effort). // CHANGED:
+      if (chain && typeof chain.then === "function") {                          // CHANGED:
+        // ok                                                                      // CHANGED:
+      } else if (window.Promise) {                                              // CHANGED:
+        chain = window.Promise.resolve(chain);                                  // CHANGED:
+      }                                                                         // CHANGED:
+
+      // Catch + finally with backward-safe fallback.                             // CHANGED:
+      var caught = chain.then(function (v) { return v; }).catch(function (err) { // CHANGED:
+        try { console.info("PPA: busy error on", tag, err); } catch (e1) {}     // CHANGED:
+        renderNotice("error", "There was an error while processing your request."); // CHANGED:
+        throw err;                                                             // CHANGED:
+      });                                                                      // CHANGED:
+
+      if (caught && typeof caught.finally === "function") {                    // CHANGED:
+        return caught.finally(function () {                                    // CHANGED:
+          setButtonsDisabled(false);                                            // CHANGED:
+          try { console.info("PPA: busy end ←", tag); } catch (e2) {}           // CHANGED:
+        });                                                                    // CHANGED:
+      }                                                                        // CHANGED:
+
+      // Fallback if .finally is unavailable.                                   // CHANGED:
+      return caught.then(function (v2) {                                        // CHANGED:
+        setButtonsDisabled(false);                                              // CHANGED:
+        try { console.info("PPA: busy end ←", tag); } catch (e3) {}             // CHANGED:
+        return v2;                                                             // CHANGED:
+      }, function (e4) {                                                       // CHANGED:
+        setButtonsDisabled(false);                                              // CHANGED:
+        try { console.info("PPA: busy end ←", tag); } catch (e5) {}             // CHANGED:
+        throw e4;                                                              // CHANGED:
+      });                                                                      // CHANGED:
+    } catch (e6) {                                                             // CHANGED:
+      setButtonsDisabled(false);                                               // CHANGED:
+      try { console.info("PPA: busy sync error on", tag, e6); } catch (e7) {}  // CHANGED:
+      renderNotice("error", "There was an error while preparing your request."); // CHANGED:
+      throw e6;                                                                // CHANGED:
+    }                                                                          // CHANGED:
+  }                                                                             // CHANGED:
+
+  // ---- Export (merge) -------------------------------------------------------
+  // Existing WP notice API (do not break other modules)                         // CHANGED:
   notices.ver = MOD_VER; // CHANGED:
   notices.show = show; // CHANGED:
   notices.clear = clear; // CHANGED:
@@ -247,6 +411,22 @@
   notices._buildNoticeEl = buildNoticeEl; // CHANGED:
   notices._resolveContainer = resolveContainer; // CHANGED:
   notices._typeToClass = typeToClass; // CHANGED:
+
+  // New Composer toolbar notice API (admin.js parity)                           // CHANGED:
+  notices.noticeContainer = noticeContainer; // CHANGED:
+  notices.renderNotice = renderNotice; // CHANGED:
+  notices.renderNoticeTimed = renderNoticeTimed; // CHANGED:
+  notices.renderNoticeHtml = renderNoticeHtml; // CHANGED:
+  notices.renderNoticeTimedHtml = renderNoticeTimedHtml; // CHANGED:
+  notices.clearNotice = clearNotice; // CHANGED:
+  notices.setButtonsDisabled = setButtonsDisabled; // CHANGED:
+  notices.withBusy = withBusy; // CHANGED:
+
+  // Friendly aliases for future module callers (non-breaking)                   // CHANGED:
+  if (!hasOwn(notices, "render")) notices.render = renderNotice; // CHANGED:
+  if (!hasOwn(notices, "renderTimed")) notices.renderTimed = renderNoticeTimed; // CHANGED:
+  if (!hasOwn(notices, "renderHtml")) notices.renderHtml = renderNoticeHtml; // CHANGED:
+  if (!hasOwn(notices, "renderTimedHtml")) notices.renderTimedHtml = renderNoticeTimedHtml; // CHANGED:
 
   window.PPAAdminModules.notices = notices; // CHANGED:
 
