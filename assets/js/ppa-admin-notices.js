@@ -15,6 +15,7 @@
  * - WP-native notice classes: notice, notice-error, notice-warning, notice-success, notice-info
  *
  * ========= CHANGE LOG =========
+ * 2025-12-21.2: Add clickGuard helper (parity target for admin.js cutover) + export alias; NO wiring changes. // CHANGED:
  * 2025-12-21.1: Add Composer toolbar notice + busy helpers (mirror admin.js API) without changing existing WP notice helpers. // CHANGED:
  * 2025-12-20.2: Merge export (no early return) to avoid clobber issues during modular cutover. // CHANGED:
  */
@@ -27,7 +28,7 @@
 
   // CHANGED: Do NOT early-return if object pre-exists; merge into it.
   // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-notices.v2025-12-21.1"; // CHANGED:
+  var MOD_VER = "ppa-admin-notices.v2025-12-21.2"; // CHANGED:
   var notices = window.PPAAdminModules.notices || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
@@ -354,7 +355,7 @@
 
   function withBusy(promiseFactory, label) {                                    // CHANGED:
     setButtonsDisabled(true);                                                   // CHANGED:
-    clearNotice();                                                             // CHANGED:
+    clearNotice();                                                              // CHANGED:
     var tag = label || "request";                                               // CHANGED:
     try { console.info("PPA: busy start →", tag); } catch (e0) {}               // CHANGED:
     try {                                                                       // CHANGED:
@@ -364,12 +365,12 @@
 
       // If promiseFactory doesn't return a thenable, normalize to a resolved promise (best-effort). // CHANGED:
       if (chain && typeof chain.then === "function") {                          // CHANGED:
-        // ok                                                                      // CHANGED:
+        // ok                                                                   // CHANGED:
       } else if (window.Promise) {                                              // CHANGED:
         chain = window.Promise.resolve(chain);                                  // CHANGED:
       }                                                                         // CHANGED:
 
-      // Catch + finally with backward-safe fallback.                             // CHANGED:
+      // Catch + finally with backward-safe fallback.                           // CHANGED:
       var caught = chain.then(function (v) { return v; }).catch(function (err) { // CHANGED:
         try { console.info("PPA: busy error on", tag, err); } catch (e1) {}     // CHANGED:
         renderNotice("error", "There was an error while processing your request."); // CHANGED:
@@ -401,8 +402,19 @@
     }                                                                          // CHANGED:
   }                                                                             // CHANGED:
 
+  function clickGuard(btn, ms) {                                                // CHANGED:
+    // Parity target for admin.js: prevent rapid double-clicks.                  // CHANGED:
+    if (!btn) return false;                                                     // CHANGED:
+    var windowMs = (ms && ms > 0) ? ms : 350;                                   // CHANGED:
+    var ts = Number(btn.getAttribute("data-ppa-ts") || 0);                      // CHANGED:
+    var now = (Date.now ? Date.now() : (new Date()).getTime());                 // CHANGED:
+    if (now - ts < windowMs) return true;                                       // CHANGED:
+    btn.setAttribute("data-ppa-ts", String(now));                               // CHANGED:
+    return false;                                                               // CHANGED:
+  }                                                                             // CHANGED:
+
   // ---- Export (merge) -------------------------------------------------------
-  // Existing WP notice API (do not break other modules)                         // CHANGED:
+  // Existing WP notice API (do not break other modules)
   notices.ver = MOD_VER; // CHANGED:
   notices.show = show; // CHANGED:
   notices.clear = clear; // CHANGED:
@@ -412,7 +424,7 @@
   notices._resolveContainer = resolveContainer; // CHANGED:
   notices._typeToClass = typeToClass; // CHANGED:
 
-  // New Composer toolbar notice API (admin.js parity)                           // CHANGED:
+  // Composer toolbar notice API (admin.js parity)
   notices.noticeContainer = noticeContainer; // CHANGED:
   notices.renderNotice = renderNotice; // CHANGED:
   notices.renderNoticeTimed = renderNoticeTimed; // CHANGED:
@@ -421,8 +433,9 @@
   notices.clearNotice = clearNotice; // CHANGED:
   notices.setButtonsDisabled = setButtonsDisabled; // CHANGED:
   notices.withBusy = withBusy; // CHANGED:
+  notices.clickGuard = clickGuard; // CHANGED:
 
-  // Friendly aliases for future module callers (non-breaking)                   // CHANGED:
+  // Friendly aliases for future module callers (non-breaking)
   if (!hasOwn(notices, "render")) notices.render = renderNotice; // CHANGED:
   if (!hasOwn(notices, "renderTimed")) notices.renderTimed = renderNoticeTimed; // CHANGED:
   if (!hasOwn(notices, "renderHtml")) notices.renderHtml = renderNoticeHtml; // CHANGED:
