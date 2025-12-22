@@ -81,7 +81,10 @@
   color: var(--ppa-accent);
   margin-top: 0;
 }
-
+pre.ppa-outline {
+   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .ppa-preview-panel h2,
 .ppa-preview-panel h3,
 .ppa-preview-panel h4 {
