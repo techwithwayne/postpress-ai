@@ -15,6 +15,7 @@
  * - WP-native notice classes: notice, notice-error, notice-warning, notice-success, notice-info
  *
  * ========= CHANGE LOG =========
+ * 2025-12-22.1: Harden withBusy() to avoid relying on Promise/.catch/.finally on generic thenables; keep UI semantics stable. // CHANGED:
  * 2025-12-21.2: Add clickGuard helper (parity target for admin.js cutover) + export alias; NO wiring changes. // CHANGED:
  * 2025-12-21.1: Add Composer toolbar notice + busy helpers (mirror admin.js API) without changing existing WP notice helpers. // CHANGED:
  * 2025-12-20.2: Merge export (no early return) to avoid clobber issues during modular cutover. // CHANGED:
@@ -28,7 +29,7 @@
 
   // CHANGED: Do NOT early-return if object pre-exists; merge into it.
   // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-notices.v2025-12-21.2"; // CHANGED:
+  var MOD_VER = "ppa-admin-notices.v2025-12-22.1"; // CHANGED:
   var notices = window.PPAAdminModules.notices || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
@@ -353,6 +354,33 @@
     }                                                                           // CHANGED:
   }                                                                             // CHANGED:
 
+  // CHANGED: Internal helper to avoid Promise/.catch/.finally assumptions on generic thenables.
+  function attachBusyHandlers(thenable, tag) {                                  // CHANGED:
+    // If no thenable, just end busy and return the value.                       // CHANGED:
+    if (!thenable || typeof thenable.then !== "function") {                     // CHANGED:
+      setButtonsDisabled(false);                                                // CHANGED:
+      try { console.info("PPA: busy end ←", tag); } catch (e0) {}               // CHANGED:
+      return thenable;                                                         // CHANGED:
+    }                                                                           // CHANGED:
+
+    // Use .then(success, failure) to avoid requiring .catch.                    // CHANGED:
+    return thenable.then(function (v) {                                         // CHANGED:
+      return v;                                                                // CHANGED:
+    }, function (err) {                                                        // CHANGED:
+      try { console.info("PPA: busy error on", tag, err); } catch (e1) {}       // CHANGED:
+      renderNotice("error", "There was an error while processing your request."); // CHANGED:
+      throw err;                                                               // CHANGED:
+    }).then(function (v2) {                                                    // CHANGED:
+      setButtonsDisabled(false);                                                // CHANGED:
+      try { console.info("PPA: busy end ←", tag); } catch (e2) {}               // CHANGED:
+      return v2;                                                               // CHANGED:
+    }, function (e3) {                                                         // CHANGED:
+      setButtonsDisabled(false);                                                // CHANGED:
+      try { console.info("PPA: busy end ←", tag); } catch (e4) {}               // CHANGED:
+      throw e3;                                                                // CHANGED:
+    });                                                                        // CHANGED:
+  }                                                                             // CHANGED:
+
   function withBusy(promiseFactory, label) {                                    // CHANGED:
     setButtonsDisabled(true);                                                   // CHANGED:
     clearNotice();                                                              // CHANGED:
@@ -361,45 +389,18 @@
     try {                                                                       // CHANGED:
       // Match admin.js behavior: wrap promiseFactory(), show generic error notices, always re-enable buttons. // CHANGED:
       var p = promiseFactory();                                                 // CHANGED:
-      var chain = (window.Promise ? window.Promise.resolve(p) : p);             // CHANGED:
 
-      // If promiseFactory doesn't return a thenable, normalize to a resolved promise (best-effort). // CHANGED:
-      if (chain && typeof chain.then === "function") {                          // CHANGED:
-        // ok                                                                   // CHANGED:
-      } else if (window.Promise) {                                              // CHANGED:
-        chain = window.Promise.resolve(chain);                                  // CHANGED:
-      }                                                                         // CHANGED:
+      // Prefer native Promise normalization when available, but do not depend on it. // CHANGED:
+      var chain = (window.Promise && typeof window.Promise.resolve === "function") ? window.Promise.resolve(p) : p; // CHANGED:
 
-      // Catch + finally with backward-safe fallback.                           // CHANGED:
-      var caught = chain.then(function (v) { return v; }).catch(function (err) { // CHANGED:
-        try { console.info("PPA: busy error on", tag, err); } catch (e1) {}     // CHANGED:
-        renderNotice("error", "There was an error while processing your request."); // CHANGED:
-        throw err;                                                             // CHANGED:
-      });                                                                      // CHANGED:
-
-      if (caught && typeof caught.finally === "function") {                    // CHANGED:
-        return caught.finally(function () {                                    // CHANGED:
-          setButtonsDisabled(false);                                            // CHANGED:
-          try { console.info("PPA: busy end ←", tag); } catch (e2) {}           // CHANGED:
-        });                                                                    // CHANGED:
-      }                                                                        // CHANGED:
-
-      // Fallback if .finally is unavailable.                                   // CHANGED:
-      return caught.then(function (v2) {                                        // CHANGED:
-        setButtonsDisabled(false);                                              // CHANGED:
-        try { console.info("PPA: busy end ←", tag); } catch (e3) {}             // CHANGED:
-        return v2;                                                             // CHANGED:
-      }, function (e4) {                                                       // CHANGED:
-        setButtonsDisabled(false);                                              // CHANGED:
-        try { console.info("PPA: busy end ←", tag); } catch (e5) {}             // CHANGED:
-        throw e4;                                                              // CHANGED:
-      });                                                                      // CHANGED:
-    } catch (e6) {                                                             // CHANGED:
-      setButtonsDisabled(false);                                               // CHANGED:
-      try { console.info("PPA: busy sync error on", tag, e6); } catch (e7) {}  // CHANGED:
+      // Attach handlers without requiring .catch or .finally.                   // CHANGED:
+      return attachBusyHandlers(chain, tag);                                    // CHANGED:
+    } catch (e6) {                                                              // CHANGED:
+      setButtonsDisabled(false);                                                // CHANGED:
+      try { console.info("PPA: busy sync error on", tag, e6); } catch (e7) {}   // CHANGED:
       renderNotice("error", "There was an error while preparing your request."); // CHANGED:
-      throw e6;                                                                // CHANGED:
-    }                                                                          // CHANGED:
+      throw e6;                                                                 // CHANGED:
+    }                                                                           // CHANGED:
   }                                                                             // CHANGED:
 
   function clickGuard(btn, ms) {                                                // CHANGED:
