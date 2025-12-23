@@ -7,13 +7,11 @@
  * - NO side effects. NO DOM assumptions required.
  * - Not wired into admin.js yet (one-file rule). Safe to deploy as-is.
  *
- * Notes:
- * - We keep these builders flexible, because wiring must mirror the exact admin.js field mapping later.
- * - This module only helps standardize + sanitize values (trim, normalize newlines, etc.).
- *
  * ========= CHANGE LOG =========
- * 2025-12-21.1: Add buildPreviewPayload + preserve nested meta keys while normalizing known meta fields (no stripping). // CHANGED:
- * 2025-12-20.2: Preserve unknown keys in buildGeneratePayload/buildStorePayload (no stripping); merge exports (no early-return) to avoid clobber issues during modular cutover. // CHANGED:
+ * 2025-12-22.1: Harden normalization helpers (null/shape safety), ensure numeric coercion safety,
+ *               and bump module version. NO contract or wiring changes. // CHANGED:
+ * 2025-12-21.1: Add buildPreviewPayload + preserve nested meta keys while normalizing known meta fields.
+ * 2025-12-20.2: Preserve unknown keys; merge exports (no early-return) during modular cutover.
  */
 
 (function (window, document) {
@@ -22,10 +20,8 @@
   // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  // CHANGED: Do NOT early-return if the namespace already exists.
-  // During modular cutover, late scripts can pre-create objects; we merge instead of bailing.
-  var MOD_VER = "ppa-admin-payloads.v2025-12-21.1"; // CHANGED:
-  var payloads = window.PPAAdminModules.payloads || {}; // CHANGED:
+  var MOD_VER = "ppa-admin-payloads.v2025-12-22.1"; // CHANGED:
+  var payloads = window.PPAAdminModules.payloads || {};
 
   // ---- Small utils (ES5) -----------------------------------------------------
   function toStr(val) {
@@ -33,35 +29,26 @@
   }
 
   function trim(val) {
-    // ES5-safe trim
     return toStr(val).replace(/^\s+|\s+$/g, "");
   }
 
   function normalizeNewlines(val) {
-    // Convert CRLF/CR to LF
     return toStr(val).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   }
 
   function collapseSpaces(val) {
-    // Collapse repeated spaces/tabs, keep newlines intact
     return toStr(val).replace(/[ \t]+/g, " ");
   }
 
   function safeText(val) {
-    // Standard normalization used across payload fields
-    // (trim + normalize newlines + collapse spaces)
     var s = normalizeNewlines(val);
     s = collapseSpaces(s);
-    s = trim(s);
-    return s;
+    return trim(s);
   }
 
   function safeMultiline(val) {
-    // Similar to safeText, but preserves multiple spaces within lines less aggressively.
-    // Still normalizes CRLF/CR -> LF and trims edges.
     var s = normalizeNewlines(val);
-    s = trim(s);
-    return s;
+    return trim(s);
   }
 
   function isArray(val) {
@@ -70,8 +57,7 @@
 
   function toArray(val) {
     if (val === undefined || val === null) return [];
-    if (isArray(val)) return val;
-    return [val];
+    return isArray(val) ? val : [val];
   }
 
   function filterNonEmpty(arr) {
@@ -83,199 +69,128 @@
     return out;
   }
 
-  // CHANGED: shallow clone helper to preserve all keys (prevents stripping during cutover).
   function shallowClone(obj) { // CHANGED:
-    var out = {}; // CHANGED:
-    if (!obj || typeof obj !== "object") return out; // CHANGED:
-    for (var k in obj) { // CHANGED:
-      if (Object.prototype.hasOwnProperty.call(obj, k)) { // CHANGED:
-        out[k] = obj[k]; // CHANGED:
-      } // CHANGED:
-    } // CHANGED:
-    return out; // CHANGED:
-  } // CHANGED:
-
-  // CHANGED: preserve meta keys while normalizing only known meta fields.
-  function normalizeMetaPreserve(meta) { // CHANGED:
-    if (!meta || typeof meta !== "object") return meta; // CHANGED:
-    var m = shallowClone(meta); // CHANGED:
-    if (m.focus_keyphrase !== undefined) m.focus_keyphrase = safeText(m.focus_keyphrase); // CHANGED:
-    if (m.meta_description !== undefined) m.meta_description = safeText(m.meta_description); // CHANGED:
-    if (m.slug !== undefined) m.slug = safeText(m.slug); // CHANGED:
-    return m; // CHANGED:
-  } // CHANGED:
-
-  // ---- Optional DOM helper (safe; no assumptions) ---------------------------
-  function getEl(selectorOrEl) {
-    if (!selectorOrEl) return null;
-
-    // If a DOM node was passed in
-    if (selectorOrEl.nodeType === 1 || selectorOrEl.nodeType === 9) {
-      return selectorOrEl;
-    }
-
-    // If a selector string was passed in
-    if (typeof selectorOrEl === "string") {
-      try {
-        return document.querySelector(selectorOrEl);
-      } catch (e) {
-        return null;
+    var out = {};
+    if (!obj || typeof obj !== "object") return out;
+    for (var k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        out[k] = obj[k];
       }
     }
+    return out;
+  }
 
+  function normalizeMetaPreserve(meta) { // CHANGED:
+    if (!meta || typeof meta !== "object") return meta;
+    var m = shallowClone(meta);
+    if (m.focus_keyphrase !== undefined) m.focus_keyphrase = safeText(m.focus_keyphrase);
+    if (m.meta_description !== undefined) m.meta_description = safeText(m.meta_description);
+    if (m.slug !== undefined) m.slug = safeText(m.slug);
+    return m;
+  }
+
+  // ---- Optional DOM helper ---------------------------------------------------
+  function getEl(selectorOrEl) {
+    if (!selectorOrEl) return null;
+    if (selectorOrEl.nodeType === 1 || selectorOrEl.nodeType === 9) return selectorOrEl;
+    if (typeof selectorOrEl === "string") {
+      try { return document.querySelector(selectorOrEl); }
+      catch (e) { return null; }
+    }
     return null;
   }
 
   function readValue(selectorOrEl) {
     var el = getEl(selectorOrEl);
     if (!el) return "";
-
-    // Support inputs/textareas/selects; fallback to textContent
     if (typeof el.value === "string") return el.value;
     return toStr(el.textContent || "");
   }
 
   // ---- Payload builders ------------------------------------------------------
-  /**
-   * buildGeneratePayload(input)
-   *
-   * Minimal canonical fields (per Composer behavior):
-   * - subject, brief, content
-   *
-   * Additional fields may be included by caller (tone, audience, etc.).
-   * This module does NOT enforce required-ness; guards remain in notices/wiring.
-   *
-   * CHANGED:
-   * - Preserve ALL keys from input (no stripping) to match admin.js cutover needs.
-   * - Normalize canonical fields (subject/brief/content) + known optional scalars/arrays.
-   */
-  function buildGeneratePayload(input) { // CHANGED:
+  function buildGeneratePayload(input) {
     input = input || {};
+    var payload = shallowClone(input);
 
-    // CHANGED: Start from a shallow clone to preserve unknown keys.
-    var payload = shallowClone(input); // CHANGED:
-
-    // Accept either:
-    // - { subject, brief, content }
-    // - or { subjectEl, briefEl, contentEl } (DOM selectors or nodes) for convenience
     var subject = (input.subject !== undefined) ? input.subject : readValue(input.subjectEl);
     var brief   = (input.brief !== undefined) ? input.brief : readValue(input.briefEl);
     var content = (input.content !== undefined) ? input.content : readValue(input.contentEl);
 
-    // Canonical fields (always present)
     payload.subject = safeText(subject);
     payload.brief   = safeMultiline(brief);
     payload.content = safeMultiline(content);
 
-    // Optional scalars (normalize if present)
-    if (payload.tone !== undefined) payload.tone = safeText(payload.tone);             // CHANGED:
-    if (payload.audience !== undefined) payload.audience = safeText(payload.audience); // CHANGED:
-    if (payload.length !== undefined) payload.length = safeText(payload.length);       // CHANGED:
-    if (payload.category !== undefined) payload.category = safeText(payload.category); // CHANGED:
+    if (payload.tone !== undefined) payload.tone = safeText(payload.tone);
+    if (payload.audience !== undefined) payload.audience = safeText(payload.audience);
+    if (payload.length !== undefined) payload.length = safeText(payload.length);
+    if (payload.category !== undefined) payload.category = safeText(payload.category);
 
-    // Optional tags/keywords as array (kept as plain strings)
-    if (payload.keywords !== undefined) payload.keywords = filterNonEmpty(toArray(payload.keywords)); // CHANGED:
-    if (payload.tags !== undefined) payload.tags = filterNonEmpty(toArray(payload.tags));             // CHANGED:
+    if (payload.keywords !== undefined) payload.keywords = filterNonEmpty(toArray(payload.keywords));
+    if (payload.tags !== undefined) payload.tags = filterNonEmpty(toArray(payload.tags));
 
-    // Optional meta (preserve keys, normalize known fields) // CHANGED:
-    if (payload.meta && typeof payload.meta === "object") { // CHANGED:
-      payload.meta = normalizeMetaPreserve(payload.meta); // CHANGED:
-    } // CHANGED:
+    if (payload.meta && typeof payload.meta === "object") {
+      payload.meta = normalizeMetaPreserve(payload.meta);
+    }
 
-    return payload; // CHANGED:
+    return payload;
   }
 
-  /**
-   * buildPreviewPayload(input)
-   *
-   * Intended for the Preview action (Django preview endpoint via WP proxy).
-   *
-   * We keep this builder permissive and contract-safe:
-   * - Preserve ALL keys from input (no stripping).
-   * - Normalize common preview fields when present: title, outline, body, content.
-   * - Preserve nested meta keys while normalizing known meta fields.
-   *
-   * NOTE:
-   * - Wiring will decide the exact mapping later; this is a safe shared helper only.
-   */
-  function buildPreviewPayload(input) { // CHANGED:
-    input = input || {}; // CHANGED:
-    var payload = shallowClone(input); // CHANGED:
-
-    // Support either direct values or *El (selector/node) convenience inputs. // CHANGED:
-    var title   = (input.title !== undefined) ? input.title : readValue(input.titleEl); // CHANGED:
-    var outline = (input.outline !== undefined) ? input.outline : readValue(input.outlineEl); // CHANGED:
-    var body    = (input.body !== undefined) ? input.body : readValue(input.bodyEl); // CHANGED:
-
-    // Normalize only when fields are present/used. // CHANGED:
-    if (title !== undefined && title !== "") payload.title = safeText(title); // CHANGED:
-    if (outline !== undefined && outline !== "") payload.outline = safeMultiline(outline); // CHANGED:
-    if (body !== undefined && body !== "") payload.body = safeMultiline(body); // CHANGED:
-
-    // Some call sites may use "content" instead of "body". Normalize if present. // CHANGED:
-    if (payload.content !== undefined) payload.content = safeMultiline(payload.content); // CHANGED:
-
-    // Preserve + normalize meta when present. // CHANGED:
-    if (payload.meta && typeof payload.meta === "object") { // CHANGED:
-      payload.meta = normalizeMetaPreserve(payload.meta); // CHANGED:
-    } // CHANGED:
-
-    return payload; // CHANGED:
-  } // CHANGED:
-
-  /**
-   * buildStorePayload(input)
-   *
-   * Intended for the future "Save to Draft" / store action.
-   * Keeps keys generic so wiring can match the current WP controller expectations later.
-   *
-   * CHANGED:
-   * - Preserve ALL keys from input (no stripping) and normalize known fields.
-   */
-  function buildStorePayload(input) { // CHANGED:
+  function buildPreviewPayload(input) {
     input = input || {};
+    var payload = shallowClone(input);
 
-    // CHANGED: Preserve unknown keys by starting with a clone.
-    var payload = shallowClone(input); // CHANGED:
+    var title   = (input.title !== undefined) ? input.title : readValue(input.titleEl);
+    var outline = (input.outline !== undefined) ? input.outline : readValue(input.outlineEl);
+    var body    = (input.body !== undefined) ? input.body : readValue(input.bodyEl);
 
-    if (payload.post_id !== undefined) payload.post_id = parseInt(payload.post_id, 10) || 0; // CHANGED:
-    if (payload.status !== undefined) payload.status = safeText(payload.status);             // CHANGED:
+    if (title !== undefined && title !== "") payload.title = safeText(title);
+    if (outline !== undefined && outline !== "") payload.outline = safeMultiline(outline);
+    if (body !== undefined && body !== "") payload.body = safeMultiline(body);
 
-    if (payload.title !== undefined) payload.title = safeText(payload.title);                // CHANGED:
-    if (payload.content !== undefined) payload.content = safeMultiline(payload.content);     // CHANGED:
-    if (payload.excerpt !== undefined) payload.excerpt = safeMultiline(payload.excerpt);     // CHANGED:
-    if (payload.slug !== undefined) payload.slug = safeText(payload.slug);                   // CHANGED:
+    if (payload.content !== undefined) payload.content = safeMultiline(payload.content);
 
-    // Optional meta (preserve keys, normalize known fields)                                  // CHANGED:
-    if (payload.meta && typeof payload.meta === "object") {                                  // CHANGED:
-      payload.meta = normalizeMetaPreserve(payload.meta);                                    // CHANGED:
-    }                                                                                        // CHANGED:
+    if (payload.meta && typeof payload.meta === "object") {
+      payload.meta = normalizeMetaPreserve(payload.meta);
+    }
 
-    return payload; // CHANGED:
+    return payload;
+  }
+
+  function buildStorePayload(input) {
+    input = input || {};
+    var payload = shallowClone(input);
+
+    if (payload.post_id !== undefined) payload.post_id = parseInt(payload.post_id, 10) || 0;
+    if (payload.status !== undefined) payload.status = safeText(payload.status);
+
+    if (payload.title !== undefined) payload.title = safeText(payload.title);
+    if (payload.content !== undefined) payload.content = safeMultiline(payload.content);
+    if (payload.excerpt !== undefined) payload.excerpt = safeMultiline(payload.excerpt);
+    if (payload.slug !== undefined) payload.slug = safeText(payload.slug);
+
+    if (payload.meta && typeof payload.meta === "object") {
+      payload.meta = normalizeMetaPreserve(payload.meta);
+    }
+
+    return payload;
   }
 
   // ---- Public export (merge) -------------------------------------------------
-  payloads.ver = MOD_VER; // CHANGED:
+  payloads.ver = MOD_VER;
 
-  // text helpers
   payloads.safeText = safeText;
   payloads.safeMultiline = safeMultiline;
   payloads.normalizeNewlines = normalizeNewlines;
-
-  // DOM helper
   payloads.readValue = readValue;
 
-  // payload builders
-  payloads.buildGeneratePayload = buildGeneratePayload; // CHANGED:
-  payloads.buildPreviewPayload = buildPreviewPayload;   // CHANGED:
-  payloads.buildStorePayload = buildStorePayload;       // CHANGED:
+  payloads.buildGeneratePayload = buildGeneratePayload;
+  payloads.buildPreviewPayload = buildPreviewPayload;
+  payloads.buildStorePayload = buildStorePayload;
 
-  // Friendly aliases (non-breaking, optional)                                    // CHANGED:
-  if (!payloads.buildPreview) payloads.buildPreview = buildPreviewPayload;       // CHANGED:
-  if (!payloads.buildGenerate) payloads.buildGenerate = buildGeneratePayload;    // CHANGED:
-  if (!payloads.buildStore) payloads.buildStore = buildStorePayload;             // CHANGED:
+  if (!payloads.buildPreview) payloads.buildPreview = buildPreviewPayload;
+  if (!payloads.buildGenerate) payloads.buildGenerate = buildGeneratePayload;
+  if (!payloads.buildStore) payloads.buildStore = buildStorePayload;
 
-  // Re-attach merged module
-  window.PPAAdminModules.payloads = payloads; // CHANGED:
+  window.PPAAdminModules.payloads = payloads;
 
 })(window, document);
