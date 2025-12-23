@@ -5,80 +5,140 @@
  * Purpose:
  * - Provide a thin helper around generateView to render results into a Composer preview pane.
  * - NO side effects on load.
- * - Not wired into admin.js yet (one-file rule).
  *
- * Contracts:
- * - Exposes: window.PPAAdminModules.composerPreview
- * - Does NOT assume specific DOM IDs. Caller can pass a container selector/element.
- * - If no container is found, it fails safely (returns { ok:false }).
+ * IMPORTANT (Composer stability):
+ * - Preview MUST render ONLY into the right-side pane.
+ * - Canonical pane ALWAYS wins if present.
  *
  * ========= CHANGE LOG =========
- * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
+ * 2025-12-22.2: Version bump only. No behavioral changes. File confirmed stable for release. // CHANGED:
+ * 2025-12-22.1: Safety hardening: canonical pane enforcement, reject bad targets, try/catch render guards.
  */
 
 (function (window, document) {
   "use strict";
 
-  // ---- Namespace guard -------------------------------------------------------
   window.PPAAdminModules = window.PPAAdminModules || {};
 
-  // CHANGED: Do NOT early-return if object pre-exists; merge into it.
-  // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-composer-preview.v2025-12-20.2"; // CHANGED:
-  var composerPreview = window.PPAAdminModules.composerPreview || {}; // CHANGED:
+  var MOD_VER = "ppa-admin-composer-preview.v2025-12-22.2"; // CHANGED:
+  var composerPreview = window.PPAAdminModules.composerPreview || {};
 
-  // ---- Small utils (ES5) -----------------------------------------------------
   function isEl(node) {
     return !!(node && (node.nodeType === 1 || node.nodeType === 9));
   }
 
   function getEl(selectorOrEl) {
     if (!selectorOrEl) return null;
-
     if (isEl(selectorOrEl)) return selectorOrEl;
-
     if (typeof selectorOrEl === "string") {
-      try {
-        return document.querySelector(selectorOrEl);
-      } catch (e) {
-        return null;
-      }
+      try { return document.querySelector(selectorOrEl); }
+      catch (e) { return null; }
     }
-
     return null;
   }
 
-  // Conservative fallback selectors (non-breaking because this module is non-wired).
-  // Caller should pass the real container used by admin.js once we wire it.
-  function findPreviewContainerFallback() {
-    var selectors = [
-      "#ppa-preview",
-      "#ppa_preview",
-      "#ppa-preview-pane",
-      ".ppa-preview-pane",
-      ".ppa-preview"
-    ];
+  function isPreviewPaneCandidate(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var tag = (el.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "FORM" || tag === "BUTTON" || tag === "SELECT") {
+      return false;
+    }
+    return true;
+  }
 
-    for (var i = 0; i < selectors.length; i++) {
-      var el = getEl(selectors[i]);
-      if (el) return el;
+  function getComposerRoot() {
+    try {
+      return (
+        document.getElementById("ppa-composer") ||
+        document.getElementById("ppa-composer-app") ||
+        document.querySelector("[data-ppa-composer]") ||
+        document.querySelector(".ppa-composer") ||
+        document.querySelector(".ppa-composer-layout") ||
+        null
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function isLikelyPreviewPane(el) {
+    if (!isPreviewPaneCandidate(el)) return false;
+
+    var id = (el.id || "");
+    if (id === "ppa-preview-pane" || id === "ppa-composer-preview-pane" || id === "ppa-composer-preview") {
+      return true;
     }
 
-    return null;
+    try {
+      if (el.getAttribute && el.getAttribute("data-ppa-preview-pane") !== null) {
+        return true;
+      }
+    } catch (e) {}
+
+    var cls = (el.className || "");
+    if (typeof cls === "string") {
+      if (cls.indexOf("ppa-preview-pane") !== -1 || cls.indexOf("ppa-composer-preview-pane") !== -1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getCanonicalPreviewPane() {
+    try {
+      var el = document.getElementById("ppa-preview-pane");
+      if (isPreviewPaneCandidate(el)) return el;
+
+      el = document.getElementById("ppa-composer-preview-pane");
+      if (isPreviewPaneCandidate(el)) return el;
+
+      el = document.getElementById("ppa-composer-preview");
+      if (isPreviewPaneCandidate(el)) return el;
+
+      var root = getComposerRoot() || document;
+      var selectors = [
+        "[data-ppa-preview-pane='1']",
+        "[data-ppa-preview-pane='true']",
+        "[data-ppa-preview-pane]",
+        ".ppa-preview-pane",
+        ".ppa-composer-preview-pane"
+      ];
+
+      for (var i = 0; i < selectors.length; i++) {
+        try {
+          var found = root.querySelector(selectors[i]);
+          if (isPreviewPaneCandidate(found)) return found;
+        } catch (e1) {}
+      }
+      return null;
+    } catch (e2) {
+      return null;
+    }
+  }
+
+  function findPreviewContainerFallback() {
+    return getCanonicalPreviewPane();
   }
 
   function resolvePreviewContainer(options) {
     options = options || {};
 
-    // Preferred explicit inputs
+    var canonical = getCanonicalPreviewPane();
+    if (canonical) return canonical;
+
     var el =
       getEl(options.container) ||
       getEl(options.containerEl) ||
       getEl(options.containerSelector);
 
-    if (el) return el;
+    if (options.allowNonCanonical && el && isPreviewPaneCandidate(el)) {
+      return el;
+    }
 
-    // Optional fallback scan (safe; returns null if not found)
+    if (!options.allowNonCanonical && el && isLikelyPreviewPane(el)) {
+      return el;
+    }
+
     if (options.allowFallbackScan) {
       return findPreviewContainerFallback();
     }
@@ -86,76 +146,59 @@
     return null;
   }
 
-  /**
-   * render(containerOrSelector, result, options)
-   *
-   * - containerOrSelector: DOM element OR selector string. If omitted, requires options.allowFallbackScan=true.
-   * - result: any supported result shape (generateView will normalize)
-   * - options:
-   *   - allowMarked: bool (passed through to generateView)
-   *   - mode: "replace" (default) or "append"
-   *   - allowFallbackScan: bool (default false) — tries common selectors
-   *
-   * Returns:
-   * - { ok:true, rendered:{...} } or { ok:false, error:"..." }
-   */
   function render(containerOrSelector, result, options) {
     options = options || {};
 
     var container = resolvePreviewContainer({
       container: containerOrSelector,
-      allowFallbackScan: !!options.allowFallbackScan
+      allowFallbackScan: !!options.allowFallbackScan,
+      allowNonCanonical: !!options.allowNonCanonical
     });
 
-    if (!container) {
-      return { ok: false, error: "preview_container_not_found" };
-    }
-
-    if (!window.PPAAdminModules.generateView || typeof window.PPAAdminModules.generateView.renderPreview !== "function") {
+    if (!container) return { ok: false, error: "preview_container_not_found" };
+    if (!window.PPAAdminModules.generateView ||
+        typeof window.PPAAdminModules.generateView.renderPreview !== "function") {
       return { ok: false, error: "generate_view_module_missing" };
     }
 
-    var rendered = window.PPAAdminModules.generateView.renderPreview(container, result, {
-      allowMarked: !!options.allowMarked,
-      mode: options.mode || "replace"
-    });
-
-    return { ok: true, rendered: rendered };
+    try {
+      var rendered = window.PPAAdminModules.generateView.renderPreview(container, result, {
+        allowMarked: !!options.allowMarked,
+        mode: options.mode || "replace"
+      });
+      return { ok: true, rendered: rendered };
+    } catch (e) {
+      return { ok: false, error: "render_failed" };
+    }
   }
 
-  /**
-   * clear(containerOrSelector, options)
-   * Clears preview container content safely.
-   */
   function clear(containerOrSelector, options) {
     options = options || {};
 
     var container = resolvePreviewContainer({
       container: containerOrSelector,
-      allowFallbackScan: !!options.allowFallbackScan
+      allowFallbackScan: !!options.allowFallbackScan,
+      allowNonCanonical: !!options.allowNonCanonical
     });
 
-    if (!container) {
-      return { ok: false, error: "preview_container_not_found" };
-    }
+    if (!container) return { ok: false, error: "preview_container_not_found" };
 
-    // Clear safely
     while (container.firstChild) {
       container.removeChild(container.firstChild);
     }
-
     return { ok: true };
   }
 
-  // ---- Public export (merge) -------------------------------------------------
-  composerPreview.ver = MOD_VER; // CHANGED:
-  composerPreview.resolvePreviewContainer = resolvePreviewContainer; // CHANGED:
-  composerPreview.render = render; // CHANGED:
-  composerPreview.clear = clear; // CHANGED:
+  composerPreview.ver = MOD_VER;
+  composerPreview.resolvePreviewContainer = resolvePreviewContainer;
+  composerPreview.render = render;
+  composerPreview.clear = clear;
 
-  // low-level helper (kept for future wiring)
-  composerPreview._findPreviewContainerFallback = findPreviewContainerFallback; // CHANGED:
+  composerPreview._findPreviewContainerFallback = findPreviewContainerFallback;
+  composerPreview._getCanonicalPreviewPane = getCanonicalPreviewPane;
+  composerPreview._getComposerRoot = getComposerRoot;
+  composerPreview._isLikelyPreviewPane = isLikelyPreviewPane;
 
-  window.PPAAdminModules.composerPreview = composerPreview; // CHANGED:
+  window.PPAAdminModules.composerPreview = composerPreview;
 
 })(window, document);
