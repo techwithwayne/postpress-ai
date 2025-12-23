@@ -14,6 +14,9 @@
  *   - { data:{ result:{...} } } (common WP ajax wrapper)
  *
  * ========= CHANGE LOG =========
+ * 2025-12-22.1: Safety hardening: only accept ELEMENT containers (never the Document); guard DOM mutations with try/catch so bad callers can’t hard-crash the Composer screen. Output HTML unchanged. // CHANGED:
+ * 2025-12-21.1: Render Generate preview like stable admin.js (Title as h2; Outline/Draft/SEO sections); // CHANGED:
+ *               replace raw <pre> dump + "Title/Outline/Body/Meta" blocks with safe Markdown-ish HTML. // CHANGED:
  * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
  */
 
@@ -25,7 +28,7 @@
 
   // CHANGED: Do NOT early-return if object pre-exists; merge into it.
   // Late scripts may pre-create namespace objects; we must still attach functions.
-  var MOD_VER = "ppa-admin-generate-view.v2025-12-20.2"; // CHANGED:
+  var MOD_VER = "ppa-admin-generate-view.v2025-12-22.1"; // CHANGED:
   var generateView = window.PPAAdminModules.generateView || {}; // CHANGED:
 
   // ---- Small utils (ES5) -----------------------------------------------------
@@ -56,7 +59,8 @@
   }
 
   function isEl(node) {
-    return !!(node && (node.nodeType === 1 || node.nodeType === 9));
+    // Safety: ONLY accept ELEMENT nodes (never Document). // CHANGED:
+    return !!(node && node.nodeType === 1); // CHANGED:
   }
 
   function getEl(selectorOrEl) {
@@ -76,7 +80,7 @@
   }
 
   function removeAllChildren(el) {
-    if (!el) return;
+    if (!el || el.nodeType !== 1) return; // CHANGED:
     while (el.firstChild) {
       el.removeChild(el.firstChild);
     }
@@ -144,84 +148,172 @@
     };
   }
 
-  // ---- HTML builders (no side effects) --------------------------------------
-  function buildOutlineHtml(outlineArr) {
-    if (!outlineArr || !outlineArr.length) {
-      return '<div class="ppa-preview-empty">No outline returned.</div>';
-    }
+  // ---- Markdown-ish renderer (safe, ES5) ------------------------------------ // CHANGED:
+  // Goal: match stable admin.js preview behavior without requiring marked.js.   // CHANGED:
+  function toHtmlFromText(text) { // CHANGED:
+    var t = trim(text); // CHANGED:
+    if (!t) return ""; // CHANGED:
+    var parts = t.split(/\n{2,}/); // CHANGED:
+    for (var i = 0; i < parts.length; i++) { // CHANGED:
+      var safe = escapeHtml(parts[i]).replace(/\n/g, "<br>"); // CHANGED:
+      parts[i] = "<p>" + safe + "</p>"; // CHANGED:
+    } // CHANGED:
+    return parts.join(""); // CHANGED:
+  } // CHANGED:
 
-    var html = "<ol class=\"ppa-preview-outline\">";
-    for (var i = 0; i < outlineArr.length; i++) {
-      html += "<li>" + escapeHtml(outlineArr[i]) + "</li>";
-    }
-    html += "</ol>";
-    return html;
-  }
+  function markdownToHtml(m) { // CHANGED:
+    var txt = toStr(m); // CHANGED:
+    if (!txt) return ""; // CHANGED:
 
-  function buildBodyHtml(bodyMarkdown, options) {
-    options = options || {};
+    // If it already looks like HTML, return as-is (parity with stable admin.js). // CHANGED:
+    if (/<[a-z][\s\S]*>/i.test(txt)) { // CHANGED:
+      return txt; // CHANGED:
+    } // CHANGED:
 
-    // Default: render as escaped <pre> to avoid any unsafe HTML assumptions.
-    // If the caller explicitly opts in AND marked is present, we can render markdown.
-    var allowMarked = !!options.allowMarked;
+    function applyInline(mdText) { // CHANGED:
+      var s = escapeHtml(mdText); // CHANGED:
+      // Bold: **text** or __text__ // CHANGED:
+      s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>"); // CHANGED:
+      s = s.replace(/__(.+?)__/g, "<strong>$1</strong>"); // CHANGED:
+      // Emphasis: *text* or _text_ // CHANGED:
+      s = s.replace(/\*(.+?)\*/g, "<em>$1</em>"); // CHANGED:
+      s = s.replace(/_(.+?)_/g, "<em>$1</em>"); // CHANGED:
+      return s; // CHANGED:
+    } // CHANGED:
 
-    if (allowMarked && window.marked && typeof window.marked.parse === "function") {
-      // NOTE: marked is not sanitized by default. Caller must decide if this is acceptable.
-      return "<div class=\"ppa-preview-body ppa-preview-body-marked\">" + window.marked.parse(toStr(bodyMarkdown)) + "</div>";
-    }
+    var lines = txt.split(/\r?\n/); // CHANGED:
+    var htmlParts = []; // CHANGED:
+    var inList = false; // CHANGED:
+    var paraBuf = []; // CHANGED:
 
-    return "<pre class=\"ppa-preview-body ppa-preview-body-pre\">" + escapeHtml(toStr(bodyMarkdown)) + "</pre>";
-  }
+    function flushParagraph() { // CHANGED:
+      if (!paraBuf.length) return; // CHANGED:
+      var text = paraBuf.join(" ").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, ""); // CHANGED:
+      if (!text) { paraBuf = []; return; } // CHANGED:
+      htmlParts.push("<p>" + applyInline(text) + "</p>"); // CHANGED:
+      paraBuf = []; // CHANGED:
+    } // CHANGED:
 
-  function buildMetaTableHtml(meta) {
-    meta = meta || {};
+    function flushList() { // CHANGED:
+      if (!inList) return; // CHANGED:
+      htmlParts.push("</ul>"); // CHANGED:
+      inList = false; // CHANGED:
+    } // CHANGED:
 
-    var fk = meta.focus_keyphrase ? escapeHtml(meta.focus_keyphrase) : "";
-    var md = meta.meta_description ? escapeHtml(meta.meta_description) : "";
-    var sl = meta.slug ? escapeHtml(meta.slug) : "";
+    for (var i = 0; i < lines.length; i++) { // CHANGED:
+      var line = lines[i]; // CHANGED:
+      var trimmedLine = trim(line); // CHANGED:
 
-    return (
-      "<table class=\"ppa-preview-meta\" role=\"presentation\">" +
-        "<tbody>" +
-          "<tr><th>Focus keyphrase</th><td>" + (fk || "<em>—</em>") + "</td></tr>" +
-          "<tr><th>Meta description</th><td>" + (md || "<em>—</em>") + "</td></tr>" +
-          "<tr><th>Slug</th><td>" + (sl || "<em>—</em>") + "</td></tr>" +
-        "</tbody>" +
-      "</table>"
-    );
-  }
+      if (!trimmedLine) { // CHANGED:
+        flushParagraph(); // CHANGED:
+        flushList(); // CHANGED:
+        continue; // CHANGED:
+      } // CHANGED:
 
-  function buildPreviewHtml(model, options) {
-    options = options || {};
+      // Headings: #, ##, ###, ####, #####, ###### // CHANGED:
+      var mHeading = trimmedLine.match(/^(#{1,6})\s+(.*)$/); // CHANGED:
+      if (mHeading) { // CHANGED:
+        flushParagraph(); // CHANGED:
+        flushList(); // CHANGED:
+        var level = mHeading[1].length; // CHANGED:
+        if (level < 1) level = 1; // CHANGED:
+        if (level > 6) level = 6; // CHANGED:
+        var hText = applyInline(mHeading[2] || ""); // CHANGED:
+        htmlParts.push("<h" + level + ">" + hText + "</h" + level + ">"); // CHANGED:
+        continue; // CHANGED:
+      } // CHANGED:
 
-    var titleHtml = model.title ? escapeHtml(model.title) : "<em>No title returned.</em>";
+      // Unordered list items: -, *, + at start // CHANGED:
+      var mList = trimmedLine.match(/^[-*+]\s+(.*)$/); // CHANGED:
+      if (mList) { // CHANGED:
+        flushParagraph(); // CHANGED:
+        if (!inList) { // CHANGED:
+          htmlParts.push("<ul>"); // CHANGED:
+          inList = true; // CHANGED:
+        } // CHANGED:
+        htmlParts.push("<li>" + applyInline(mList[1] || "") + "</li>"); // CHANGED:
+        continue; // CHANGED:
+      } // CHANGED:
 
-    var html = "";
-    html += "<div class=\"ppa-preview\">";
+      // Otherwise: paragraph text buffer // CHANGED:
+      paraBuf.push(trimmedLine); // CHANGED:
+    } // CHANGED:
 
-    html += "<div class=\"ppa-preview-section ppa-preview-title\">";
-    html += "<h3 class=\"ppa-preview-h\">Title</h3>";
-    html += "<div class=\"ppa-preview-title-text\">" + titleHtml + "</div>";
-    html += "</div>";
+    flushParagraph(); // CHANGED:
+    flushList(); // CHANGED:
 
-    html += "<div class=\"ppa-preview-section ppa-preview-outline-wrap\">";
-    html += "<h3 class=\"ppa-preview-h\">Outline</h3>";
-    html += buildOutlineHtml(model.outline);
-    html += "</div>";
+    if (!htmlParts.length) { // CHANGED:
+      return toHtmlFromText(txt); // CHANGED:
+    } // CHANGED:
+    return htmlParts.join(""); // CHANGED:
+  } // CHANGED:
 
-    html += "<div class=\"ppa-preview-section ppa-preview-body-wrap\">";
-    html += "<h3 class=\"ppa-preview-h\">Body</h3>";
-    html += buildBodyHtml(model.body_markdown, options);
-    html += "</div>";
+  // ---- HTML builders (no side effects) -------------------------------------- // CHANGED:
+  function buildOutlineHtml(outlineArr) { // CHANGED:
+    if (!outlineArr || !outlineArr.length) { // CHANGED:
+      return ""; // CHANGED:
+    } // CHANGED:
 
-    html += "<div class=\"ppa-preview-section ppa-preview-meta-wrap\">";
-    html += "<h3 class=\"ppa-preview-h\">Meta</h3>";
-    html += buildMetaTableHtml(model.meta);
-    html += "</div>";
+    var html = "<ol>"; // CHANGED:
+    for (var i = 0; i < outlineArr.length; i++) { // CHANGED:
+      html += "<li>" + escapeHtml(outlineArr[i]) + "</li>"; // CHANGED:
+    } // CHANGED:
+    html += "</ol>"; // CHANGED:
+    return html; // CHANGED:
+  } // CHANGED:
 
-    html += "</div>";
-    return html;
-  }
+  function buildMetaListHtml(meta) { // CHANGED:
+    meta = meta || {}; // CHANGED:
+
+    var items = []; // CHANGED:
+    if (meta.focus_keyphrase) { // CHANGED:
+      items.push("<li><strong>Focus keyphrase:</strong> " + escapeHtml(meta.focus_keyphrase) + "</li>"); // CHANGED:
+    } // CHANGED:
+    if (meta.meta_description) { // CHANGED:
+      items.push("<li><strong>Meta description:</strong> " + escapeHtml(meta.meta_description) + "</li>"); // CHANGED:
+    } // CHANGED:
+    if (meta.slug) { // CHANGED:
+      items.push("<li><strong>Slug:</strong> " + escapeHtml(meta.slug) + "</li>"); // CHANGED:
+    } // CHANGED:
+
+    if (!items.length) return ""; // CHANGED:
+    return "<ul>" + items.join("") + "</ul>"; // CHANGED:
+  } // CHANGED:
+
+  function buildPreviewHtml(model, options) { // CHANGED:
+    options = options || {}; // CHANGED:
+
+    // Stable preview structure (parity with admin.js renderGeneratePreview). // CHANGED:
+    var parts = []; // CHANGED:
+
+    if (model.title) { // CHANGED:
+      parts.push("<h2>" + escapeHtml(model.title) + "</h2>"); // CHANGED:
+    } // CHANGED:
+
+    if (model.outline && model.outline.length) { // CHANGED:
+      parts.push("<h3>Outline</h3>"); // CHANGED:
+      parts.push(buildOutlineHtml(model.outline)); // CHANGED:
+    } // CHANGED:
+
+    var bodyHtml = markdownToHtml(model.body_markdown); // CHANGED:
+    if (bodyHtml) { // CHANGED:
+      parts.push("<h3>Draft</h3>"); // CHANGED:
+      parts.push(bodyHtml); // CHANGED:
+    } // CHANGED:
+
+    var metaHtml = buildMetaListHtml(model.meta); // CHANGED:
+    if (metaHtml) { // CHANGED:
+      parts.push("<h3>SEO</h3>"); // CHANGED:
+      parts.push(metaHtml); // CHANGED:
+    } // CHANGED:
+
+    if (!parts.length) { // CHANGED:
+      parts.push("<p>No preview content available.</p>"); // CHANGED:
+    } // CHANGED:
+
+    // Keep wrapper class for backward compatibility with any existing admin CSS. // CHANGED:
+    return "<div class=\"ppa-preview\">" + parts.join("") + "</div>"; // CHANGED:
+  } // CHANGED:
 
   // ---- Render helper (acts only when called) --------------------------------
   /**
@@ -230,7 +322,7 @@
    * - containerOrSelector: DOM element or selector string
    * - input: any supported result shape (see header)
    * - options:
-   *   - allowMarked: boolean (default false) — only used if window.marked exists
+   *   - allowMarked: boolean (kept for compatibility; no longer required for readable output) // CHANGED:
    *   - mode: "replace" (default) or "append"
    *
    * Returns:
@@ -240,7 +332,7 @@
     options = options || {};
     var container = getEl(containerOrSelector);
 
-    if (!container) {
+    if (!container || container.nodeType !== 1) { // CHANGED:
       return {
         model: normalizeGenerateResult(input),
         html: "",
@@ -252,16 +344,22 @@
     var html = buildPreviewHtml(model, options);
 
     var mode = options.mode || "replace";
-    if (mode === "append") {
-      // Append as a wrapper node
-      var wrapper = document.createElement("div");
-      wrapper.innerHTML = html;
-      container.appendChild(wrapper);
-    } else {
-      // Replace contents
-      removeAllChildren(container);
-      container.innerHTML = html;
-    }
+
+    try { // CHANGED:
+      if (mode === "append") {
+        // Append as a wrapper node
+        var wrapper = document.createElement("div");
+        wrapper.innerHTML = html;
+        container.appendChild(wrapper);
+      } else {
+        // Replace contents
+        removeAllChildren(container);
+        container.innerHTML = html;
+      }
+    } catch (e) { // CHANGED:
+      // Fail safe: do not crash the page if caller passes a bad container or DOM is locked. // CHANGED:
+      return { model: model, html: "", container: null }; // CHANGED:
+    } // CHANGED:
 
     return {
       model: model,
@@ -279,6 +377,7 @@
   // low-level helpers (kept for future wiring)
   generateView._escapeHtml = escapeHtml; // CHANGED:
   generateView._unwrapResultShape = unwrapResultShape; // CHANGED:
+  generateView._markdownToHtml = markdownToHtml; // CHANGED:
 
   window.PPAAdminModules.generateView = generateView; // CHANGED:
 
