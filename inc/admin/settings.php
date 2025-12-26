@@ -10,20 +10,23 @@
  * - Display-only caching of last licensing response for admin visibility (no enforcement).
  *
  * Notes:
- * - Server URL is infrastructure; kept internally (constant/option) but NOT shown to end users.  // CHANGED:
+ * - Server URL is infrastructure; kept internally (constant/option) but NOT shown to end users.   // CHANGED:
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
- * 2025-11-19: Initial settings screen & connectivity test (Django URL + shared key). // CHANGED:
- * 2025-12-25: Add license UI + admin-post handlers to call Django /license/* endpoints (server-side). // CHANGED:
- * 2025-12-25: HARDEN: Settings screen + actions admin-only (manage_options).                               // CHANGED:
- * 2025-12-25: UX: Simplify copy for creators; remove technical pipeline language.                          // CHANGED:
- * 2025-12-25: BRAND: Add stable wrapper classes (ppa-admin ppa-settings) for CSS parity with Composer.     // CHANGED:
- * 2025-12-25: CLEAN: Remove inline layout styles; use class hooks for styling later.                       // CHANGED:
- * 2025-12-25: UX: Render fields manually (no duplicate section headings); “grandma-friendly” labels.       // CHANGED:
- * 2025-12-25: FIX: Render notices inside Setup card so they never float outside the frame/grid.            // CHANGED:
- * 2025-12-25: UX: Hide Server URL + Connection Key from UI; License Key is the only user-facing input.     // CHANGED:
- * 2025-12-25: AUTH: If Connection Key is empty, use License Key for X-PPA-Key (legacy-safe).               // CHANGED:
+ * 2025-11-19: Initial settings screen & connectivity test (Django URL + shared key).                              // CHANGED:
+ * 2025-12-25: Add license UI + admin-post handlers to call Django /license/* endpoints (server-side).            // CHANGED:
+ * 2025-12-25: HARDEN: Settings screen + actions admin-only (manage_options).                                     // CHANGED:
+ * 2025-12-25: UX: Simplify copy for creators; remove technical pipeline language.                                // CHANGED:
+ * 2025-12-25: BRAND: Add stable wrapper classes (ppa-admin ppa-settings) for CSS parity with Composer.           // CHANGED:
+ * 2025-12-25: CLEAN: Remove inline layout styles; use class hooks for styling later.                             // CHANGED:
+ * 2025-12-25: UX: Render fields manually (no duplicate section headings); “grandma-friendly” labels.             // CHANGED:
+ * 2025-12-25: FIX: Render notices inside Setup card so they never float outside the frame/grid.                  // CHANGED:
+ * 2025-12-25: UX: Hide Server URL + Connection Key from UI; License Key is the only user-facing input.           // CHANGED:
+ * 2025-12-25: AUTH: If Connection Key is empty, use License Key for X-PPA-Key (legacy-safe).                     // CHANGED:
+ * 2025-12-25: UX GUARDRAILS: Disable Activate until key saved; show Active/Not active badge (pure PHP).           // CHANGED:
+ * 2025-12-26: UX HARDEN: Persist "active on this site" locally after successful Activate; clear on Deactivate.    // CHANGED:
+ *            (UI convenience only; Django remains authoritative.)                                                  // CHANGED:
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -39,6 +42,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 		// ===== License option + transient (display-only) =====
 		const OPT_LICENSE_KEY      = 'ppa_license_key';                                        // CHANGED:
+		const OPT_ACTIVE_SITE      = 'ppa_license_active_site';                                // CHANGED:
 		const TRANSIENT_LAST_LIC   = 'ppa_license_last_result';
 		const LAST_LIC_TTL_SECONDS = 10 * MINUTE_IN_SECONDS;
 
@@ -90,7 +94,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		 *
 		 * Note:
 		 * - We still register legacy options for backwards compatibility (sanitization + storage),
-		 *   but we DO NOT render them in the UI anymore.                                         // CHANGED:
+		 *   but we DO NOT render them in the UI anymore.                                          // CHANGED:
 		 */
 		public static function register_settings() {
 			// (Legacy) Django URL is still supported (constant/option), but not rendered.          // CHANGED:
@@ -218,6 +222,91 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			<?php
 		}
 
+		/**
+		 * Local “active on this site” helper.
+		 *
+		 * IMPORTANT:
+		 * - This is NOT enforcement. Django remains authoritative.
+		 * - This is only used to reduce confusion in the UI (disable Activate + show badge)
+		 *   after a successful Activate action.
+		 */
+		private static function is_active_on_this_site_option() {                               // CHANGED:
+			$stored = get_option( self::OPT_ACTIVE_SITE, '' );                                   // CHANGED:
+			$stored = is_string( $stored ) ? untrailingslashit( $stored ) : '';                  // CHANGED:
+			$home   = untrailingslashit( home_url( '/' ) );                                      // CHANGED:
+			return ( '' !== $stored && $stored === $home );                                      // CHANGED:
+		}
+
+		/**
+		 * Determine “active on this site” from the cached last result (display-only).
+		 *
+		 * Why:
+		 * - NO background calls to Django during page render.
+		 * - NO JS.
+		 * - We only reflect the most recent license action result we already cached.
+		 *
+		 * We support multiple possible shapes from Django without assuming exact keys.
+		 *
+		 * @param mixed $last
+		 * @return string one of: active|inactive|unknown
+		 */
+		private static function derive_activation_state( $last ) {                               // CHANGED:
+			// First priority: our local UI marker (set only after Django said OK).                 // CHANGED:
+			if ( self::is_active_on_this_site_option() ) {                                       // CHANGED:
+				return 'active';                                                                 // CHANGED:
+			}                                                                                      // CHANGED:
+
+			if ( ! is_array( $last ) ) {                                                         // CHANGED:
+				return 'unknown';                                                                // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Common: { ok: true, data: { active: true } } or similar.
+			$data = isset( $last['data'] ) && is_array( $last['data'] ) ? $last['data'] : array(); // CHANGED:
+
+			$candidates = array(                                                                  // CHANGED:
+				// boolean flags                                                                // CHANGED:
+				'active',                                                                         // CHANGED:
+				'is_active',                                                                      // CHANGED:
+				'site_active',                                                                    // CHANGED:
+				'activated',                                                                      // CHANGED:
+				// status strings                                                               // CHANGED:
+				'status',                                                                         // CHANGED:
+				'activation_status',                                                              // CHANGED:
+			);
+
+			foreach ( $candidates as $k ) {                                                       // CHANGED:
+				if ( array_key_exists( $k, $data ) ) {                                            // CHANGED:
+					$v = $data[ $k ];                                                             // CHANGED:
+					if ( is_bool( $v ) ) {                                                        // CHANGED:
+						return $v ? 'active' : 'inactive';                                        // CHANGED:
+					}                                                                              // CHANGED:
+					if ( is_string( $v ) ) {                                                      // CHANGED:
+						$vv = strtolower( trim( $v ) );                                           // CHANGED:
+						if ( in_array( $vv, array( 'active', 'activated', 'on', 'enabled' ), true ) ) { // CHANGED:
+							return 'active';                                                     // CHANGED:
+						}                                                                          // CHANGED:
+						if ( in_array( $vv, array( 'inactive', 'deactivated', 'off', 'disabled' ), true ) ) { // CHANGED:
+							return 'inactive';                                                   // CHANGED:
+						}                                                                          // CHANGED:
+					}                                                                              // CHANGED:
+				}                                                                                  // CHANGED:
+			}
+
+			// Another common: list of active sites and/or current site marked.
+			if ( isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) {          // CHANGED:
+				$home = untrailingslashit( home_url( '/' ) );                                     // CHANGED:
+				foreach ( $data['active_sites'] as $site ) {                                      // CHANGED:
+					if ( is_string( $site ) && untrailingslashit( $site ) === $home ) {           // CHANGED:
+						return 'active';                                                         // CHANGED:
+					}                                                                              // CHANGED:
+				}                                                                                  // CHANGED:
+				// If list exists and we didn't match, it's likely inactive for this site.
+				return 'inactive';                                                                // CHANGED:
+			}
+
+			return 'unknown';                                                                      // CHANGED:
+		}
+
 		// Legacy helpers (not used for UI now, but kept for compatibility).                      // CHANGED:
 		public static function section_connection_intro() {
 			?>
@@ -340,10 +429,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			// Fallback: use License Key for auth (simplified UX).                                 // CHANGED:
-			$lic = self::get_license_key();                                                        // CHANGED:
-			if ( '' !== $lic ) {                                                                   // CHANGED:
-				return $lic;                                                                        // CHANGED:
-			}                                                                                       // CHANGED:
+			$lic = self::get_license_key();                                                       // CHANGED:
+			if ( '' !== $lic ) {                                                                  // CHANGED:
+				return $lic;                                                                       // CHANGED:
+			}                                                                                      // CHANGED:
 
 			return '';
 		}
@@ -501,6 +590,16 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$result = self::normalize_django_response( $response );
 			self::cache_last_license_result( $result );
 
+			// UI convenience marker:
+			// Only set/clear if Django responded ok. This does NOT enforce licensing.              // CHANGED:
+			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {      // CHANGED:
+				if ( 'activate' === $action ) {                                                   // CHANGED:
+					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );               // CHANGED:
+				} elseif ( 'deactivate' === $action ) {                                           // CHANGED:
+					delete_option( self::OPT_ACTIVE_SITE );                                       // CHANGED:
+				}                                                                                 // CHANGED:
+			}                                                                                      // CHANGED:
+
 			$notice = self::notice_from_license_result( ucfirst( $action ), $result );
 			$status = ( isset( $result['ok'] ) && true === $result['ok'] ) ? 'ok' : 'error';
 
@@ -640,6 +739,15 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$last = get_transient( self::TRANSIENT_LAST_LIC );
 
 			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );                      // CHANGED:
+			$val_license = self::sanitize_license_key( $val_license );                             // CHANGED:
+
+			// UX guardrails (pure PHP):
+			// - Must save key before Activate.
+			// - If active marker says active OR cached last result suggests active on this site, disable Activate + show badge. // CHANGED:
+			$has_key          = ( '' !== $val_license );                                           // CHANGED:
+			$activation_state = self::derive_activation_state( $last );                            // CHANGED:
+			$is_active_here   = ( 'active' === $activation_state );                                // CHANGED:
+			$is_inactive_here = ( 'inactive' === $activation_state );                              // CHANGED:
 			?>
 			<div class="wrap ppa-admin ppa-settings">
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
@@ -694,23 +802,58 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						<?php esc_html_e( 'Use these buttons to check or activate this site.', 'postpress-ai' ); ?> <!-- CHANGED: -->
 					</p>
 
+					<?php
+					// Activation badge (display-only; local marker + cached result).                 // CHANGED:
+					if ( $is_active_here ) :                                                         // CHANGED:
+						?>
+						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--active"><?php esc_html_e( 'Active on this site', 'postpress-ai' ); ?></span></p>
+						<?php
+					elseif ( $is_inactive_here ) :                                                    // CHANGED:
+						?>
+						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--inactive"><?php esc_html_e( 'Not active', 'postpress-ai' ); ?></span></p>
+						<?php
+					else :                                                                            // CHANGED:
+						?>
+						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--unknown"><?php esc_html_e( 'Unknown (run Check License)', 'postpress-ai' ); ?></span></p>
+						<?php
+					endif;
+					?>
+
 					<div class="ppa-actions-row">
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-verify' ); ?>
 							<input type="hidden" name="action" value="ppa_license_verify" />
-							<?php submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false ); ?>
+							<?php
+							// Check License stays enabled (even if empty, handler will show friendly notice). // CHANGED:
+							submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false ); // CHANGED:
+							?>
 						</form>
 
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-activate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_activate" />
-							<?php submit_button( __( 'Activate This Site', 'postpress-ai' ), 'primary', 'ppa_license_activate_btn', false ); ?>
+							<?php
+							// Guardrails:
+							// - Must save License Key first.
+							// - If already active, disable Activate (prevents double-activation confusion).   // CHANGED:
+							$disable_activate = ( ! $has_key ) || $is_active_here;                           // CHANGED:
+							$attrs            = $disable_activate ? array( 'disabled' => 'disabled' ) : array(); // CHANGED:
+							submit_button( __( 'Activate This Site', 'postpress-ai' ), 'primary', 'ppa_license_activate_btn', false, $attrs ); // CHANGED:
+							?>
+							<?php if ( ! $has_key ) : ?>
+								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first. Then you can activate.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+							<?php elseif ( $is_active_here ) : ?>
+								<p class="description ppa-inline-help"><?php esc_html_e( 'This site is already active.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+							<?php endif; ?>
 						</form>
 
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-deactivate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_deactivate" />
-							<?php submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false ); ?>
+							<?php
+							// Deactivate stays enabled (per locked rules), but still requires a saved key in handler. // CHANGED:
+							submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false ); // CHANGED:
+							?>
 						</form>
 					</div>
 
