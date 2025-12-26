@@ -14,10 +14,20 @@
  *
  * ========= CHANGE LOG =========
  *
- * 2025-12-25 — Tightened spacing + typography, improved contrast, refined panel depth, and normalized
- *              buttons/inputs for a more “serious business tool” feel.
- * 2025-12-25 — FIX: Notices inside cards now have stronger contrast + left accent bar (visible on dark UI). // CHANGED:
- * 2025-12-25 — FIX: Force WP secondary buttons (button-secondary) to match PostPress styling.              // CHANGED:
+ * 2025-12-25 — Fixed composer-like frame padding and added centered max-width container to prevent content
+ *              from stretching to the edges of the screen.
+ *
+ * 2025-12-25 — Updated H1 styling: applied orange color, sharper font weight, and refined spacing for a
+ *              cleaner, more prominent heading.
+ *
+ * 2025-12-25 — Reworked two-column layout to avoid reliance on :nth-of-type selectors, ensuring notices and
+ *              other dynamic elements no longer break the grid structure.
+ *
+ * 2025-12-25 — FIX: Primary button was being overridden by generic .button styling; corrected specificity. // CHANGED:
+ * 2025-12-25 — UX: Right-side License Actions area spaced + stacked (less cramped / less confusing).       // CHANGED:
+ * 2025-12-25 — POLISH: Button height parity, calmer spacing, smaller debug box, better disabled styling.   // CHANGED:
+ *
+ * 2025-12-26 — FINAL POLISH: Subtle hover/focus transitions + calmer card hover, without changing layout.  // CHANGED:
  */
 
 body.postpress-ai_page_postpress-ai-settings {
@@ -153,12 +163,20 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
   box-shadow: var(--ppa-shadow-soft);
   box-sizing: border-box;
   margin: 0 !important;
+
+  transition: border-color .14s ease, box-shadow .14s ease, transform .10s ease; /* CHANGED: */
+}
+
+/* Calmer “alive” feeling without being flashy */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card:hover {
+  border-color: rgba(255,108,0,.16); /* CHANGED: */
+  box-shadow: 0 6px 20px rgba(0,0,0,.42); /* CHANGED: */
 }
 
 /* Panel titles */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .title {
   color: var(--ppa-accent);
-  margin: 0 0 8px;
+  margin: 0 0 10px; /* CHANGED: a touch more breathing room */
   font-size: 16px;
   font-weight: 900;
   letter-spacing: .15px;
@@ -173,7 +191,7 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-h
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card h3 {
   color: var(--ppa-text);
-  margin: 14px 0 8px;
+  margin: 16px 0 8px; /* CHANGED: calm separation */
   font-size: 13px;
   font-weight: 900;
   letter-spacing: .1px;
@@ -266,7 +284,7 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings textar
   box-shadow: 0 0 0 2px rgba(255,108,0,.22) !important;
 }
 
-/* Saved key badge */
+/* Saved key badge (code pill) */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings code {
   background: rgba(255,255,255,.06);
   color: var(--ppa-text);
@@ -276,27 +294,39 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings code {
   font-size: 12px;
 }
 
-/* Debug textarea */
+/* Debug textarea (POLISH: smaller, less dominant) */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings textarea.ppa-debug-box {
-  min-height: 220px;
+  min-height: 180px; /* CHANGED: was 220px */
   resize: vertical;
   line-height: 1.45;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* Buttons (serious + consistent) */
+/* ===================================================================== */
+/* Buttons (high specificity, stable)                                      */
+/* ===================================================================== */
+
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button,
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary, /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary,        /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-primary {
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-primary,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.delete {
   border-radius: 10px !important;
   padding: 10px 16px !important;
-  min-height: 40px !important;
+  min-height: 42px !important; /* CHANGED: parity across all */
   line-height: 18px !important;
   font-weight: 900 !important;
   letter-spacing: .15px !important;
   text-shadow: none !important;
   box-shadow: none !important;
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease, transform .08s ease, box-shadow .14s ease; /* CHANGED: */
+}
+
+/* Ensure all buttons render the same height even if WP changes line-height somewhere */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button {
+  height: 42px !important; /* CHANGED: button height lock */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings p.submit {
@@ -304,7 +334,17 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings p.subm
   padding: 0 !important;
 }
 
-/* Primary */
+/* Hover feel (only when enabled) */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not([disabled]):hover,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not([disabled]):focus {
+  box-shadow: 0 0 0 2px rgba(255,108,0,.10) !important; /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not([disabled]):active {
+  transform: translateY(1px);
+}
+
+/* Primary (orange) */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-primary {
   background: var(--ppa-accent) !important;
   border: 1px solid rgba(0,0,0,.0) !important;
@@ -317,26 +357,30 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .butto
   color: #121212 !important;
 }
 
-/* Secondary (FORCE override of WP core .button-secondary) */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button,
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary, /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary {        /* CHANGED: */
+/* Secondary (dark charcoal) */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary {
   background: #242424 !important;
   border: 1px solid rgba(255,255,255,.14) !important;
   color: var(--ppa-text) !important;
 }
 
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:hover,
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:focus,
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary:hover, /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary:focus,  /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary:hover,         /* CHANGED: */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary:focus {        /* CHANGED: */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary:hover,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.button-secondary:focus,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary:hover,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-secondary:focus {
   border-color: rgba(255,108,0,.70) !important;
   color: var(--ppa-text) !important;
 }
 
-/* Danger */
+/* Default buttons that are NOT explicitly primary/secondary/delete */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not(.button-primary):not(.button-secondary):not(.delete) {
+  background: #242424 !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  color: var(--ppa-text) !important;
+}
+
+/* Danger (outlined red) */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.delete {
   background: transparent !important;
   border: 1px solid rgba(214,54,56,.78) !important;
@@ -349,19 +393,144 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .butto
   box-shadow: 0 0 0 2px rgba(214,54,56,.16) !important;
 }
 
-/* License action buttons row */
+/* Disabled buttons (guardrails) */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button[disabled],
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:disabled {
+  opacity: .58 !important; /* CHANGED: slightly clearer */
+  cursor: not-allowed !important;
+  transform: none !important;
+  filter: grayscale(.10);
+  box-shadow: none !important; /* CHANGED: */
+}
+
+/* Disabled primary: muted orange but still “designed” */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-primary[disabled],
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button-primary:disabled {
+  background: rgba(255,108,0,.28) !important; /* CHANGED */
+  border: 1px solid rgba(255,108,0,.22) !important; /* CHANGED */
+  color: rgba(18,18,18,.78) !important; /* CHANGED */
+}
+
+/* Disabled delete button: subtle red outline, not loud */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.delete[disabled],
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button.delete:disabled {
+  border-color: rgba(214,54,56,.35) !important; /* CHANGED */
+  color: rgba(255,215,216,.72) !important; /* CHANGED */
+}
+
+/* ===================================================================== */
+/* Status badges (Active / Inactive / Unknown)                             */
+/* ===================================================================== */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px; /* CHANGED: slightly taller, calmer */
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: var(--ppa-text);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08px;
+  vertical-align: middle;
+
+  transition: border-color .14s ease, background-color .14s ease; /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.40);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--active {
+  border-color: rgba(255,108,0,.42);
+  background: rgba(255,108,0,.10);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--active::before {
+  background: var(--ppa-accent);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--inactive {
+  border-color: rgba(214,54,56,.42);
+  background: rgba(214,54,56,.10);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--inactive::before {
+  background: var(--ppa-danger);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--unknown {
+  border-color: rgba(255,255,255,.18);
+  background: rgba(255,255,255,.05);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--unknown::before {
+  background: rgba(245,245,245,.55);
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-help .ppa-badge {
+  margin-left: 10px; /* CHANGED */
+}
+
+/* ===================================================================== */
+/* License action buttons row — MICRO POLISH                               */
+/* ===================================================================== */
+
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-actions-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px; /* CHANGED: slightly more space after status */
+  align-items: stretch;
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form {
   margin: 0;
+  width: 100%;
 }
 
-/* Responsive */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form p.submit {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form .button,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form .button-primary,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form .button-secondary,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-action-form .button.delete {
+  width: 100% !important;
+  text-align: center !important;
+}
+
+/* Helper under the disabled Activate button: calm + readable */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-inline-help {
+  margin: 8px 0 0 !important;
+  padding-left: 2px !important;
+  color: rgba(245,245,245,.58) !important; /* CHANGED */
+  font-size: 12px !important; /* CHANGED */
+  line-height: 1.4 !important; /* CHANGED */
+}
+
+/* “Last response” breathing room */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card h3 + .ppa-help {
+  margin-top: 0 !important;
+  margin-bottom: 12px !important;
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-debug-box {
+  margin-top: 10px !important;
+}
+
+/* ===================================================================== */
+/* Responsive                                                             */
+/* ===================================================================== */
+
 @media (max-width: 1020px) {
   body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings {
     grid-template-columns: 1fr;
