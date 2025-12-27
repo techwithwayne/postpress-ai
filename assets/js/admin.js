@@ -7,6 +7,7 @@
  * 2025-12-25.2: FIX ppa_store 400: send JSON-body transport for ppa_store (same as ppa_generate) so PHP proxy reads valid JSON from php://input and forwards object-root to Django. This resolves Django “Root must be an object” and unblocks Save Draft redirects. // CHANGED:
  * 2025-12-25.1: FIX Save Draft (Store): ensure local WP draft is created by sending status + target_sites in store payload; redirect to edit_link (or fallback edit URL) after successful store. Also fix status dropdown incorrectly overwriting payload.mode; improve edit_link/id extraction from nested response shapes. // CHANGED:
  * 2025-12-22.1: Preview outline cleanup… // CHANGED:
+ * 2025-12-27.1: FIX nonce lookup order: prefer window.PPA.nonce first for admin AJAX (ppa_usage_snapshot, etc.). No other behavior changes. // CHANGED:
  */
 
 (function () {
@@ -67,7 +68,9 @@
   }
 
   function getNonce() {
-    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce);
+    // NEW ORDER (LOCKED): window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
+    if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce); // CHANGED:
+    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce); // CHANGED:
     var el = $('#ppa-nonce');
     if (el && el.value) return String(el.value);
     var data = $('[data-ppa-nonce]');
