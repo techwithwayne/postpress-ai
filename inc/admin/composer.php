@@ -1,185 +1,142 @@
 <?php
 /**
  * CHANGE LOG
- * 2025-10-19 — Added "Preview" heading to right pane to match page heading. // CHANGED
- * 2025-10-19 — Cleaned UI; dark two-column layout with Subject, Genre, Tone, Word Count,
- *               Optional brief, and actions (Preview, Save Draft, Publish).
- * - Capability checks are delegated to the menu registration in postpress-ai.php.
- * - Inline JS is a defensive fallback; main wiring should live in assets/js/admin.js.
+ * 2025-11-16.2 — Add "Generate Draft" button (ppa-generate) for AI /generate/ pipeline.              // CHANGED:
+ * 2025-11-16 — Clarify "Save Draft (Store)" label so UI reflects store behavior.                     // CHANGED:
+ * 2025-11-11 — Add Advanced fields (#ppa-title, #ppa-excerpt, #ppa-slug) for admin.js autofill/store parity.  // CHANGED:
+ * 2025-11-10 — UI polish: make Preview primary (accent) button; localize H1 text.
+ * 2025-11-09 — Remove hardcoded <link> CSS fallback; centralized enqueue owns styles.
+ * 2025-11-09 — Update H1 to "PostPress Composer" for menu consistency.
+ * 2025-11-08 — Add versioned external CSS fallback (?ver=filemtime) to bust cache.
+ * 2025-11-08 — Strip inline <style>; rely on assets/css/admin.css.
+ * 2025-11-08 — Add #ppa-toolbar-msg live region for notices from admin.js.
+ * 2025-10-31 — Removed inline <script>; events handled by admin.js.
+ * 2025-10-19 — Added "Preview" heading to right pane.
  */
 
-/** Exit if accessed directly. */
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
+if (!defined('ABSPATH')) { exit; }
 
-error_log( 'PPA: composer.php rendering at ' . date( 'c' ) ); // CHANGED
+// Optional debug trace (safe; no secrets)
+error_log('PPA: composer.php rendering at ' . date('c'));
 
-// Nonce for AJAX (header X-PPA-Nonce) — validated server-side where applicable
-$ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' );
+// Nonce for AJAX headers (validated server-side where applicable)
+$ppa_nonce    = wp_create_nonce('ppa-admin');
+$current_user = wp_get_current_user();
+
+// Styles are enqueued centrally in inc/admin/enqueue.php; no local <link> fallback.
 ?>
-<div id="ppa-composer" class="ppa-composer ppa-composer-wrap" style="color:#fff;">
-    <style>
-        /* Fallback styles — primary styles should live in assets/css/admin.css */
-        .ppa-composer-wrap { display:grid; grid-template-columns: 1fr 1fr; gap:24px; }
-        .ppa-form-panel, .ppa-preview-panel {
-            background:#111; border:1px solid #222; border-radius:8px; padding:18px;
-        }
-        .ppa-composer-wrap h1 { margin:0 0 12px; font-size:22px; color:#ff6c00; } /* match accent */ /* CHANGED */
-        .ppa-composer-wrap label { display:block; margin:8px 0 4px; font-weight:600; }
-        .ppa-composer-wrap input[type="text"],
-        .ppa-composer-wrap select,
-        .ppa-composer-wrap input[type="number"],
-        .ppa-composer-wrap textarea {
-            width:100%; padding:8px; border-radius:6px; border:1px solid #333;
-            background:#0f0f0f; color:#fff;
-        }
-        .ppa-composer-wrap textarea { min-height:90px; }
-        .ppa-actions { margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .ppa-btn { font-weight:600; padding:8px 16px; border-radius:6px; cursor:pointer; border:none; }
-        .ppa-btn-primary { background:#ff6c00; color:#121212; }
-        .ppa-btn-secondary { background:#222; color:#fff; border:1px solid #333; }
-        .ppa-note { font-size:13px; color:#bbb; margin-top:8px; display:block; }
-        #ppa-preview-pane { margin-top:12px; padding:12px; border-radius:6px; min-height:120px; background:#fff; color:#121212; }
-        @media (max-width: 1100px) { .ppa-composer-wrap { grid-template-columns: 1fr; } }
-    </style>
+<!-- (No inline CSS; centralized enqueue supplies admin.css and admin.js) -->
 
-    <?php printf( '<input type="hidden" id="ppa-nonce" value="%s" />', esc_attr( $ppa_nonce ) ); ?>
+<div class="wrap ppa-composer-wrap" id="ppa-composer" data-ppa-nonce="<?php echo esc_attr($ppa_nonce); ?>">
 
-    <div class="ppa-form-panel">
-        <h1>PostPress AI Composer</h1>
+    <div class="ppa-form-panel" aria-label="<?php echo esc_attr__( 'PostPress AI Composer', 'postpress-ai' ); ?>">
+        <h1><?php echo esc_html__( 'PostPress Composer', 'postpress-ai' ); ?></h1>
+        <p class="ppa-hint">
+            <?php
+            /* translators: %s: current user display name */
+            printf(
+                esc_html__( 'Signed in as %s.', 'postpress-ai' ),
+                esc_html( $current_user->display_name ?: $current_user->user_login )
+            );
+            ?>
+        </p>
 
-        <label for="ppa-subject">Subject / Title</label>
-        <input id="ppa-subject" name="ppa_subject" type="text" placeholder="e.g. 5 ways to improve your website speed" value="" />
+        <!-- Live notice region consumed by admin.js -->
+        <div id="ppa-toolbar-msg" class="ppa-notice" role="status" aria-live="polite"></div>
 
-        <label for="ppa-subject-extra">Optional brief / instructions</label>
-        <textarea id="ppa-subject-extra" name="ppa_subject_extra" rows="3" placeholder="(optional: additional context or outline)"></textarea>
+        <div class="ppa-form-group">
+            <label for="ppa-subject"><?php echo esc_html__( 'Subject / Title', 'postpress-ai' ); ?></label>
+            <input type="text" id="ppa-subject" placeholder="<?php echo esc_attr__( 'What is this post about?', 'postpress-ai' ); ?>">
+        </div>
 
-        <label for="ppa-genre">Genre</label>
-        <select id="ppa-genre" name="ppa_genre">
-            <option value="blog">Blog Post</option>
-            <option value="news">News Article</option>
-            <option value="listicle">Listicle</option>
-            <option value="tutorial">Tutorial</option>
-        </select>
+        <div class="ppa-form-group">
+    <label for="ppa-audience">
+        <?php echo esc_html__( 'Target audience', 'postpress-ai' ); ?>
+    </label>
+    <input
+        type="text"
+        id="ppa-audience"
+        placeholder="<?php echo esc_attr__( 'e.g. busy small business owners in Iowa', 'postpress-ai' ); ?>"
+    />
+</div>
 
-        <label for="ppa-tone">Tone</label>
-        <select id="ppa-tone" name="ppa_tone">
-            <option value="casual">Casual</option>
-            <option value="professional">Professional</option>
-            <option value="friendly" selected>Friendly</option>
-        </select>
+        <div class="ppa-inline">
+            <div class="ppa-form-group">
+                <label for="ppa-genre"><?php echo esc_html__( 'Genre', 'postpress-ai' ); ?></label>
+                <select id="ppa-genre">
+                    <option value=""><?php echo esc_html__( 'Auto', 'postpress-ai' ); ?></option>
+                    <option value="howto"><?php echo esc_html__( 'How-to', 'postpress-ai' ); ?></option>
+                    <option value="listicle"><?php echo esc_html__( 'Listicle', 'postpress-ai' ); ?></option>
+                    <option value="news"><?php echo esc_html__( 'News', 'postpress-ai' ); ?></option>
+                    <option value="review"><?php echo esc_html__( 'Review', 'postpress-ai' ); ?></option>
+                </select>
+            </div>
+            <div class="ppa-form-group">
+                <label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
+                <select id="ppa-tone">
+                    <option value=""><?php echo esc_html__( 'Auto', 'postpress-ai' ); ?></option>
+                    <option value="casual"><?php echo esc_html__( 'Casual', 'postpress-ai' ); ?></option>
+                    <option value="friendly"><?php echo esc_html__( 'Friendly', 'postpress-ai' ); ?></option>
+                    <option value="professional"><?php echo esc_html__( 'Professional', 'postpress-ai' ); ?></option>
+                    <option value="technical"><?php echo esc_html__( 'Technical', 'postpress-ai' ); ?></option>
+                </select>
+            </div>
+            <div class="ppa-form-group">
+                <label for="ppa-word-count"><?php echo esc_html__( 'Word Count', 'postpress-ai' ); ?></label>
+                <input type="number" id="ppa-word-count" min="300" step="100" placeholder="<?php echo esc_attr__( 'e.g. 1200', 'postpress-ai' ); ?>">
+            </div>
+        </div>
 
-        <label for="ppa-wordcount">Approx. word count</label>
-        <input id="ppa-wordcount" name="ppa_wordcount" type="number" min="50" max="2000" value="300" />
+        <div class="ppa-form-group">
+            <label for="ppa-brief"><?php echo esc_html__( 'Optional brief / extra instructions', 'postpress-ai' ); ?></label>
+            <textarea id="ppa-brief" rows="6" placeholder="<?php echo esc_attr__( 'Any details, links, or constraints you want the AI to follow.', 'postpress-ai' ); ?>"></textarea>
+        </div>
 
-        <div class="ppa-actions">
-            <button id="ppa-preview-btn" class="ppa-btn ppa-btn-primary" type="button">Preview</button>
-            <button id="ppa-save-btn" class="ppa-btn ppa-btn-secondary" type="button">Save Draft</button>
-            <button id="ppa-publish-btn" class="ppa-btn ppa-btn-secondary" type="button">Publish</button>
-            <span class="ppa-note">Preview uses the AI backend. “Save Draft” creates a draft in WordPress. “Publish” will publish immediately.</span>
+        <!-- Advanced (optional) fields wired to admin.js autofill/store -->
+        <details class="ppa-advanced">
+            <summary><?php echo esc_html__( 'Advanced (optional)', 'postpress-ai' ); ?></summary>
+            <div class="ppa-form-group">
+                <label for="ppa-title"><?php echo esc_html__( 'Title (override)', 'postpress-ai' ); ?></label>
+                <input type="text" id="ppa-title" placeholder="<?php echo esc_attr__( 'Auto-filled after Preview', 'postpress-ai' ); ?>">
+            </div>
+            <div class="ppa-form-group">
+                <label for="ppa-excerpt"><?php echo esc_html__( 'Excerpt (optional)', 'postpress-ai' ); ?></label>
+                <textarea id="ppa-excerpt" rows="3" placeholder="<?php echo esc_attr__( 'Auto-filled after Preview', 'postpress-ai' ); ?>"></textarea>
+            </div>
+            <div class="ppa-form-group">
+                <label for="ppa-slug"><?php echo esc_html__( 'Slug (optional)', 'postpress-ai' ); ?></label>
+                <input type="text" id="ppa-slug" placeholder="<?php echo esc_attr__( 'auto-generated-from-title', 'postpress-ai' ); ?>">
+            </div>
+        </details>
+
+        <div class="ppa-actions" role="group" aria-label="<?php echo esc_attr__( 'Composer actions', 'postpress-ai' ); ?>">
+            <button id="ppa-preview" class="ppa-btn ppa-btn-primary" type="button">
+                <?php echo esc_html__( 'Preview', 'postpress-ai' ); ?>
+            </button>
+            <button id="ppa-generate" class="ppa-btn ppa-btn-secondary" type="button">                       <!-- CHANGED -->
+                <?php echo esc_html__( 'Generate Draft', 'postpress-ai' ); ?>                                <!-- CHANGED -->
+            </button>                                                                                        <!-- CHANGED -->
+            <button id="ppa-draft" class="ppa-btn ppa-btn-secondary" type="button">
+                <?php echo esc_html__( 'Save Draft (Store)', 'postpress-ai' ); ?>
+            </button>
+            <button id="ppa-publish" class="ppa-btn ppa-btn-secondary" type="button">
+                <?php echo esc_html__( 'Publish', 'postpress-ai' ); ?>
+            </button>
+            <span class="ppa-note">
+                <?php
+                echo esc_html__(
+                    '“Preview” talks to the AI backend. “Generate Draft” asks AI to create a full draft and SEO meta. “Save Draft (Store)” creates a draft in WordPress via the AI store pipeline. “Publish” publishes immediately.',
+                    'postpress-ai'
+                );                                                                                            // CHANGED:
+                ?>
+            </span>
         </div>
     </div>
 
-    <div class="ppa-preview-panel">
-        <h1>Preview</h1> <!-- Added heading to match left panel --> <!-- CHANGED -->
-        <div id="ppa-preview-pane" aria-live="polite"><em style="color:#666;">(Preview will appear here once generated.)</em></div>
+    <div class="ppa-preview-panel" aria-label="<?php echo esc_attr__( 'Preview panel', 'postpress-ai' ); ?>">
+        <h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
+        <div id="ppa-preview-pane" aria-live="polite">
+            <em><?php echo esc_html__( '(Preview will appear here once generated.)', 'postpress-ai' ); ?></em>
+        </div>
     </div>
 </div>
-
-<script>
-// Defensive fallback wiring; primary logic should live in assets/js/admin.js
-console.info('PPA: composer.php inline script init');
-(function(){
-    const $ = (id) => document.getElementById(id);
-    const previewBtn = $('ppa-preview-btn');
-    const saveBtn    = $('ppa-save-btn');
-    const publishBtn = $('ppa-publish-btn');
-    const previewPane = $('ppa-preview-pane');
-    const nonceEl = $('ppa-nonce');
-
-    function getPayload(){
-        return {
-            subject: ($('ppa-subject')||{}).value || '',
-            extra:   ($('ppa-subject-extra')||{}).value || '',
-            genre:   ($('ppa-genre')||{}).value || '',
-            tone:    ($('ppa-tone')||{}).value || 'friendly',
-            word_count: parseInt((($('ppa-wordcount')||{}).value)||'300',10)||300
-        };
-    }
-
-    async function callAjax(action, body){
-        const headers = { 'Content-Type': 'application/json' };
-        if (nonceEl && nonceEl.value) headers['X-PPA-Nonce'] = nonceEl.value;
-        const url = (window.ajaxurl || '/wp-admin/admin-ajax.php') + '?action=' + encodeURIComponent(action);
-        const res = await fetch(url, { method:'POST', credentials:'same-origin', headers, body: JSON.stringify(body||{}) });
-        const text = await res.text();
-        try { return JSON.parse(text); } catch(e){ throw new Error('Non-JSON: ' + text.slice(0,400)); }
-    }
-
-    function extractHTML(json){
-        if (!json) return '';
-        if (typeof json.html==='string') return json.html;
-        if (json.result && typeof json.result.html==='string') return json.result.html;
-        if (json.data && typeof json.data.html==='string') return json.data.html;
-        if (typeof json.content==='string') return json.content;
-        if (typeof json.preview==='string') return json.preview;
-        return '';
-    }
-
-    previewBtn && previewBtn.addEventListener('click', async () => {
-        console.info('PPA: Preview clicked');
-        const payload = getPayload();
-        previewPane.innerHTML = '<p style="color:#666;margin:0;">Requesting preview…</p>';
-        try{
-            const json = await callAjax('ppa_preview', payload);
-            const html = extractHTML(json);
-            previewPane.innerHTML = html || '<div class="notice notice-error"><p>No preview HTML in response.</p></div>';
-        }catch(err){
-            console.error('PPA: Preview error', err);
-            previewPane.innerHTML = '<div class="notice notice-error"><p>Preview failed. Check console.</p></div>';
-        }
-    });
-
-    saveBtn && saveBtn.addEventListener('click', async () => {
-        console.info('PPA: Save Draft clicked');
-        const p = getPayload();
-        try{
-            const json = await callAjax('ppa_store', {
-                title: p.subject || 'Untitled',
-                content: previewPane.innerHTML || (p.extra ? '<p>'+p.extra+'</p>' : '<p></p>'),
-                status: 'draft',
-                meta: { genre:p.genre, tone:p.tone, word_count:p.word_count }
-            });
-            const ok = json && (json.ok===true || json.success===true);
-            const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
-            alert(ok ? ('Draft saved. Post ID: '+id) : 'Save failed — see console.');
-            if (!ok) console.error('PPA: Save response', json);
-        }catch(err){
-            alert('Save failed — see console.');
-            console.error('PPA: Save error', err);
-        }
-    });
-
-    publishBtn && publishBtn.addEventListener('click', async () => {
-        if (!confirm('Publish now?')) return;
-        console.info('PPA: Publish clicked');
-        const p = getPayload();
-        try{
-            const json = await callAjax('ppa_store', {
-                title: p.subject || 'Untitled',
-                content: previewPane.innerHTML || (p.extra ? '<p>'+p.extra+'</p>' : '<p></p>'),
-                status: 'publish',
-                meta: { genre:p.genre, tone:p.tone, word_count:p.word_count }
-            });
-            const ok = json && (json.ok===true || json.success===true);
-            const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
-            alert(ok ? ('Published. Post ID: '+id) : 'Publish failed — see console.');
-            if (!ok) console.error('PPA: Publish response', json);
-        }catch(err){
-            alert('Publish failed — see console.');
-            console.error('PPA: Publish error', err);
-        }
-    });
-})();
-</script>

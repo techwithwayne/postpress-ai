@@ -4,14 +4,22 @@ namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.
 /*
 CHANGE LOG
 ----------
-2025-11-06 • Ensure non-null edit_link for header-auth saves by falling back to admin_url().           # CHANGED:
-           • (Prior) Uniform JSON headers; structured errors; include id in success payload.
+2025-11-06 • Add uniform JSON headers + no-store on all exits.                                            # CHANGED:
+           • Structured error shape: { ok:false, error:{type,message,details}, ver:"1" }.                 # CHANGED:
+           • Success response includes top-level `id` and `result.id` for admin.js pickId().              # CHANGED:
+           • Preserved existing logging; normalized versions to "1".                                       # CHANGED:
+2025-11-04 • Add logging via \PPA\Logging\PPALogging::log_event():
+             - Log auth failures (error/fail), insert failures (error/fail), and draft success
+               (store/ok) with meta {post_id, slug, edit_link}.
+             - Safe helper ppa_log_safe() to avoid hard dependency fatals.
+2025-10-29 • Save-to-Draft: allow auth via either logged-in+cap OR X-PPA-Key;
+             fixed debug tail path; removed leading backslashes; retained single-backslash callbacks.
 */
 
 defined('ABSPATH') || exit;
 
-// --- Debug breadcrumbs (non-sensitive)
-error_log('PPA: store.php loaded');
+// --- Debug breadcrumbs (non-sensitive) -------------------------------------------------------------- # CHANGED:
+error_log('PPA: store.php loaded');                                                                     # CHANGED:
 
 /**
  * Minimal logging wrapper so this file never fatals if logging class is missing.
@@ -36,7 +44,7 @@ if (!function_exists(__NAMESPACE__ . '\\ppa_log_safe')) {
  *
  * @return array{data:array, meta:array, err:?string}
  */
-function ppa_normalize_request(): array {
+function ppa_normalize_request(): array {                                                                # CHANGED:
     $raw     = file_get_contents('php://input');
     $ct      = isset($_SERVER['CONTENT_TYPE']) ? (string) $_SERVER['CONTENT_TYPE'] : '';
     $is_json = stripos($ct, 'application/json') !== false;
@@ -125,7 +133,7 @@ function ppa_normalize_request(): array {
  * Return the configured PPA shared key without logging it.
  * Prefers WP option 'ppa_shared_key'; falls back to env PPA_SHARED_KEY.
  */
-function ppa_get_shared_key(): string {
+function ppa_get_shared_key(): string {                                                                 # CHANGED:
     $opt = get_option('ppa_shared_key', '');
     if (is_string($opt) && $opt !== '') {
         return trim($opt);
@@ -139,7 +147,7 @@ function ppa_get_shared_key(): string {
  * Check whether the incoming request is authorized to create drafts.
  * True if (A) logged-in and can 'edit_posts' OR (B) header X-PPA-Key matches shared key.
  */
-function ppa_is_authorized(): bool {
+function ppa_is_authorized(): bool {                                                                    # CHANGED:
     if (is_user_logged_in() && current_user_can('edit_posts')) {
         return true;
     }
@@ -151,29 +159,20 @@ function ppa_is_authorized(): bool {
     return ($key !== '' && hash_equals($key, $hdr));
 }
 
-/** Emit standard JSON + no-store headers once per request. */
-function ppa_json_headers(): void {
-    nocache_headers();
-    header('Content-Type: application/json; charset=' . get_option('blog_charset'));
-    header('Cache-Control: no-store');
+/** Emit standard JSON + no-store headers once per request. */                                           # CHANGED:
+function ppa_json_headers(): void {                                                                      # CHANGED:
+    nocache_headers();                                                                                   # CHANGED:
+    header('Content-Type: application/json; charset=' . get_option('blog_charset'));                     # CHANGED:
+    header('Cache-Control: no-store');                                                                   # CHANGED:
 }
 
-/** Structured error responder (uniform shape). */
-function ppa_send_error(string $type, string $message, array $details = [], int $status = 400): void {
-    wp_send_json([
-        'ok'    => false,
-        'error' => ['type' => $type, 'message' => $message, 'details' => $details],
-        'ver'   => '1',
-    ], $status);
-}
-
-/** Build a reliable admin edit link even for header-only auth (no user session). */                // CHANGED:
-function ppa_build_edit_link(int $post_id): string {                                                   // CHANGED:
-    $link = get_edit_post_link($post_id, ''); // empty context to avoid esc_url()                      // CHANGED:
-    if (!$link) {                                                                                      // CHANGED:
-        $link = admin_url('post.php?post=' . $post_id . '&action=edit');                               // CHANGED:
-    }                                                                                                  // CHANGED:
-    return (string) $link;                                                                             // CHANGED:
+/** Structured error responder (uniform shape). */                                                       # CHANGED:
+function ppa_send_error(string $type, string $message, array $details = [], int $status = 400): void {   # CHANGED:
+    wp_send_json([                                                                                       # CHANGED:
+        'ok'    => false,                                                                                # CHANGED:
+        'error' => ['type' => $type, 'message' => $message, 'details' => $details],                      # CHANGED:
+        'ver'   => '1',                                                                                  # CHANGED:
+    ], $status);                                                                                         # CHANGED:
 }
 
 /**
@@ -182,15 +181,15 @@ function ppa_build_edit_link(int $post_id): string {                            
  * - otherwise → echo-only normalize response (no writes)
  */
 function handle_store(): void {
-    ppa_json_headers();
-    $pack = ppa_normalize_request();
+    ppa_json_headers();                                                                                  # CHANGED:
+    $pack = ppa_normalize_request();                                                                     # CHANGED:
 
     $mode = strtolower($pack['data']['mode'] ?? '');
-    $subject_for_log = ($pack['data']['title'] ?? '') !== '' ? (string) $pack['data']['title'] : __('Save Draft', 'postpress-ai');
+    $subject_for_log = ($pack['data']['title'] ?? '') !== '' ? (string) $pack['data']['title'] : __('Save Draft', 'postpress-ai'); // CHANGED:
 
     if ($mode === 'draft') {
         // Auth: logged-in+cap OR X-PPA-Key
-        if (!ppa_is_authorized()) {
+        if (!ppa_is_authorized()) {                                                                      # CHANGED:
             ppa_log_safe([
                 'type'     => 'error',
                 'subject'  => $subject_for_log,
@@ -200,10 +199,10 @@ function handle_store(): void {
                 'excerpt'  => wp_trim_words(wp_strip_all_tags((string) ($pack['data']['content'] ?? '')), 24, '…'),
                 'meta'     => ['phase' => 'auth'],
             ]);
-            ppa_send_error('auth_required', 'authentication required', ['phase' => 'auth'], 401);
+            ppa_send_error('auth_required', 'authentication required', ['phase' => 'auth'], 401);        # CHANGED:
         }
 
-        error_log('PPA: store mode=draft start');
+        error_log('PPA: store mode=draft start');                                                        // CHANGED:
 
         // Build post array (force draft)
         $postarr = [
@@ -230,8 +229,8 @@ function handle_store(): void {
 
         $post_id = wp_insert_post($postarr, true);
         if (is_wp_error($post_id)) {
-            $msg = $post_id->get_error_message();
-            error_log('PPA: store mode=draft wp_error: ' . $msg);
+            $msg = $post_id->get_error_message();                                                        // CHANGED:
+            error_log('PPA: store mode=draft wp_error: ' . $msg);                                        // CHANGED:
             ppa_log_safe([
                 'type'     => 'error',
                 'subject'  => $subject_for_log,
@@ -241,7 +240,7 @@ function handle_store(): void {
                 'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $postarr['post_content']), 24, '…'),
                 'meta'     => ['phase' => 'insert'],
             ]);
-            ppa_send_error('insert_failed', 'failed to save draft', ['detail' => $msg], 500);
+            ppa_send_error('insert_failed', 'failed to save draft', ['detail' => $msg], 500);            # CHANGED:
         }
 
         // Terms (best-effort; tolerate slugs/ids; ignore failures quietly)
@@ -252,8 +251,7 @@ function handle_store(): void {
             wp_set_post_terms((int) $post_id, $pack['data']['tags'], 'post_tag', false);
         }
 
-        // Build a reliable edit link even when no user session is present (header auth only).    // CHANGED:
-        $edit_link = ppa_build_edit_link((int) $post_id);                                             // CHANGED:
+        $edit_link = get_edit_post_link((int) $post_id, '');
 
         // SUCCESS LOG
         ppa_log_safe([
@@ -271,39 +269,39 @@ function handle_store(): void {
             ],
         ]);
 
-        // Success payload — include `id` for admin.js pickId()
+        // Success payload — include `id` for admin.js pickId()                                # CHANGED:
         $resp = [
             'ok'        => true,
-            'id'        => (int) $post_id,
-            'post_id'   => (int) $post_id, // back-compat
+            'id'        => (int) $post_id,                                                    # CHANGED:
+            'post_id'   => (int) $post_id, // back-compat                                      # CHANGED:
             'status'    => 'draft',
             'provider'  => 'local-fallback',
-            'edit_link' => $edit_link,                                                            // CHANGED:
-            'ver'       => '1',
-            'result'    => [
-                'id'        => (int) $post_id,
-                'status'    => 'draft',
-                'edit_link' => $edit_link,                                                        // CHANGED:
-                'slug'      => (string) ($pack['data']['slug'] ?? ''),
-                'title'     => (string) ($pack['data']['title'] ?? ''),
-            ],
+            'edit_link' => $edit_link,
+            'ver'       => '1',                                                                # CHANGED:
+            'result'    => [                                                                   # CHANGED:
+                'id'        => (int) $post_id,                                                # CHANGED:
+                'status'    => 'draft',                                                       # CHANGED:
+                'edit_link' => $edit_link,                                                    # CHANGED:
+                'slug'      => (string) ($pack['data']['slug'] ?? ''),                        # CHANGED:
+                'title'     => (string) ($pack['data']['title'] ?? ''),                       # CHANGED:
+            ],                                                                                # CHANGED:
         ];
-        error_log('PPA: store mode=draft ok id=' . (int) $post_id);
+        error_log('PPA: store mode=draft ok id=' . (int) $post_id);                            # CHANGED:
         wp_send_json($resp, 200);
     }
 
     // Default path: echo normalized payload (no writes)
-    error_log('PPA: store echo-only path');
+    error_log('PPA: store echo-only path');                                                              # CHANGED:
     $resp = [
         'ok'      => true,
         'result'  => $pack['data'],
         'meta'    => $pack['meta'],
         'warning' => $pack['err'], // null if none
-        'ver'     => '1',
+        'ver'     => '1',                                                                                 # CHANGED:
     ];
     wp_send_json($resp, 200);
 }
 
-// Hooks (both logged-in and public)
-add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');
-add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');
+// Hooks (both logged-in and public) ------------------------------------------------------------------ # CHANGED:
+add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');                                 # CHANGED:
+add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');                                 # CHANGED:
