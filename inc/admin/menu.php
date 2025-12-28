@@ -3,7 +3,8 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
- * 2025-12-28: FIX: Remove duplicate “PostPress Composer” submenu entry.
+ * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
+ * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
  *             WP already auto-creates the first submenu for the parent slug via add_menu_page().              // CHANGED:
  *             We keep the rename of that auto submenu label, but do not add a second submenu item.           // CHANGED:
  *
@@ -25,8 +26,8 @@
  * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;
  *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.
  * 2025-11-08: Add submenus under the top-level:
- *             - Rename default submenu to “PostPress Composer” (same slug as parent).
- *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.
+ *             - Rename default submenu to "PostPress Composer" (same slug as parent).
+ *             - Add "Testbed" submenu (slug: ppa-testbed) under PostPress AI.
  *             - Remove legacy Tools→Testbed to avoid duplicates.
  * 2025-11-04: New file. Restores the top-level "PostPress AI" admin menu and composer renderer.
  *             - Registers menu with capability 'edit_posts' (Admin/Editor/Author).
@@ -126,15 +127,27 @@ if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {             
 /**
  * Register the top-level "PostPress AI" menu and route to the Composer renderer.
  * Also adds:
- *  - Submenu “PostPress Composer” (renames the default submenu label).
- *  - Submenu “Settings” (admin-only).
- *  - Submenu “Testbed” (hidden unless PPA_ENABLE_TESTBED === true).
+ *  - Submenu "PostPress Composer" (renames the default submenu label).
+ *  - Submenu "Settings" (admin-only).
+ *  - Submenu "Testbed" (hidden unless PPA_ENABLE_TESTBED === true).
  */
 if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 	function ppa_register_admin_menu() {
 		$capability_composer = 'edit_posts';
 		$capability_admin    = 'manage_options'; // Settings + Testbed are admin-only.                // CHANGED:
 		$menu_slug           = 'postpress-ai';
+
+		// Custom SVG icon for PostPress AI                                                         // CHANGED:
+		$icon_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <path d="M3 2h8.5c3.59 0 6.5 2.91 6.5 6.5S15.09 15 11.5 15H8v3H3V2z" fill="#ff8c00" opacity="0.2"/>
+  <g stroke="#ff8c00" stroke-width="1.2" stroke-linecap="round" fill="none">
+    <circle cx="12" cy="7" r="1.5"/>
+    <circle cx="7" cy="11" r="1.2"/>
+    <path d="M12 8.5 L12 10 L10 12 L7 12"/>
+    <path d="M7 11 L7 9.5"/>
+  </g>
+</svg>'; // CHANGED:
+		$menu_icon = 'data:image/svg+xml;base64,' . base64_encode( $icon_svg );                      // CHANGED:
 
 		// Top-level menu (Composer)
 		add_menu_page(
@@ -143,11 +156,11 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			$capability_composer,
 			$menu_slug,
 			'ppa_render_composer',
-			'dashicons-welcome-widgets-menus',
-			65
+			$menu_icon,                                                                              // CHANGED:
+			3                                                                                        // CHANGED: position 3 = high priority (right after Dashboard)
 		);
 
-		// Rename the auto-generated first submenu to “PostPress Composer”
+		// Rename the auto-generated first submenu to "PostPress Composer"
 		// NOTE: WP auto-creates this first submenu for the parent slug; do NOT add a duplicate.      // CHANGED:
 		global $submenu;
 		if ( isset( $submenu[ $menu_slug ][0] ) ) {
