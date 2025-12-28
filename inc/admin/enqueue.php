@@ -3,6 +3,10 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
+ * 2025-12-27 • FIX: Detect Settings screen reliably and enqueue admin-settings.css there.                  # CHANGED:
+ * 2025-12-27 • FIX: Enforce UNBREAKABLE RULE — Settings loads ONLY admin-settings.css (NOT admin.css).    # CHANGED:
+ * 2025-12-27 • FIX: Expand "is our page" gating so Settings gets CSS while keeping JS only on main/testbed.# CHANGED:
+ *
  * 2025-12-10.2 • Enqueue ppa-admin-editor.js (editor helpers) between core and admin.js; no behavior change.      # CHANGED:
  * 2025-12-20.2 • Register modular admin modules (ppa-admin-*.js) and enqueue only when non-empty; keep admin.js as boot. # CHANGED:
  * 2025-12-09.1 • Enqueue ppa-admin-core.js before admin.js so shared helpers live in PPAAdmin.core; no behavior change. # CHANGED:
@@ -39,6 +43,7 @@ if (!function_exists('ppa_admin_enqueue')) {
         $admin_comp_store_js_rel    = 'assets/js/ppa-admin-composer-store.js';              // CHANGED:
         $admin_js_rel                = 'assets/js/admin.js';
         $admin_css_rel               = 'assets/css/admin.css';
+        $admin_settings_css_rel      = 'assets/css/admin-settings.css';                                                // CHANGED:
         $testbed_js_rel              = 'inc/admin/ppa-testbed.js';
         $admin_spinner_rel           = 'assets/js/admin-preview-spinner.js';                                             // CHANGED:
 
@@ -54,6 +59,7 @@ if (!function_exists('ppa_admin_enqueue')) {
         $admin_comp_store_js_file    = $plugin_root_dir . '/' . $admin_comp_store_js_rel;    // CHANGED:
         $admin_js_file                = $plugin_root_dir . '/' . $admin_js_rel;
         $admin_css_file               = $plugin_root_dir . '/' . $admin_css_rel;
+        $admin_settings_css_file      = $plugin_root_dir . '/' . $admin_settings_css_rel;                                     // CHANGED:
         $testbed_js_file              = $plugin_root_dir . '/' . $testbed_js_rel;
         $admin_spinner_file           = $plugin_root_dir . '/' . $admin_spinner_rel;                                        // CHANGED:
 
@@ -71,6 +77,7 @@ if (!function_exists('ppa_admin_enqueue')) {
             $admin_comp_store_js_url    = $base_url . '/' . $admin_comp_store_js_rel;        // CHANGED:
             $admin_js_url                = $base_url . '/' . $admin_js_rel;
             $admin_css_url               = $base_url . '/' . $admin_css_rel;
+            $admin_settings_css_url      = $base_url . '/' . $admin_settings_css_rel;                                          // CHANGED:
             $testbed_js_url              = $base_url . '/' . $testbed_js_rel;
             $admin_spinner_url           = $base_url . '/' . $admin_spinner_rel;                                          // CHANGED:
         } else {
@@ -85,6 +92,7 @@ if (!function_exists('ppa_admin_enqueue')) {
             $admin_comp_store_js_url    = plugins_url($admin_comp_store_js_rel,    $plugin_main_file);        // CHANGED:
             $admin_js_url                = plugins_url($admin_js_rel,        $plugin_main_file);
             $admin_css_url               = plugins_url($admin_css_rel,       $plugin_main_file);
+            $admin_settings_css_url      = plugins_url($admin_settings_css_rel, $plugin_main_file);                                            // CHANGED:
             $testbed_js_url              = plugins_url($testbed_js_rel,      $plugin_main_file);
             $admin_spinner_url           = plugins_url($admin_spinner_rel,   $plugin_main_file);                                 // CHANGED:
         }
@@ -102,6 +110,7 @@ if (!function_exists('ppa_admin_enqueue')) {
             $admin_comp_store_js_url    = set_url_scheme($admin_comp_store_js_url, 'https');                  // CHANGED:
             $admin_js_url                = set_url_scheme($admin_js_url, 'https');                                        // CHANGED:
             $admin_css_url               = set_url_scheme($admin_css_url, 'https');                                       // CHANGED:
+            $admin_settings_css_url      = set_url_scheme($admin_settings_css_url, 'https');                              // CHANGED:
             $testbed_js_url              = set_url_scheme($testbed_js_url, 'https');                                      // CHANGED:
             $admin_spinner_url           = set_url_scheme($admin_spinner_url, 'https');                                   // CHANGED:
         }                                                                                                          // CHANGED:
@@ -118,6 +127,7 @@ if (!function_exists('ppa_admin_enqueue')) {
         $admin_comp_store_js_ver    = file_exists($admin_comp_store_js_file)    ? (string) filemtime($admin_comp_store_js_file)    : (string) time(); // CHANGED:
         $admin_js_ver                = file_exists($admin_js_file)     ? (string) filemtime($admin_js_file)        : (string) time();
         $admin_css_ver               = file_exists($admin_css_file)    ? (string) filemtime($admin_css_file)       : (string) time();
+        $admin_settings_css_ver      = file_exists($admin_settings_css_file) ? (string) filemtime($admin_settings_css_file) : (string) time(); // CHANGED:
         $testbed_js_ver              = file_exists($testbed_js_file)   ? (string) filemtime($testbed_js_file)      : (string) time();
         $admin_spinner_ver           = file_exists($admin_spinner_file)   ? (string) filemtime($admin_spinner_file)   : (string) time(); // CHANGED:
 
@@ -137,13 +147,22 @@ if (!function_exists('ppa_admin_enqueue')) {
         }
         $page_param = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : '';
 
-        // Screen IDs
-        $slug_main_ui         = 'toplevel_page_postpress-ai';      // top-level Composer page
+        // Screen IDs / hooks
+        $slug_main_ui         = 'toplevel_page_postpress-ai';                      // top-level Composer page
+        $slug_settings        = 'postpress-ai_page_postpress-ai-settings';         // Settings submenu            # CHANGED:
         $slug_testbed         = 'postpress-ai_page_postpress-ai-testbed';
 
         // Fallback logic: $hook param is reliable, $screen_id can be empty under edge contexts
-        $is_main_ui = ($hook === $slug_main_ui) || ($screen_id === $slug_main_ui) || ($page_param === 'postpress-ai');
-        $is_testbed = ($hook === $slug_testbed) || ($screen_id === $slug_testbed) || ($page_param === 'postpress-ai-testbed');
+        $is_main_ui   = ($hook === $slug_main_ui)   || ($screen_id === $slug_main_ui)   || ($page_param === 'postpress-ai');
+        $is_settings  = ($hook === $slug_settings)  || ($screen_id === $slug_settings)  || ($page_param === 'postpress-ai-settings'); // CHANGED:
+        $is_testbed   = ($hook === $slug_testbed)   || ($screen_id === $slug_testbed)   || ($page_param === 'postpress-ai-testbed');
+
+        // Our pages (used to gate purge + config)
+        $is_ppa_page = ($is_main_ui || $is_settings || $is_testbed);                                                   // CHANGED:
+
+        if (!$is_ppa_page) {                                                                                          // CHANGED:
+            return;                                                                                                    // CHANGED:
+        }                                                                                                              // CHANGED:
 
         // ---------------------------------------------------------------------
         // Build shared config (window.PPA) — exposed before admin.js
@@ -213,12 +232,28 @@ if (!function_exists('ppa_admin_enqueue')) {
         $purge_by_rel($admin_comp_store_js_rel,    'script');  // CHANGED:
         $purge_by_rel($admin_js_rel,        'script');                                                                 // (kept)
         $purge_by_rel($admin_css_rel,       'style');                                                                  // (kept)
+        $purge_by_rel($admin_settings_css_rel, 'style');                                                               // CHANGED:
         $purge_by_rel($testbed_js_rel,      'script');                                                                 // (kept)
         $purge_by_rel($admin_spinner_rel,   'script');                                                                 // CHANGED:
 
         // ---------------------------------------------------------------------
-        // Enqueue assets on main UI and Testbed (CLI will generally skip)
+        // Enqueue assets
         // ---------------------------------------------------------------------
+
+        /**
+         * CSS RULES:
+         * - Settings loads ONLY admin-settings.css (no admin.css).                                      # CHANGED:
+         * - Composer/Testbed use admin.css.                                                            # CHANGED:
+         */
+
+        if ($is_settings) {                                                                                           // CHANGED:
+            // Settings CSS only (UNBREAKABLE RULE)
+            wp_register_style('ppa-admin-settings-css', $admin_settings_css_url, array(), $admin_settings_css_ver, 'all'); // CHANGED:
+            wp_enqueue_style('ppa-admin-settings-css');                                                               // CHANGED:
+            return;                                                                                                   // CHANGED: no JS stack needed on Settings
+        }                                                                                                             // CHANGED:
+
+        // Composer + Testbed
         if ($is_main_ui || $is_testbed) {
             // CSS
             wp_register_style('ppa-admin-css', $admin_css_url, array(), $admin_css_ver, 'all');
@@ -305,3 +340,6 @@ if (!function_exists('ppa_admin_enqueue')) {
         }
     }
 }
+
+// Ensure hook is registered (some restore states lose this line).                                      # CHANGED:
+add_action('admin_enqueue_scripts', 'ppa_admin_enqueue', 9);                                           # CHANGED:
