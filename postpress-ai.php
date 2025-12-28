@@ -13,6 +13,16 @@
 
 /**
  * CHANGE LOG
+ * 2025-12-28 — HARDEN: Arm admin-post fallback only when the incoming request action matches our settings actions.
+ *              This reduces debug.log noise and avoids attaching extra hooks on unrelated admin-post requests. # CHANGED:
+ * 2025-12-28 — HARDEN: Detect admin-post via $pagenow OR PHP_SELF basename for stacks where $pagenow isn't set
+ *              yet at plugins_loaded.                                                                          # CHANGED:
+ *
+ * 2025-12-28 — FIX: Admin-post fallback handlers. When clicking "Activate This Site", WP hits admin-post.php.
+ *              settings.php is normally only included by the Settings page renderer (menu.php), so on admin-post
+ *              requests the handler may not exist → blank admin-post screen. We now register tiny fallback hooks
+ *              ONLY on admin-post.php requests, requiring settings.php and dispatching the correct handler. # CHANGED:
+ *
  * 2025-11-11 — Fix syntax error in includes block (require_once shortcodes); keep enqueue + ver overrides.     # CHANGED:
  * 2025-11-11 — Add defensive remove_action() before our enqueue hook to avoid duplicate earlier hooks.        # CHANGED:
  * 2025-11-11 — Script ver override by SRC: force filemtime ?ver for ANY handle whose src points to          # CHANGED:
@@ -72,6 +82,77 @@ add_action( 'plugins_loaded', function () {
 	$logging = PPA_PLUGIN_DIR . 'inc/logging/class-ppa-logging.php';
 	if ( file_exists( $logging ) ) { require_once $logging; \PPA\Logging\PPALogging::init(); }
 }, 9 );
+
+/** ---------------------------------------------------------------------------------
+ * Admin-post fallback handlers (Settings actions)
+ *
+ * Why:
+ * - The Settings UI file (inc/admin/settings.php) is normally included only when visiting the Settings screen
+ *   via the menu renderer (inc/admin/menu.php).                                         # CHANGED:
+ * - But license buttons post to wp-admin/admin-post.php. If settings.php isn't included on that request,
+ *   the admin_post_* handlers may not be registered → blank admin-post screen.          # CHANGED:
+ *
+ * Fix:
+ * - ONLY on admin-post.php requests, register tiny fallback handlers for our settings actions.
+ * - Each handler require_once()'s settings.php and calls the correct static method.     # CHANGED:
+ * - This avoids loading settings.php on every admin request, and avoids duplicate hooks on normal pages. # CHANGED:
+ * -------------------------------------------------------------------------------- */
+add_action( 'plugins_loaded', function () {                                                           // CHANGED:
+	if ( ! is_admin() ) {                                                                             // CHANGED:
+		return;                                                                                       // CHANGED:
+	}                                                                                                  // CHANGED:
+
+	// CHANGED: Robust detection: some stacks don't have $GLOBALS['pagenow'] ready this early.
+	$pagenow  = isset( $GLOBALS['pagenow'] ) ? (string) $GLOBALS['pagenow'] : '';                      // CHANGED:
+	$php_self = isset( $_SERVER['PHP_SELF'] ) ? basename( (string) $_SERVER['PHP_SELF'] ) : '';        // CHANGED:
+	if ( 'admin-post.php' !== $pagenow && 'admin-post.php' !== $php_self ) {                           // CHANGED:
+		return;                                                                                       // CHANGED:
+	}                                                                                                  // CHANGED:
+
+	// CHANGED: Only arm fallback when THIS request is actually one of our actions.
+	$req_action = '';                                                                                  // CHANGED:
+	if ( isset( $_REQUEST['action'] ) ) {                                                              // CHANGED:
+		$req_action = sanitize_key( wp_unslash( $_REQUEST['action'] ) );                               // CHANGED:
+	}                                                                                                  // CHANGED:
+
+	$action_map = array(                                                                               // CHANGED:
+		'ppa_test_connectivity' => 'handle_test_connectivity',                                          // CHANGED:
+		'ppa_license_verify'    => 'handle_license_verify',                                             // CHANGED:
+		'ppa_license_activate'  => 'handle_license_activate',                                           // CHANGED:
+		'ppa_license_deactivate'=> 'handle_license_deactivate',                                         // CHANGED:
+	);                                                                                                  // CHANGED:
+
+	if ( '' === $req_action || ! isset( $action_map[ $req_action ] ) ) {                               // CHANGED:
+		return;                                                                                       // CHANGED:
+	}                                                                                                  // CHANGED:
+
+	$settings_file = PPA_PLUGIN_DIR . 'inc/admin/settings.php';                                        // CHANGED:
+
+	$dispatch = function ( $method, $action ) use ( $settings_file ) {                                 // CHANGED:
+		// Require settings.php only when a settings action actually fires (this request).            // CHANGED:
+		if ( file_exists( $settings_file ) ) {                                                        // CHANGED:
+			require_once $settings_file;                                                              // CHANGED:
+		}                                                                                              // CHANGED:
+
+		if ( class_exists( 'PPA_Admin_Settings' ) && is_callable( array( 'PPA_Admin_Settings', $method ) ) ) { // CHANGED:
+			// Call the real handler (it does capability + nonce checks and redirects).              // CHANGED:
+			call_user_func( array( 'PPA_Admin_Settings', $method ) );                                 // CHANGED:
+			exit; // Safety: the handler normally redirects+exits; this guarantees no fall-through.  // CHANGED:
+		}                                                                                              // CHANGED:
+
+		error_log( 'PPA: admin-post fallback could not dispatch ' . $action . ' → ' . $method );       // CHANGED:
+		wp_die( esc_html__( 'PostPress AI settings handler missing. Please reinstall or contact support.', 'postpress-ai' ), 'PostPress AI', array( 'response' => 500 ) ); // CHANGED:
+	};                                                                                                 // CHANGED:
+
+	$method = $action_map[ $req_action ];                                                              // CHANGED:
+
+	// CHANGED: Register ONLY the one hook needed for this request.
+	add_action( 'admin_post_' . $req_action, function () use ( $dispatch, $method, $req_action ) {     // CHANGED:
+		$dispatch( $method, $req_action );                                                            // CHANGED:
+	}, 0 );                                                                                            // CHANGED:
+
+	error_log( 'PPA: admin-post fallback armed (action=' . $req_action . ')' );                        // CHANGED:
+}, 7 );                                                                                                 // CHANGED:
 
 /** ---------------------------------------------------------------------------------
  * AJAX handlers — load early so admin-ajax.php can find them
