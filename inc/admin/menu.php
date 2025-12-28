@@ -3,6 +3,14 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
+ * 2025-12-28: FIX: Remove duplicate “PostPress Composer” submenu entry.
+ *             WP already auto-creates the first submenu for the parent slug via add_menu_page().              // CHANGED:
+ *             We keep the rename of that auto submenu label, but do not add a second submenu item.           // CHANGED:
+ *
+ * 2025-12-28: FIX: Register the 'ppa_settings' settings group early on admin_init so options.php accepts option_page=ppa_settings
+ *             even when settings.php is only included by the menu callback (prevents "allowed options list" error).            // CHANGED:
+ *             (No Django/endpoints/CORS/auth changes. No layout/CSS changes. menu.php only.)                                  // CHANGED:
+ *
  * 2025-12-27: FIX: Add Settings submenu (admin-only) under PostPress AI and route to settings.php include. // CHANGED:
  * 2025-12-27: FIX: Gate Testbed submenu behind PPA_ENABLE_TESTBED === true (hidden by default).            // CHANGED:
  * 2025-12-27: FIX: Normalize Testbed slug to "postpress-ai-testbed" to match screen detection/enqueue.     // CHANGED:
@@ -35,6 +43,87 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Sanitize helper for simple PPA settings (string or array).
+ * This is intentionally conservative: only supports scalar strings + nested arrays of strings.      // CHANGED:
+ */
+if ( ! function_exists( 'ppa_sanitize_setting_value' ) ) {                                         // CHANGED:
+	function ppa_sanitize_setting_value( $value ) {                                                 // CHANGED:
+		$value = wp_unslash( $value );                                                               // CHANGED:
+
+		if ( is_array( $value ) ) {                                                                  // CHANGED:
+			$out = array();                                                                          // CHANGED:
+			foreach ( $value as $k => $v ) {                                                         // CHANGED:
+				// Preserve keys, sanitize values recursively.                                        // CHANGED:
+				$out[ $k ] = ppa_sanitize_setting_value( $v );                                       // CHANGED:
+			}                                                                                        // CHANGED:
+			return $out;                                                                             // CHANGED:
+		}                                                                                            // CHANGED:
+
+		return sanitize_text_field( (string) $value );                                               // CHANGED:
+	}                                                                                                // CHANGED:
+}                                                                                                    // CHANGED:
+
+/**
+ * Settings API bootstrap (critical for options.php saves).
+ *
+ * WHY:
+ * - The Settings page form posts to options.php with option_page=ppa_settings.
+ * - If register_setting('ppa_settings', ...) has NOT run by admin_init, WP rejects the save with:
+ *   "Error: The ppa_settings options page is not in the allowed options list."
+ * - settings.php is currently included by the Settings menu callback (late), so it may miss admin_init on save.  // CHANGED:
+ *
+ * FIX:
+ * - Register the relevant setting(s) here on admin_init (early), without touching settings.php.
+ * - This is WP-only, does not impact Django/endpoints/CORS/auth/etc.                                                  // CHANGED:
+ */
+if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {                                 // CHANGED:
+	function ppa_register_settings_api_bootstrap() {                                                 // CHANGED:
+		if ( ! is_admin() ) {                                                                       // CHANGED:
+			return;                                                                                 // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Only admins can hit options.php successfully anyway, but keep this tight.                 // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {                                             // CHANGED:
+			return;                                                                                 // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Avoid overriding an existing registration if settings.php (or another file) registers first.  // CHANGED:
+		global $wp_registered_settings;                                                             // CHANGED:
+		if ( ! is_array( $wp_registered_settings ) ) {                                              // CHANGED:
+			$wp_registered_settings = array();                                                      // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Most common pattern: a single option for the license key.                                 // CHANGED:
+		if ( ! isset( $wp_registered_settings['ppa_license_key'] ) ) {                              // CHANGED:
+			register_setting(                                                                       // CHANGED:
+				'ppa_settings',                                                                     // CHANGED: option_group (must match settings_fields('ppa_settings'))
+				'ppa_license_key',                                                                  // CHANGED: option_name
+				array(                                                                              // CHANGED:
+					'type'              => 'string',                                                // CHANGED:
+					'sanitize_callback' => 'ppa_sanitize_setting_value',                            // CHANGED:
+					'default'           => '',                                                      // CHANGED:
+				)                                                                                   // CHANGED:
+			);                                                                                       // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Alternate pattern: store settings as an array under one option named same-ish as the group.   // CHANGED:
+		// This is harmless if unused, and prevents edge cases where the form uses ppa_settings[...].    // CHANGED:
+		if ( ! isset( $wp_registered_settings['ppa_settings'] ) ) {                                  // CHANGED:
+			register_setting(                                                                       // CHANGED:
+				'ppa_settings',                                                                     // CHANGED:
+				'ppa_settings',                                                                     // CHANGED:
+				array(                                                                              // CHANGED:
+					'type'              => 'array',                                                 // CHANGED:
+					'sanitize_callback' => 'ppa_sanitize_setting_value',                            // CHANGED:
+					'default'           => array(),                                                 // CHANGED:
+				)                                                                                   // CHANGED:
+			);                                                                                       // CHANGED:
+		}                                                                                            // CHANGED:
+	}                                                                                                // CHANGED:
+	add_action( 'admin_init', 'ppa_register_settings_api_bootstrap', 0 );                            // CHANGED: priority 0 = early
+}                                                                                                    // CHANGED:
+
+/**
  * Register the top-level "PostPress AI" menu and route to the Composer renderer.
  * Also adds:
  *  - Submenu “PostPress Composer” (renames the default submenu label).
@@ -59,20 +148,11 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 		);
 
 		// Rename the auto-generated first submenu to “PostPress Composer”
+		// NOTE: WP auto-creates this first submenu for the parent slug; do NOT add a duplicate.      // CHANGED:
 		global $submenu;
 		if ( isset( $submenu[ $menu_slug ][0] ) ) {
 			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );
 		}
-
-		// Explicitly ensure the Composer submenu exists with the same slug as parent
-		add_submenu_page(
-			$menu_slug,                                 // parent
-			__( 'PostPress Composer', 'postpress-ai' ), // page title
-			__( 'PostPress Composer', 'postpress-ai' ), // menu title
-			$capability_composer,
-			$menu_slug,                                 // same slug as parent
-			'ppa_render_composer'
-		);
 
 		// Settings submenu (admin-only)                                                        // CHANGED:
 		add_submenu_page(                                                                         // CHANGED:
