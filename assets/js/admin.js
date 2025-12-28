@@ -4,52 +4,16 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-12-22.1: Preview outline cleanup: stop rendering Outline in a <pre> block; render Outline via markdownToHtml() inside a <div class="ppa-outline"> to prevent pre overflow/wrap issues; broaden list hardening scope to the full preview pane so Outline + Body bullets render reliably. // CHANGED:
- *               No contract changes. No endpoint changes. No payload shape changes. Preview pane placement preserved. // CHANGED:
- * 2025-12-21.8: Preview pane list hardening: restore visible bullets + safe left padding and wrapping for ul/ol/li inside the preview pane only (WP admin resets were hiding markers / clipping). // CHANGED:
- *               No contract changes. No endpoint changes. No payload shape changes. No global CSS edits. // CHANGED:
- * 2025-12-21.7: Fix ppa_generate 400 ('Root must be an object') by restoring proven JSON-body transport for ppa_generate only; keep other actions on legacy form transport to avoid breaking stable store/publish flows. // CHANGED:
- *               No endpoint changes; no payload key changes; preserves preview pane hardening + exports + module bridge parity. // CHANGED:
- * 2025-12-21.6: Fix ppa_generate 400 ('Root must be an object') by sending payload as a real POST object (payload[...]) so PHP proxy forwards JSON object root; other actions unchanged. // CHANGED:
- * 2025-12-21.5: Fix btn* refs to use real DOM elements (avoid addEventListener crash); use getElementById for toolbar buttons + msg container (no behavior change). // CHANGED:
- * 2025-12-21.3: Remove version parity check block (data-at... older comment history; no runtime behavior changes. // CHANGED:
- * 2025-12-21.2: Shrink admin.js by removing legacy hidden ...view) click handler + related response/html helpers; // CHANGED:
- *               keep Generate/Store/Publish flows and expo...e behavior unchanged.                                // CHANGED:
- * 2025-12-21.1: Composer preview hardening: force Generate...legacy transport only (no modular DOM side-effects); // CHANGED:
- *               capture + stop propagation on button click...to prevent orchestrator hijacks;                     // CHANGED:
- *               add preview pane resolver + visibility unh...de (no DOM moves, no new styles);                    // CHANGED:
- *               export postStore so required console check... pass.                                               // CHANGED:
- * 2025-12-20.2: Fix PPAAdmin export merge so new helpers always exist (postGenerate no longer undefined); // CHANGED:
- *               add robust module bridge polling + on-demand patch so module apiPost equals legacy apiPost. // CHANGED:
- *               add reactive PPAAdminModules setter + 30s ...true even if modules load late or overwrite exports. // CHANGED:
- * 2025-12-20.1: Nonce priority fix — prefer ppaAdmin.nonce before data-ppa-nonce to prevent wp_rest nonce being sent to admin-ajax actions. // CHANGED:
- * 2025-12-09.1: Expose selected helpers on window.PPAAdmin for safe future modularization (no behavior change). // CHANGED:
- * 2025-11-18.7: Clean AI-generated titles to strip trailing ellipsis/punctuation before filling WP title. // CHANGED:
- * 2025-11-18.6: Hide Preview button in Composer and rename Generate Draft → Generate Preview.         // CHANGED:
- * 2025-11-18.5: Preview now builds HTML from AI title + body/markdown/text instead of only raw html; // CHANGED:
- *               JSON diagnostic fallback kept only as last resort.                                   // CHANGED:
- * 2025-11-17.2: Enhance Markdown → HTML rendering for generate preview (headings, lists, inline em/strong). // CHANGED:
- * 2025-11-17: Wire target audience field into preview payload.                                       // CHANGED:
- * 2025-11-16.3: Wire ppa_generate (Generate button) to AI /generate/ endpoint; render structured draft + SEO    // CHANGED:
- *               meta in preview and auto-fill core fields where empty.                                         // CHANGED:
- * 2025-11-16.2: Clarify draft success notice to mention WordPress draft; bump JS internal version.              // CHANGED:
- * 2025-11-16: Add mode hint to store payloads (draft/publish/update) for Django/WP store pipeline.               // CHANGED:
- * 2025-11-15: Add X-PPA-View ('composer') and X-Requested-With headers for Composer AJAX parity with Django logs;  // CHANGED:
- *             keeps existing payload/UX unchanged while improving diagnostics.                                      // CHANGED:
- * 2025-11-11.6: Always render preview from result.html (fallback to content); set data-ppa-provider on pane;    // CHANGED:
- *               de-duplicate readCsvValues; add window.PPA_LAST_PREVIEW debug hook; version bump.               // CHANGED:
- * 2025-11-11.5: Preview payload now maps UI fields for Django normalize endpoint:
- *               - subject → title, brief → content (+html/text synonyms).
- *               - If no HTML returned, show JSON diagnostic in preview pane.
- * 2025-11-11.4: Add early guard for Preview when both subject & brief are empty (UX); DevTools test hook.
- * 2025-11-11.3: Support nested preview shapes (data.result.content/html, result.content/html); provider pick.
- * 2025-10..2025-11: Prior fixes & UX polish (see earlier entries).
+ * 2025-12-25.2: FIX ppa_store 400: send JSON-body transport for ppa_store (same as ppa_generate) so PHP proxy reads valid JSON from php://input and forwards object-root to Django. This resolves Django “Root must be an object” and unblocks Save Draft redirects. // CHANGED:
+ * 2025-12-25.1: FIX Save Draft (Store): ensure local WP draft is created by sending status + target_sites in store payload; redirect to edit_link (or fallback edit URL) after successful store. Also fix status dropdown incorrectly overwriting payload.mode; improve edit_link/id extraction from nested response shapes. // CHANGED:
+ * 2025-12-22.1: Preview outline cleanup… // CHANGED:
+ * 2025-12-27.1: FIX nonce lookup order: prefer window.PPA.nonce first for admin AJAX (ppa_usage_snapshot, etc.). No other behavior changes. // CHANGED:
  */
 
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-12-22.1'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2025-12-25.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -70,7 +34,6 @@
   })();
 
   // ---- Preview Pane Resolver (Composer) ------------------------------------
-  // cache + resolve preview pane without moving DOM nodes.
   var __ppaPreviewPane = null;
 
   function getPreviewPane() {
@@ -79,7 +42,6 @@
     try { pane = root.querySelector('#ppa-preview-pane'); } catch (e) { pane = null; }
     if (!pane) pane = document.getElementById('ppa-preview-pane');
     if (!pane) {
-      // Last-resort fallbacks without moving any DOM nodes.
       try { pane = root.querySelector('[data-ppa-preview-pane]') || root.querySelector('.ppa-preview-pane'); }
       catch (e2) { pane = null; }
     }
@@ -87,7 +49,6 @@
     return __ppaPreviewPane;
   }
 
-  // Make preview pane focusable for screen readers
   (function ensurePreviewPaneFocusable(){
     var pane = getPreviewPane();
     if (pane && !pane.hasAttribute('tabindex')) pane.setAttribute('tabindex', '-1');
@@ -107,8 +68,9 @@
   }
 
   function getNonce() {
-    // Prefer the enqueued config, then fallback to data attrs.
-    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce);
+    // NEW ORDER (LOCKED): window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
+    if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce); // CHANGED:
+    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce); // CHANGED:
     var el = $('#ppa-nonce');
     if (el && el.value) return String(el.value);
     var data = $('[data-ppa-nonce]');
@@ -125,7 +87,6 @@
   }
 
   function normalizePayloadObject(payload) {
-    // If a caller passes JSON as a string, parse it so we always work with an object root.
     if (payload === undefined || payload === null) return {};
     if (typeof payload === 'string') {
       var s = String(payload || '').trim();
@@ -149,13 +110,15 @@
     var ajaxUrl = getAjaxUrl();
     var payloadObj = normalizePayloadObject(payload);
 
-    // IMPORTANT: Fix only the known-bad path.
-    // - ppa_generate uses JSON body (object root) to avoid double-encoding that triggers Django "Root must be an object".
-    // - other actions keep legacy form body to avoid changing stable store/publish behavior.
-    var isGenerate = (String(action) === 'ppa_generate');
+    // Transport rules (critical):
+    // - ppa_generate MUST be JSON body (proven fix).
+    // - ppa_store MUST ALSO be JSON body because PHP proxy reads php://input expecting JSON,
+    //   and forwards that raw string to Django. Form-encoded breaks Django object-root.  // CHANGED:
+    var act = String(action || '');
+    var useJsonBody = (act === 'ppa_generate' || act === 'ppa_store'); // CHANGED:
 
     // Build endpoint robustly (supports ajaxUrl already containing a '?').
-    var endpoint = ajaxUrl + (ajaxUrl.indexOf('?') === -1 ? '?' : '&') + 'action=' + encodeURIComponent(String(action || ''));
+    var endpoint = ajaxUrl + (ajaxUrl.indexOf('?') === -1 ? '?' : '&') + 'action=' + encodeURIComponent(act);
 
     var headers = {
       'X-Requested-With': 'XMLHttpRequest',
@@ -166,19 +129,18 @@
     if (nonce) headers['X-WP-Nonce'] = nonce;
 
     var body;
-    if (isGenerate) {
-      headers['Content-Type'] = 'application/json; charset=UTF-8';
-      body = JSON.stringify(payloadObj || {});
+    if (useJsonBody) { // CHANGED:
+      headers['Content-Type'] = 'application/json; charset=UTF-8'; // CHANGED:
+      body = JSON.stringify(payloadObj || {}); // CHANGED:
     } else {
       headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
-      body = toFormBody({ action: action, payload: JSON.stringify(payloadObj || {}) });
+      body = toFormBody({ action: act, payload: JSON.stringify(payloadObj || {}) });
     }
 
-    // Debug hook: verify which transport was used without logging user content.
     try {
       window.PPA_LAST_REQUEST = {
-        action: String(action || ''),
-        transport: (isGenerate ? 'json-body' : 'form-payload-json'),
+        action: act,
+        transport: (useJsonBody ? 'json-body' : 'form-payload-json'), // CHANGED:
         js_ver: PPA_JS_VER
       };
     } catch (e0) {}
@@ -204,7 +166,6 @@
     });
   }
 
-  // Simple escapers
   function escHtml(s){
     return String(s || '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -215,7 +176,6 @@
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
-  // Clean AI-generated titles so we never leave trailing ellipsis or dangling punctuation.
   function ppaCleanTitle(raw) {
     if (!raw) return '';
     var t = String(raw).trim();
@@ -244,7 +204,6 @@
   function toHtmlFromText(txt) {
     var s = String(txt || '').trim();
     if (!s) return '';
-    // Escape and basic paragraphing
     s = escHtml(s);
     var parts = s.split(/\n\s*\n/).map(function (p) {
       p = String(p || '').trim();
@@ -257,10 +216,8 @@
   function markdownToHtml(md) {
     var txt = String(md || '').trim();
     if (!txt) return '';
-    // Escape first, then apply minimal transforms
     txt = escHtml(txt).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-    // Headings
     txt = txt.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>');
     txt = txt.replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>');
     txt = txt.replace(/^####\s+(.*)$/gm, '<h4>$1</h4>');
@@ -268,20 +225,15 @@
     txt = txt.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
     txt = txt.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
 
-    // Bold/italic
     txt = txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     txt = txt.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Inline code
     txt = txt.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-    // Lists (simple)
     txt = txt.replace(/^\-\s+(.*)$/gm, '<li>$1</li>');
     txt = txt.replace(/(<li>.*<\/li>\n?)+/g, function (block) {
       return '<ul>' + block.replace(/\n/g, '') + '</ul>';
     });
 
-    // Paragraphs
     var htmlParts = [];
     var blocks = txt.split(/\n\s*\n/);
     blocks.forEach(function (b) {
@@ -295,13 +247,10 @@
     });
 
     if (!htmlParts.length) {
-      // Fallback to the old behavior if nothing parsed
       return toHtmlFromText(txt);
     }
     return htmlParts.join('');
   }
-
-  // ---- Payload builders ----------------------------------------------------
 
   function buildPreviewPayload() {
     var subject = $('#ppa-subject');
@@ -312,7 +261,6 @@
     var audience = $('#ppa-audience');
 
     var payload = {
-      // Keep legacy synonyms for backend parity
       subject: subject ? String(subject.value || '').trim() : '',
       title:   subject ? String(subject.value || '').trim() : '',
       brief:   brief   ? String(brief.value   || '').trim() : '',
@@ -327,7 +275,6 @@
       _js_ver: PPA_JS_VER
     };
 
-    // Optional: pass tags/categories if present on the page
     var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
     var catsEl = $('#ppa-categories') || $('#post_category');
     if (tagsEl) {
@@ -345,7 +292,6 @@
       })();
     }
 
-    // Optional meta fields
     var focusEl = $('#yoast_wpseo_focuskw_text_input');
     var metaEl  = $('#yoast_wpseo_metadesc');
     payload.meta = {
@@ -365,7 +311,6 @@
 
   function extractExcerptFromHtml(html) {
     var h = String(html || '');
-    // first paragraph
     var m = h.match(/<p[^>]*>(.*?)<\/p>/i);
     if (!m) return '';
     return String(m[1] || '').replace(/<[^>]+>/g,'').trim();
@@ -377,8 +322,13 @@
     var slug    = $('#ppa-slug')    || $('#post_name');
     var content = $('#ppa-content') || $('#content');
 
+    var safeMode = String(mode || 'draft').trim().toLowerCase();
+    if (!safeMode) safeMode = 'draft';
+
     var payload = {
-      mode: mode || 'draft',
+      mode: safeMode,
+      status: safeMode,
+      target_sites: [ safeMode ],
       title:   title ? String(title.value || '').trim() : '',
       excerpt: excerpt ? String(excerpt.value || '').trim() : '',
       slug:    slug ? String(slug.value || '').trim() : '',
@@ -386,18 +336,16 @@
       _js_ver: PPA_JS_VER
     };
 
-    // Optional: post id if present
     var postId = $('#post_ID');
     if (postId && postId.value) payload.post_id = String(postId.value);
 
-    // Optional: status override from UI
     var statusEl = $('#ppa-status');
-    var modeVal = statusEl ? String(statusEl.value || '').trim() : '';
-    if (modeVal) {
-      payload.mode = modeVal;
+    var statusVal = statusEl ? String(statusEl.value || '').trim().toLowerCase() : '';
+    if (statusVal) {
+      payload.status = statusVal;
+      payload.target_sites = [ statusVal ];
     }
 
-    // If editor is empty, use Preview HTML and auto-fill
     if (!payload.content || !String(payload.content).trim()) {
       var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
@@ -409,7 +357,6 @@
       }
     }
 
-    // Optional meta fields
     var focusEl2 = $('#yoast_wpseo_focuskw_text_input');
     var metaEl2  = $('#yoast_wpseo_metadesc');
     payload.meta = {
@@ -430,14 +377,11 @@
     return !!(subject || title);
   }
 
-  // ---- Toolbar Notices & Busy State ---------------------------------------
-
   var btnPreview  = document.getElementById('ppa-preview');
   var btnDraft    = document.getElementById('ppa-draft');
   var btnPublish  = document.getElementById('ppa-publish');
   var btnGenerate = document.getElementById('ppa-generate');
 
-  // Repurpose Generate as the main preview button and hide the old Preview.
   (function adaptGenerateAsPreview(){
     if (btnPreview) {
       try { btnPreview.style.display = 'none'; } catch (e) {}
@@ -447,22 +391,15 @@
     }
   })();
 
-  // Ensure we always have a notice container above the main buttons
   function noticeContainer() {
     var el = document.getElementById('ppa-toolbar-msg');
     if (el) return el;
 
-    // Try to anchor it in the same row as the primary buttons
     var host = null;
-    if (btnGenerate && btnGenerate.parentNode) {
-      host = btnGenerate.parentNode;
-    } else if (btnPreview && btnPreview.parentNode) {
-      host = btnPreview.parentNode;
-    } else if (btnDraft && btnDraft.parentNode) {
-      host = btnDraft.parentNode;
-    } else if (btnPublish && btnPublish.parentNode) {
-      host = btnPublish.parentNode;
-    }
+    if (btnGenerate && btnGenerate.parentNode) host = btnGenerate.parentNode;
+    else if (btnPreview && btnPreview.parentNode) host = btnPreview.parentNode;
+    else if (btnDraft && btnDraft.parentNode) host = btnDraft.parentNode;
+    else if (btnPublish && btnPublish.parentNode) host = btnPublish.parentNode;
     if (!host) return null;
 
     el = document.createElement('div');
@@ -558,8 +495,6 @@
     }
   }
 
-  // ---- Preview render -------------------------------------------------------
-
   function ensurePreviewPaneVisible() {
     var pane = getPreviewPane();
     if (!pane) return;
@@ -570,42 +505,40 @@
     } catch (e) {}
   }
 
-  function hardenPreviewLists(pane) { // CHANGED:
-    // WP admin CSS frequently resets ul/ol styles. We only fix inside the preview pane to avoid global side-effects. // CHANGED:
-    if (!pane || pane.nodeType !== 1) return; // CHANGED:
-    var scope = null; // CHANGED:
-    scope = pane; // CHANGED: style lists across the entire preview pane (Outline + Body), not only the first .ppa-body
+  function hardenPreviewLists(pane) {
+    if (!pane || pane.nodeType !== 1) return;
+    var scope = pane;
 
-    var lists = []; // CHANGED:
-    try { lists = Array.prototype.slice.call(scope.querySelectorAll('ul, ol') || []); } catch (e1) { lists = []; } // CHANGED:
-    for (var i = 0; i < lists.length; i++) { // CHANGED:
-      var list = lists[i]; // CHANGED:
-      if (!list || list.nodeType !== 1) continue; // CHANGED:
-      try { // CHANGED:
-        list.style.listStylePosition = 'outside'; // CHANGED:
-        list.style.paddingLeft = '1.25em'; // CHANGED: ensures markers are not clipped
-        list.style.marginLeft = '0.75em'; // CHANGED:
-        list.style.maxWidth = '100%'; // CHANGED:
-        list.style.boxSizing = 'border-box'; // CHANGED:
-        if (String(list.tagName || '').toUpperCase() === 'UL') list.style.listStyleType = 'disc'; // CHANGED:
-        if (String(list.tagName || '').toUpperCase() === 'OL') list.style.listStyleType = 'decimal'; // CHANGED:
-      } catch (e2) {} // CHANGED:
-    } // CHANGED:
+    var lists = [];
+    try { lists = Array.prototype.slice.call(scope.querySelectorAll('ul, ol') || []); } catch (e1) { lists = []; }
+    for (var i = 0; i < lists.length; i++) {
+      var list = lists[i];
+      if (!list || list.nodeType !== 1) continue;
+      try {
+        list.style.listStylePosition = 'outside';
+        list.style.paddingLeft = '1.25em';
+        list.style.marginLeft = '0.75em';
+        list.style.maxWidth = '100%';
+        list.style.boxSizing = 'border-box';
+        if (String(list.tagName || '').toUpperCase() === 'UL') list.style.listStyleType = 'disc';
+        if (String(list.tagName || '').toUpperCase() === 'OL') list.style.listStyleType = 'decimal';
+      } catch (e2) {}
+    }
 
-    var items = []; // CHANGED:
-    try { items = Array.prototype.slice.call(scope.querySelectorAll('li') || []); } catch (e3) { items = []; } // CHANGED:
-    for (var j = 0; j < items.length; j++) { // CHANGED:
-      var li = items[j]; // CHANGED:
-      if (!li || li.nodeType !== 1) continue; // CHANGED:
-      try { // CHANGED:
-        li.style.display = 'list-item'; // CHANGED:
-        li.style.overflowWrap = 'anywhere'; // CHANGED:
-        li.style.wordBreak = 'break-word'; // CHANGED:
-        li.style.maxWidth = '100%'; // CHANGED:
-        li.style.boxSizing = 'border-box'; // CHANGED:
-      } catch (e4) {} // CHANGED:
-    } // CHANGED:
-  } // CHANGED:
+    var items = [];
+    try { items = Array.prototype.slice.call(scope.querySelectorAll('li') || []); } catch (e3) { items = []; }
+    for (var j = 0; j < items.length; j++) {
+      var li = items[j];
+      if (!li || li.nodeType !== 1) continue;
+      try {
+        li.style.display = 'list-item';
+        li.style.overflowWrap = 'anywhere';
+        li.style.wordBreak = 'break-word';
+        li.style.maxWidth = '100%';
+        li.style.boxSizing = 'border-box';
+      } catch (e4) {}
+    }
+  }
 
   function buildPreviewHtml(result) {
     var title = '';
@@ -625,7 +558,7 @@
     if (title) html += '<h2>' + escHtml(title) + '</h2>';
     if (outline) {
       html += '<h3>Outline</h3>';
-      html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>'; // CHANGED:
+      html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>';
     }
     if (bodyMd) {
       html += '<h3>Body</h3>';
@@ -662,12 +595,10 @@
     }
     pane.innerHTML = html;
 
-    hardenPreviewLists(pane); // CHANGED: restore bullets + wrap inside preview pane only
+    hardenPreviewLists(pane);
 
     try { pane.focus(); } catch (e2) {}
   }
-
-  // ---- Response unwrapping --------------------------------------------------
 
   function unwrapWpAjax(body) {
     if (!body || typeof body !== 'object') return { hasEnvelope: false, success: null, data: body };
@@ -686,8 +617,6 @@
     return unwrappedData;
   }
 
-  // ---- Generate + Store -----------------------------------------------------
-
   function applyGenerateResult(result) {
     if (!result || typeof result !== 'object') return { titleFilled: false, excerptFilled: false, slugFilled: false };
 
@@ -703,20 +632,17 @@
       filled.titleFilled = true;
     }
 
-    // Fill content if empty
     var contentEl = $('#ppa-content') || $('#content');
     if (contentEl && (!String(contentEl.value || '').trim()) && bodyMd) {
       contentEl.value = markdownToHtml(bodyMd);
     }
 
-    // Excerpt
     var excerptEl = $('#ppa-excerpt') || $('#excerpt');
     if (excerptEl && meta && meta.meta_description && !String(excerptEl.value || '').trim()) {
       excerptEl.value = String(meta.meta_description);
       filled.excerptFilled = true;
     }
 
-    // Slug
     var slugEl = $('#ppa-slug') || $('#post_name');
     if (slugEl && (!String(slugEl.value || '').trim())) {
       var s = '';
@@ -728,7 +654,6 @@
       }
     }
 
-    // Yoast best-effort
     var focusEl3 = $('#yoast_wpseo_focuskw_text_input');
     var metaEl3  = $('#yoast_wpseo_metadesc');
     if (focusEl3 && meta && meta.focus_keyphrase && !String(focusEl3.value || '').trim()) {
@@ -756,8 +681,13 @@
     try {
       if (body && typeof body === 'object') {
         if (body.id) return body.id;
+        if (body.post_id) return body.post_id;
+
         if (body.data && body.data.id) return body.data.id;
         if (body.data && body.data.post_id) return body.data.post_id;
+
+        if (body.data && body.data.result && body.data.result.id) return body.data.result.id;
+        if (body.result && body.result.id) return body.result.id;
       }
     } catch (e) {}
     return '';
@@ -768,6 +698,9 @@
       if (body && typeof body === 'object') {
         if (body.edit_link) return body.edit_link;
         if (body.data && body.data.edit_link) return body.data.edit_link;
+
+        if (body.data && body.data.result && body.data.result.edit_link) return body.data.result.edit_link;
+        if (body.result && body.result.edit_link) return body.result.edit_link;
       }
     } catch (e) {}
     return '';
@@ -777,10 +710,22 @@
     try {
       if (body && typeof body === 'object') {
         if (body.view_link) return body.view_link;
+        if (body.permalink) return body.permalink;
+
         if (body.data && body.data.view_link) return body.data.view_link;
+        if (body.data && body.data.permalink) return body.data.permalink;
+
+        if (body.data && body.data.result && body.data.result.permalink) return body.data.result.permalink;
+        if (body.result && body.result.permalink) return body.result.permalink;
       }
     } catch (e) {}
     return '';
+  }
+
+  function buildWpEditUrlFromId(id) {
+    var pid = parseInt(String(id || ''), 10);
+    if (!pid || pid < 1) return '';
+    return '/wp-admin/post.php?post=' + String(pid) + '&action=edit';
   }
 
   function stopEvent(ev) {
@@ -788,6 +733,15 @@
     try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e1) {}
     try { if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (e2) {}
     try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
+  }
+
+  function clickGuard(btn) {
+    if (!btn) return false;
+    var ts = Number(btn.getAttribute('data-ppa-ts') || 0);
+    var now = (Date.now ? Date.now() : (new Date()).getTime());
+    if (now - ts < 350) return true;
+    btn.setAttribute('data-ppa-ts', String(now));
+    return false;
   }
 
   // Wire buttons
@@ -808,13 +762,29 @@
           var wp = unwrapWpAjax(res.body);
           var data = wp.hasEnvelope ? wp.data : res.body;
           var msg = pickMessage(res.body) || 'Draft request sent.';
+
           if (!res.ok || (wp.hasEnvelope && !wp.success)) {
             renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
             return;
           }
-          renderNoticeTimed('success', 'Draft saved successfully.', 3500);
+
+          var edit = pickEditLink(res.body) || (data && data.edit_link ? data.edit_link : '');
+          var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
+          var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
+
+          renderNoticeTimed('success', 'Draft saved. Opening it now…', 2500);
           console.info('PPA: draft ok', data);
+
+          window.setTimeout(function () {
+            var url = edit || fallbackEdit;
+            if (url) {
+              try { window.location.href = String(url); } catch (e1) {}
+            } else {
+              renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 5000);
+              console.info('PPA: draft ok but missing edit link/id', res);
+            }
+          }, 450);
         });
       }, 'store');
     }, true);
@@ -841,6 +811,7 @@
           var pid = pickId(res.body);
           var edit = pickEditLink(res.body);
           var view = pickViewLink(res.body);
+
           if (!res.ok || (wp.hasEnvelope && !wp.success)) {
             renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
             console.info('PPA: publish failed', res);
@@ -867,7 +838,6 @@
       if (clickGuard(btnGenerate)) return;
       console.info('PPA: Generate clicked');
 
-      // Reuse preview payload so subject/brief/genre/tone/word_count all flow through.
       var probe = buildPreviewPayload();
       if (!String(probe.title || '').trim() &&
           !String(probe.text || '').trim() &&
@@ -907,7 +877,6 @@
     }, true);
   }
 
-  // ---- Export Surface (window.PPAAdmin) -------------------------------------
   window.PPAAdmin = window.PPAAdmin || {};
   window.PPAAdmin.apiPost = apiPost;
   window.PPAAdmin.postGenerate = function () { return apiPost('ppa_generate', buildPreviewPayload()); };
@@ -916,7 +885,6 @@
   window.PPAAdmin.renderPreview = renderPreview;
   window.PPAAdmin._js_ver = PPA_JS_VER;
 
-  // ---- Module Bridge (parity) ----------------------------------------------
   (function patchModuleBridge(){
     try {
       window.PPAAdminModules = window.PPAAdminModules || {};
