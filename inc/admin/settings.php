@@ -4,7 +4,7 @@
  * Path: inc/admin/settings.php
  *
  * Provides:
- * - Settings submenu under PostPress AI.
+ * - Settings UI renderer for PostPress AI.
  * - License key storage (admin-only) + license actions that call Django /license/* (server-side only).
  * - Test Connection action that calls Django /version/ and /health/ (server-side only).
  * - Display-only caching of last licensing response for admin visibility (no enforcement).
@@ -14,6 +14,16 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2025-12-28: FIX: Prevent duplicate plan-limit notice by suppressing querystring license notice
+ *              when site_limit_reached is true (persistent notice handles it).                    // CHANGED:
+ * 2025-12-28: UX: If last license response shows plan_limit + site_limit_reached, show friendly message
+ *              and disable "Activate This Site" (UX only; no enforcement; endpoints unchanged).     // CHANGED:
+ * 2025-12-28: FIX: Prevent fatal "Call to undefined function submit_button()" by defensively loading
+ *              wp-admin/includes/template.php inside render_page() and providing a last-resort shim. // CHANGED:
+ *
+ * 2025-12-27: FIX: Remove submenu registration from this file; menu.php is the single menu registrar.          // CHANGED:
+ *             Settings screen is routed here via ppa_render_settings() include from menu.php.                 // CHANGED:
+ *
  * 2025-11-19: Initial settings screen & connectivity test (Django URL + shared key).                              // CHANGED:
  * 2025-12-25: Add license UI + admin-post handlers to call Django /license/* endpoints (server-side).            // CHANGED:
  * 2025-12-25: HARDEN: Settings screen + actions admin-only (manage_options).                                     // CHANGED:
@@ -31,12 +41,46 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/* PPA_SUBMIT_BUTTON_GUARD_START */
+ // CHANGED: Prevent fatal error if wp-admin template helpers aren't loaded yet (submit_button()).
+ // CHANGED: This can happen if Settings renders early in admin bootstrap or on admin-post requests.
+
+if ( is_admin() && ! function_exists( 'submit_button' ) ) { // CHANGED:
+    $ppa_tpl = ABSPATH . 'wp-admin/includes/template.php'; // CHANGED:
+    if ( file_exists( $ppa_tpl ) ) { // CHANGED:
+        require_once $ppa_tpl; // CHANGED:
+    } // CHANGED:
+} // CHANGED:
+
+// CHANGED: Last-resort shim — only if submit_button STILL doesn't exist after template include.
+if ( ! function_exists( 'submit_button' ) ) { // CHANGED:
+    function submit_button( $text = null, $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = null ) { // CHANGED:
+        $text = $text ?: __( 'Save Changes' ); // CHANGED:
+        $classes = 'button button-' . $type; // CHANGED:
+        $attrs = ''; // CHANGED:
+
+        if ( is_array( $other_attributes ) ) { // CHANGED:
+            foreach ( $other_attributes as $k => $v ) { // CHANGED:
+                $attrs .= ' ' . esc_attr( $k ) . '="' . esc_attr( $v ) . '"'; // CHANGED:
+            } // CHANGED:
+        } elseif ( is_string( $other_attributes ) && trim( $other_attributes ) !== '' ) { // CHANGED:
+            $attrs .= ' ' . trim( $other_attributes ); // CHANGED:
+        } // CHANGED:
+
+        $btn = '<input type="submit" name="' . esc_attr( $name ) . '" id="' . esc_attr( $name ) . '" class="' . esc_attr( $classes ) . '" value="' . esc_attr( $text ) . '"' . $attrs . ' />'; // CHANGED:
+        echo $wrap ? '<p class="submit">' . $btn . '</p>' : $btn; // CHANGED:
+    } // CHANGED:
+} // CHANGED:
+/* PPA_SUBMIT_BUTTON_GUARD_END */
+
 if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 	/**
 	 * Admin Settings for PostPress AI.
 	 *
-	 * Note: This file is self-initializing via PPA_Admin_Settings::init().
+	 * Note:
+	 * - This file is included by inc/admin/menu.php when visiting the Settings screen.
+	 * - Menu registration is owned by menu.php (single registrar).                                      // CHANGED:
 	 */
 	class PPA_Admin_Settings {
 
@@ -58,11 +102,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		 * Bootstrap hooks.
 		 */
 		public static function init() {
-			// Admin menu entry under top-level "PostPress AI".
-			add_action( 'admin_menu', array( __CLASS__, 'register_menu' ) );
+			// IMPORTANT: menu.php owns the submenu entry now.                                         // CHANGED:
+			// We only register settings + handlers here.                                               // CHANGED:
 
 			// Settings API registration.
 			add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
+
+			// If this file loads after admin_init (e.g. via admin_menu), admin_init already ran.
+			// Register settings immediately so options.php will accept option_page=ppa_settings.
+			if ( did_action( 'admin_init' ) ) {
+				self::register_settings();
+			}
 
 			// Test Connection handler (admin-post).
 			add_action( 'admin_post_ppa_test_connectivity', array( __CLASS__, 'handle_test_connectivity' ) );
@@ -71,22 +121,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			add_action( 'admin_post_ppa_license_verify', array( __CLASS__, 'handle_license_verify' ) );
 			add_action( 'admin_post_ppa_license_activate', array( __CLASS__, 'handle_license_activate' ) );
 			add_action( 'admin_post_ppa_license_deactivate', array( __CLASS__, 'handle_license_deactivate' ) );
-		}
-
-		/**
-		 * Add "Settings" submenu under the existing PostPress AI menu.
-		 */
-		public static function register_menu() {
-			$parent_slug = 'postpress-ai'; // This matches the Composer screen slug.
-
-			add_submenu_page(
-				$parent_slug,
-				__( 'PostPress AI Settings', 'postpress-ai' ),
-				__( 'Settings', 'postpress-ai' ),
-				self::cap(),
-				'postpress-ai-settings',
-				array( __CLASS__, 'render_page' )
-			);
 		}
 
 		/**
@@ -223,6 +257,37 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		}
 
 		/**
+		 * Detect plan-limit site cap response.
+		 *
+		 * Requirements (Option A):
+		 * - error.type = plan_limit
+		 * - error.code = site_limit_reached
+		 *
+		 * NOTE: This is UX-only (disable Activate + show clearer message). No enforcement.
+		 *
+		 * @param mixed $result
+		 * @return bool
+		 */
+		private static function is_plan_limit_site_limit_reached( $result ) {                   // CHANGED:
+			if ( ! is_array( $result ) ) {                                                     // CHANGED:
+				return false;                                                                  // CHANGED:
+			}                                                                                  // CHANGED:
+
+			$err = array();                                                                    // CHANGED:
+
+			if ( isset( $result['error'] ) && is_array( $result['error'] ) ) {                  // CHANGED:
+				$err = $result['error'];                                                       // CHANGED:
+			} elseif ( isset( $result['data']['error'] ) && is_array( $result['data']['error'] ) ) { // CHANGED:
+				$err = $result['data']['error'];                                               // CHANGED:
+			}                                                                                  // CHANGED:
+
+			$type = isset( $err['type'] ) ? strtolower( trim( (string) $err['type'] ) ) : '';  // CHANGED:
+			$code = isset( $err['code'] ) ? strtolower( trim( (string) $err['code'] ) ) : '';  // CHANGED:
+
+			return ( 'plan_limit' === $type && 'site_limit_reached' === $code );                // CHANGED:
+		}                                                                                      // CHANGED:
+
+		/**
 		 * Local “active on this site” helper.
 		 *
 		 * IMPORTANT:
@@ -240,18 +305,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		/**
 		 * Determine “active on this site” from the cached last result (display-only).
 		 *
-		 * Why:
-		 * - NO background calls to Django during page render.
-		 * - NO JS.
-		 * - We only reflect the most recent license action result we already cached.
-		 *
-		 * We support multiple possible shapes from Django without assuming exact keys.
-		 *
 		 * @param mixed $last
 		 * @return string one of: active|inactive|unknown
 		 */
 		private static function derive_activation_state( $last ) {                               // CHANGED:
-			// First priority: our local UI marker (set only after Django said OK).                 // CHANGED:
 			if ( self::is_active_on_this_site_option() ) {                                       // CHANGED:
 				return 'active';                                                                 // CHANGED:
 			}                                                                                      // CHANGED:
@@ -260,16 +317,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				return 'unknown';                                                                // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Common: { ok: true, data: { active: true } } or similar.
 			$data = isset( $last['data'] ) && is_array( $last['data'] ) ? $last['data'] : array(); // CHANGED:
 
 			$candidates = array(                                                                  // CHANGED:
-				// boolean flags                                                                // CHANGED:
 				'active',                                                                         // CHANGED:
 				'is_active',                                                                      // CHANGED:
 				'site_active',                                                                    // CHANGED:
 				'activated',                                                                      // CHANGED:
-				// status strings                                                               // CHANGED:
 				'status',                                                                         // CHANGED:
 				'activation_status',                                                              // CHANGED:
 			);
@@ -292,7 +346,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}
 
-			// Another common: list of active sites and/or current site marked.
 			if ( isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) {          // CHANGED:
 				$home = untrailingslashit( home_url( '/' ) );                                     // CHANGED:
 				foreach ( $data['active_sites'] as $site ) {                                      // CHANGED:
@@ -300,14 +353,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						return 'active';                                                         // CHANGED:
 					}                                                                              // CHANGED:
 				}                                                                                  // CHANGED:
-				// If list exists and we didn't match, it's likely inactive for this site.
 				return 'inactive';                                                                // CHANGED:
 			}
 
 			return 'unknown';                                                                      // CHANGED:
 		}
 
-		// Legacy helpers (not used for UI now, but kept for compatibility).                      // CHANGED:
+		// Legacy helpers (kept registered, not shown in UI now).
 		public static function section_connection_intro() {
 			?>
 			<p class="ppa-help">
@@ -372,41 +424,20 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			<?php
 		}
 
-		/**
-		 * Django base URL (infrastructure).
-		 *
-		 * Priority:
-		 * 1) PPA_DJANGO_URL constant
-		 * 2) ppa_django_url option
-		 * 3) hard default
-		 *
-		 * NOTE: This is intentionally NOT shown in UI.                                           // CHANGED:
-		 */
 		private static function get_django_base_url() {
 			if ( defined( 'PPA_DJANGO_URL' ) && PPA_DJANGO_URL ) {
 				$base = (string) PPA_DJANGO_URL;
 			} else {
 				$base = (string) get_option( 'ppa_django_url', 'https://apps.techwithwayne.com/postpress-ai/' );
-				if ( '' === trim( $base ) ) {                                                     // CHANGED:
-					$base = 'https://apps.techwithwayne.com/postpress-ai/';                         // CHANGED:
-				}                                                                                   // CHANGED:
+				if ( '' === trim( $base ) ) {
+					$base = 'https://apps.techwithwayne.com/postpress-ai/';
+				}
 			}
 			$base = esc_url_raw( $base );
 			$base = untrailingslashit( $base );
 			return $base;
 		}
 
-		/**
-		 * Resolve the key used for X-PPA-Key.
-		 *
-		 * Legacy priority:
-		 * 1) PPA_SHARED_KEY constant
-		 * 2) ppa_shared_key option
-		 * 3) ppa_shared_key filter
-		 *
-		 * New behavior:
-		 * - If none of the above exist, use the License Key as the auth key.                     // CHANGED:
-		 */
 		private static function resolve_shared_key() {
 			if ( defined( 'PPA_SHARED_KEY' ) && PPA_SHARED_KEY ) {
 				return trim( (string) PPA_SHARED_KEY );
@@ -428,11 +459,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
-			// Fallback: use License Key for auth (simplified UX).                                 // CHANGED:
-			$lic = self::get_license_key();                                                       // CHANGED:
-			if ( '' !== $lic ) {                                                                  // CHANGED:
-				return $lic;                                                                       // CHANGED:
-			}                                                                                      // CHANGED:
+			$lic = self::get_license_key();
+			if ( '' !== $lic ) {
+				return $lic;
+			}
 
 			return '';
 		}
@@ -451,14 +481,14 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			check_admin_referer( 'ppa-test-connectivity' );
 
 			$base = self::get_django_base_url();
-			$key  = self::resolve_shared_key();                                                   // CHANGED:
+			$key  = self::resolve_shared_key();
 
 			if ( '' === $base ) {
-				self::redirect_with_test_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ) ); // CHANGED:
+				self::redirect_with_test_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ) );
 			}
 
 			if ( '' === $key ) {
-				self::redirect_with_test_result( 'error', __( 'Please add your License Key first, then click Save.', 'postpress-ai' ) ); // CHANGED:
+				self::redirect_with_test_result( 'error', __( 'Please add your License Key first, then click Save.', 'postpress-ai' ) );
 			}
 
 			$headers = array(
@@ -474,8 +504,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'health'  => trailingslashit( $base ) . 'health/',
 			);
 
-			$ok_count  = 0;
-			$messages  = array();
+			$ok_count = 0;
+			$messages = array();
 
 			foreach ( $endpoints as $label => $url ) {
 				$response = wp_remote_get(
@@ -514,7 +544,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				);
 			}
 
-			$msg = __( 'Not connected yet. Please double-check your License Key.', 'postpress-ai' ); // CHANGED:
+			$msg = __( 'Not connected yet. Please double-check your License Key.', 'postpress-ai' );
 			if ( ! empty( $messages ) ) {
 				$msg .= ' ' . implode( ' ', $messages );
 			}
@@ -547,19 +577,19 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			check_admin_referer( 'ppa-license-' . $action );
 
 			$base = self::get_django_base_url();
-			$key  = self::resolve_shared_key();                                                   // CHANGED:
+			$key  = self::resolve_shared_key();
 			$lic  = self::get_license_key();
 
 			if ( '' === $base ) {
-				self::redirect_with_license_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ), array() );
 			}
 
 			if ( '' === $lic ) {
-				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() );
 			}
 
 			if ( '' === $key ) {
-				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() );
 			}
 
 			$endpoint = trailingslashit( $base ) . 'license/' . $action . '/';
@@ -568,7 +598,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'Accept'           => 'application/json; charset=utf-8',
 				'Content-Type'     => 'application/json; charset=utf-8',
 				'User-Agent'       => 'PostPressAI-WordPress/' . ( defined( 'PPA_VERSION' ) ? PPA_VERSION : 'dev' ),
-				'X-PPA-Key'        => $key,                                                         // CHANGED:
+				'X-PPA-Key'        => $key,
 				'X-PPA-View'       => 'settings_license',
 				'X-Requested-With' => 'XMLHttpRequest',
 			);
@@ -590,15 +620,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$result = self::normalize_django_response( $response );
 			self::cache_last_license_result( $result );
 
-			// UI convenience marker:
-			// Only set/clear if Django responded ok. This does NOT enforce licensing.              // CHANGED:
-			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {      // CHANGED:
-				if ( 'activate' === $action ) {                                                   // CHANGED:
-					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );               // CHANGED:
-				} elseif ( 'deactivate' === $action ) {                                           // CHANGED:
-					delete_option( self::OPT_ACTIVE_SITE );                                       // CHANGED:
-				}                                                                                 // CHANGED:
-			}                                                                                      // CHANGED:
+			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
+				if ( 'activate' === $action ) {
+					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );
+				} elseif ( 'deactivate' === $action ) {
+					delete_option( self::OPT_ACTIVE_SITE );
+				}
+			}
 
 			$notice = self::notice_from_license_result( ucfirst( $action ), $result );
 			$status = ( isset( $result['ok'] ) && true === $result['ok'] ) ? 'ok' : 'error';
@@ -658,6 +686,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 				return __( 'Done.', 'postpress-ai' );
 			}
+
+			// CHANGED: Friendlier message for site limit reached (no endpoints changed; UX only).
+			if ( self::is_plan_limit_site_limit_reached( $result ) ) {                            // CHANGED:
+				return __( 'Plan limit reached: your account has hit its site limit. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); // CHANGED:
+			}                                                                                      // CHANGED:
 
 			$code = '';
 			if ( is_array( $result ) && isset( $result['error']['code'] ) ) {
@@ -724,6 +757,32 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				wp_die( esc_html__( 'You are not allowed to access this page.', 'postpress-ai' ) );
 			}
 
+			// CHANGED: submit_button() lives in wp-admin/includes/template.php. Load it defensively to avoid fatal.
+			$ppa_tpl = ABSPATH . 'wp-admin/includes/template.php'; // CHANGED:
+			if ( ! function_exists( 'submit_button' ) && file_exists( $ppa_tpl ) ) { // CHANGED:
+				require_once $ppa_tpl; // CHANGED:
+			} // CHANGED:
+
+			// CHANGED: Last-resort shim (only if template.php STILL didn't provide submit_button()).
+			if ( ! function_exists( 'submit_button' ) ) { // CHANGED:
+				function submit_button( $text = null, $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = null ) { // CHANGED:
+					$text    = $text ?: __( 'Save Changes' ); // CHANGED:
+					$classes = 'button button-' . $type; // CHANGED:
+					$attrs   = ''; // CHANGED:
+
+					if ( is_array( $other_attributes ) ) { // CHANGED:
+						foreach ( $other_attributes as $k => $v ) { // CHANGED:
+							$attrs .= ' ' . esc_attr( $k ) . '="' . esc_attr( $v ) . '"'; // CHANGED:
+						} // CHANGED:
+					} elseif ( is_string( $other_attributes ) && trim( $other_attributes ) !== '' ) { // CHANGED:
+						$attrs .= ' ' . trim( $other_attributes ); // CHANGED:
+					} // CHANGED:
+
+					$btn = '<input type="submit" name="' . esc_attr( $name ) . '" id="' . esc_attr( $name ) . '" class="' . esc_attr( $classes ) . '" value="' . esc_attr( $text ) . '"' . $attrs . ' />'; // CHANGED:
+					echo $wrap ? '<p class="submit">' . $btn . '</p>' : $btn; // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
 			$test_status = isset( $_GET['ppa_test'] ) ? sanitize_key( wp_unslash( $_GET['ppa_test'] ) ) : '';
 			$test_msg    = isset( $_GET['ppa_test_msg'] ) ? wp_unslash( $_GET['ppa_test_msg'] ) : '';
 			if ( is_string( $test_msg ) && '' !== $test_msg ) {
@@ -738,33 +797,35 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$last = get_transient( self::TRANSIENT_LAST_LIC );
 
-			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );                      // CHANGED:
-			$val_license = self::sanitize_license_key( $val_license );                             // CHANGED:
+			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );
+			$val_license = self::sanitize_license_key( $val_license );
 
-			// UX guardrails (pure PHP):
-			// - Must save key before Activate.
-			// - If active marker says active OR cached last result suggests active on this site, disable Activate + show badge. // CHANGED:
-			$has_key          = ( '' !== $val_license );                                           // CHANGED:
-			$activation_state = self::derive_activation_state( $last );                            // CHANGED:
-			$is_active_here   = ( 'active' === $activation_state );                                // CHANGED:
-			$is_inactive_here = ( 'inactive' === $activation_state );                              // CHANGED:
+			$has_key            = ( '' !== $val_license );
+			$activation_state   = self::derive_activation_state( $last );
+			$is_active_here     = ( 'active' === $activation_state );
+			$is_inactive_here   = ( 'inactive' === $activation_state );
+			$site_limit_reached = self::is_plan_limit_site_limit_reached( $last );               // CHANGED:
 			?>
 			<div class="wrap ppa-admin ppa-settings">
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
 
 				<div class="ppa-card">
 					<?php
-					// Notices are intentionally rendered INSIDE this card to prevent “floating” outside the frame.
 					if ( '' !== $test_status && '' !== $test_msg ) {
 						self::render_notice( $test_status, $test_msg );
 					}
-					if ( '' !== $lic_status && '' !== $lic_msg ) {
+					if ( ! $site_limit_reached && '' !== $lic_status && '' !== $lic_msg ) { // CHANGED:
 						self::render_notice( $lic_status, $lic_msg );
 					}
+
+					// CHANGED: Persistent, clearer UX for plan limit site cap (based on last cached license response).
+					if ( $site_limit_reached ) {                                                    // CHANGED:
+						self::render_notice( 'error', __( 'Plan limit reached: your account has hit its site limit. You can’t activate this site until you upgrade your plan or deactivate another site.', 'postpress-ai' ) ); // CHANGED:
+					}                                                                                  // CHANGED:
 					?>
 
 					<h2 class="title"><?php esc_html_e( 'Setup', 'postpress-ai' ); ?></h2>
-					<p class="ppa-help"><?php esc_html_e( 'Paste your license key below, then click Save.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+					<p class="ppa-help"><?php esc_html_e( 'Paste your license key below, then click Save.', 'postpress-ai' ); ?></p>
 
 					<form method="post" action="options.php">
 						<?php settings_fields( 'ppa_settings' ); ?>
@@ -799,20 +860,19 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				<div class="ppa-card">
 					<h2 class="title"><?php esc_html_e( 'License Actions', 'postpress-ai' ); ?></h2>
 					<p class="ppa-help">
-						<?php esc_html_e( 'Use these buttons to check or activate this site.', 'postpress-ai' ); ?> <!-- CHANGED: -->
+						<?php esc_html_e( 'Use these buttons to check or activate this site.', 'postpress-ai' ); ?>
 					</p>
 
 					<?php
-					// Activation badge (display-only; local marker + cached result).                 // CHANGED:
-					if ( $is_active_here ) :                                                         // CHANGED:
+					if ( $is_active_here ) :
 						?>
 						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--active"><?php esc_html_e( 'Active on this site', 'postpress-ai' ); ?></span></p>
 						<?php
-					elseif ( $is_inactive_here ) :                                                    // CHANGED:
+					elseif ( $is_inactive_here ) :
 						?>
 						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--inactive"><?php esc_html_e( 'Not active', 'postpress-ai' ); ?></span></p>
 						<?php
-					else :                                                                            // CHANGED:
+					else :
 						?>
 						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--unknown"><?php esc_html_e( 'Unknown (run Check License)', 'postpress-ai' ); ?></span></p>
 						<?php
@@ -823,37 +883,30 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-verify' ); ?>
 							<input type="hidden" name="action" value="ppa_license_verify" />
-							<?php
-							// Check License stays enabled (even if empty, handler will show friendly notice). // CHANGED:
-							submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false ); // CHANGED:
-							?>
+							<?php submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false ); ?>
 						</form>
 
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-activate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_activate" />
 							<?php
-							// Guardrails:
-							// - Must save License Key first.
-							// - If already active, disable Activate (prevents double-activation confusion).   // CHANGED:
-							$disable_activate = ( ! $has_key ) || $is_active_here;                           // CHANGED:
-							$attrs            = $disable_activate ? array( 'disabled' => 'disabled' ) : array(); // CHANGED:
-							submit_button( __( 'Activate This Site', 'postpress-ai' ), 'primary', 'ppa_license_activate_btn', false, $attrs ); // CHANGED:
+							$disable_activate = ( ! $has_key ) || $is_active_here || $site_limit_reached; // CHANGED:
+							$attrs            = $disable_activate ? array( 'disabled' => 'disabled' ) : array();
+							submit_button( __( 'Activate This Site', 'postpress-ai' ), 'primary', 'ppa_license_activate_btn', false, $attrs );
 							?>
 							<?php if ( ! $has_key ) : ?>
-								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first. Then you can activate.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first. Then you can activate.', 'postpress-ai' ); ?></p>
 							<?php elseif ( $is_active_here ) : ?>
-								<p class="description ppa-inline-help"><?php esc_html_e( 'This site is already active.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+								<p class="description ppa-inline-help"><?php esc_html_e( 'This site is already active.', 'postpress-ai' ); ?></p>
+							<?php elseif ( $site_limit_reached ) : ?>
+								<p class="description ppa-inline-help"><?php esc_html_e( 'Plan limit reached. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); ?></p>
 							<?php endif; ?>
 						</form>
 
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-deactivate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_deactivate" />
-							<?php
-							// Deactivate stays enabled (per locked rules), but still requires a saved key in handler. // CHANGED:
-							submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false ); // CHANGED:
-							?>
+							<?php submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false ); ?>
 						</form>
 					</div>
 
@@ -882,4 +935,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 	}
 
 	PPA_Admin_Settings::init();
+
+	if ( is_admin() && isset( $_GET['page'] ) && $_GET['page'] === 'postpress-ai-settings' && ( ! isset( $GLOBALS['pagenow'] ) || $GLOBALS['pagenow'] !== 'admin-post.php' ) ) { // CHANGED:
+		PPA_Admin_Settings::render_page(); // CHANGED:
+	} // CHANGED:
+
 }

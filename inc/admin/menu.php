@@ -3,6 +3,20 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
+ * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
+ * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
+ *             WP already auto-creates the first submenu for the parent slug via add_menu_page().              // CHANGED:
+ *             We keep the rename of that auto submenu label, but do not add a second submenu item.           // CHANGED:
+ *
+ * 2025-12-28: FIX: Register the 'ppa_settings' settings group early on admin_init so options.php accepts option_page=ppa_settings
+ *             even when settings.php is only included by the menu callback (prevents "allowed options list" error).            // CHANGED:
+ *             (No Django/endpoints/CORS/auth changes. No layout/CSS changes. menu.php only.)                                  // CHANGED:
+ *
+ * 2025-12-27: FIX: Add Settings submenu (admin-only) under PostPress AI and route to settings.php include. // CHANGED:
+ * 2025-12-27: FIX: Gate Testbed submenu behind PPA_ENABLE_TESTBED === true (hidden by default).            // CHANGED:
+ * 2025-12-27: FIX: Normalize Testbed slug to "postpress-ai-testbed" to match screen detection/enqueue.     // CHANGED:
+ * 2025-12-27: KEEP: Single menu registrar lives here; settings.php no longer registers its own submenu.     // CHANGED:
+ *
  * 2025-11-11: Use PPA_PLUGIN_DIR for template resolution (more reliable than nested plugin_dir_path math).   // CHANGED:
  *             Keep capability 'edit_posts' and consistent permission messages.                               // CHANGED:
  *             Clarify/annotate legacy Tools→Testbed removal.                                                 // CHANGED:
@@ -12,8 +26,8 @@
  * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;
  *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.
  * 2025-11-08: Add submenus under the top-level:
- *             - Rename default submenu to “PostPress Composer” (same slug as parent).
- *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.
+ *             - Rename default submenu to "PostPress Composer" (same slug as parent).
+ *             - Add "Testbed" submenu (slug: ppa-testbed) under PostPress AI.
  *             - Remove legacy Tools→Testbed to avoid duplicates.
  * 2025-11-04: New file. Restores the top-level "PostPress AI" admin menu and composer renderer.
  *             - Registers menu with capability 'edit_posts' (Admin/Editor/Author).
@@ -30,57 +44,157 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Sanitize helper for simple PPA settings (string or array).
+ * This is intentionally conservative: only supports scalar strings + nested arrays of strings.      // CHANGED:
+ */
+if ( ! function_exists( 'ppa_sanitize_setting_value' ) ) {                                         // CHANGED:
+	function ppa_sanitize_setting_value( $value ) {                                                 // CHANGED:
+		$value = wp_unslash( $value );                                                               // CHANGED:
+
+		if ( is_array( $value ) ) {                                                                  // CHANGED:
+			$out = array();                                                                          // CHANGED:
+			foreach ( $value as $k => $v ) {                                                         // CHANGED:
+				// Preserve keys, sanitize values recursively.                                        // CHANGED:
+				$out[ $k ] = ppa_sanitize_setting_value( $v );                                       // CHANGED:
+			}                                                                                        // CHANGED:
+			return $out;                                                                             // CHANGED:
+		}                                                                                            // CHANGED:
+
+		return sanitize_text_field( (string) $value );                                               // CHANGED:
+	}                                                                                                // CHANGED:
+}                                                                                                    // CHANGED:
+
+/**
+ * Settings API bootstrap (critical for options.php saves).
+ *
+ * WHY:
+ * - The Settings page form posts to options.php with option_page=ppa_settings.
+ * - If register_setting('ppa_settings', ...) has NOT run by admin_init, WP rejects the save with:
+ *   "Error: The ppa_settings options page is not in the allowed options list."
+ * - settings.php is currently included by the Settings menu callback (late), so it may miss admin_init on save.  // CHANGED:
+ *
+ * FIX:
+ * - Register the relevant setting(s) here on admin_init (early), without touching settings.php.
+ * - This is WP-only, does not impact Django/endpoints/CORS/auth/etc.                                                  // CHANGED:
+ */
+if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {                                 // CHANGED:
+	function ppa_register_settings_api_bootstrap() {                                                 // CHANGED:
+		if ( ! is_admin() ) {                                                                       // CHANGED:
+			return;                                                                                 // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Only admins can hit options.php successfully anyway, but keep this tight.                 // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {                                             // CHANGED:
+			return;                                                                                 // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Avoid overriding an existing registration if settings.php (or another file) registers first.  // CHANGED:
+		global $wp_registered_settings;                                                             // CHANGED:
+		if ( ! is_array( $wp_registered_settings ) ) {                                              // CHANGED:
+			$wp_registered_settings = array();                                                      // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Most common pattern: a single option for the license key.                                 // CHANGED:
+		if ( ! isset( $wp_registered_settings['ppa_license_key'] ) ) {                              // CHANGED:
+			register_setting(                                                                       // CHANGED:
+				'ppa_settings',                                                                     // CHANGED: option_group (must match settings_fields('ppa_settings'))
+				'ppa_license_key',                                                                  // CHANGED: option_name
+				array(                                                                              // CHANGED:
+					'type'              => 'string',                                                // CHANGED:
+					'sanitize_callback' => 'ppa_sanitize_setting_value',                            // CHANGED:
+					'default'           => '',                                                      // CHANGED:
+				)                                                                                   // CHANGED:
+			);                                                                                       // CHANGED:
+		}                                                                                            // CHANGED:
+
+		// Alternate pattern: store settings as an array under one option named same-ish as the group.   // CHANGED:
+		// This is harmless if unused, and prevents edge cases where the form uses ppa_settings[...].    // CHANGED:
+		if ( ! isset( $wp_registered_settings['ppa_settings'] ) ) {                                  // CHANGED:
+			register_setting(                                                                       // CHANGED:
+				'ppa_settings',                                                                     // CHANGED:
+				'ppa_settings',                                                                     // CHANGED:
+				array(                                                                              // CHANGED:
+					'type'              => 'array',                                                 // CHANGED:
+					'sanitize_callback' => 'ppa_sanitize_setting_value',                            // CHANGED:
+					'default'           => array(),                                                 // CHANGED:
+				)                                                                                   // CHANGED:
+			);                                                                                       // CHANGED:
+		}                                                                                            // CHANGED:
+	}                                                                                                // CHANGED:
+	add_action( 'admin_init', 'ppa_register_settings_api_bootstrap', 0 );                            // CHANGED: priority 0 = early
+}                                                                                                    // CHANGED:
+
+/**
  * Register the top-level "PostPress AI" menu and route to the Composer renderer.
  * Also adds:
- *  - Submenu “PostPress Composer” (renames the default submenu label).
- *  - Submenu “Testbed”.
+ *  - Submenu "PostPress Composer" (renames the default submenu label).
+ *  - Submenu "Settings" (admin-only).
+ *  - Submenu "Testbed" (hidden unless PPA_ENABLE_TESTBED === true).
  */
 if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 	function ppa_register_admin_menu() {
-		$capability = 'edit_posts';
-		$menu_slug  = 'postpress-ai';
+		$capability_composer = 'edit_posts';
+		$capability_admin    = 'manage_options'; // Settings + Testbed are admin-only.                // CHANGED:
+		$menu_slug           = 'postpress-ai';
 
-		// Top-level menu
+		// Custom SVG icon for PostPress AI                                                         // CHANGED:
+		$icon_svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <path d="M3 2h8.5c3.59 0 6.5 2.91 6.5 6.5S15.09 15 11.5 15H8v3H3V2z" fill="#ff8c00" opacity="0.2"/>
+  <g stroke="#ff8c00" stroke-width="1.2" stroke-linecap="round" fill="none">
+    <circle cx="12" cy="7" r="1.5"/>
+    <circle cx="7" cy="11" r="1.2"/>
+    <path d="M12 8.5 L12 10 L10 12 L7 12"/>
+    <path d="M7 11 L7 9.5"/>
+  </g>
+</svg>'; // CHANGED:
+		$menu_icon = 'data:image/svg+xml;base64,' . base64_encode( $icon_svg );                      // CHANGED:
+
+		// Top-level menu (Composer)
 		add_menu_page(
 			__( 'PostPress AI', 'postpress-ai' ),
 			__( 'PostPress AI', 'postpress-ai' ),
-			$capability,
+			$capability_composer,
 			$menu_slug,
 			'ppa_render_composer',
-			'dashicons-welcome-widgets-menus',
-			65
+			$menu_icon,                                                                              // CHANGED:
+			3                                                                                        // CHANGED: position 3 = high priority (right after Dashboard)
 		);
 
-		// Rename the auto-generated first submenu to “PostPress Composer”
+		// Rename the auto-generated first submenu to "PostPress Composer"
+		// NOTE: WP auto-creates this first submenu for the parent slug; do NOT add a duplicate.      // CHANGED:
 		global $submenu;
 		if ( isset( $submenu[ $menu_slug ][0] ) ) {
 			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );
 		}
 
-		// Explicitly ensure the Composer submenu exists with the same slug as parent
-		add_submenu_page(
-			$menu_slug,                                 // parent
-			__( 'PostPress Composer', 'postpress-ai' ), // page title
-			__( 'PostPress Composer', 'postpress-ai' ), // menu title
-			$capability,
-			$menu_slug,                                 // same slug as parent
-			'ppa_render_composer'
-		);
+		// Settings submenu (admin-only)                                                        // CHANGED:
+		add_submenu_page(                                                                         // CHANGED:
+			$menu_slug,                                                                           // CHANGED:
+			__( 'PostPress AI Settings', 'postpress-ai' ),                                        // CHANGED:
+			__( 'Settings', 'postpress-ai' ),                                                     // CHANGED:
+			$capability_admin,                                                                    // CHANGED:
+			'postpress-ai-settings',                                                              // CHANGED:
+			'ppa_render_settings'                                                                 // CHANGED:
+		);                                                                                        // CHANGED:
 
-		// Testbed submenu under PostPress AI
-		add_submenu_page(
-			$menu_slug,                                 // parent = PostPress AI
-			__( 'PPA Testbed', 'postpress-ai' ),        // page title
-			__( 'Testbed', 'postpress-ai' ),            // menu title
-			$capability,
-			'ppa-testbed',                              // slug
-			'ppa_render_testbed'                        // callback
-		);
+		// Testbed submenu (admin-only AND gated)                                                 // CHANGED:
+		$testbed_enabled = ( defined( 'PPA_ENABLE_TESTBED' ) && true === PPA_ENABLE_TESTBED );    // CHANGED:
+		if ( $testbed_enabled ) {                                                                // CHANGED:
+			add_submenu_page(                                                                     // CHANGED:
+				$menu_slug,                                                                       // CHANGED:
+				__( 'PPA Testbed', 'postpress-ai' ),                                               // CHANGED:
+				__( 'Testbed', 'postpress-ai' ),                                                   // CHANGED:
+				$capability_admin,                                                                // CHANGED:
+				'postpress-ai-testbed',                                                           // CHANGED: normalized slug
+				'ppa_render_testbed'                                                              // CHANGED:
+			);                                                                                    // CHANGED:
+		}                                                                                        // CHANGED:
 
-		// Remove any legacy Tools→Testbed to avoid duplicates (harmless if not present).                 // CHANGED:
-		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                               // CHANGED:
+		// Remove any legacy Tools→Testbed to avoid duplicates (harmless if not present).         // CHANGED:
+		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                       // CHANGED:
+		remove_submenu_page( 'tools.php', 'postpress-ai-testbed' );                              // CHANGED:
 
-		error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ', cap=' . $capability . ')' );
+		error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ')' );
 	}
 	add_action( 'admin_menu', 'ppa_register_admin_menu', 9 );
 }
@@ -95,8 +209,8 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
 		}
 
-		// Prefer constant defined by root loader; avoids nested plugin_dir_path drift.                     // CHANGED:
-		$composer = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/composer.php';                           // CHANGED:
+		// Prefer constant defined by root loader; avoids nested plugin_dir_path drift.            // CHANGED:
+		$composer = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/composer.php';                 // CHANGED:
 
 		if ( file_exists( $composer ) ) {
 			error_log( 'PPA: including composer.php' );
@@ -107,10 +221,35 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
 		// Fallback UI (minimal, no inline assets beyond this safe notice).
 		error_log( 'PPA: composer.php missing at ' . $composer );
 		echo '<div class="wrap"><h1>PostPress Composer</h1><p>'
-		   . esc_html__( 'Composer UI not found. Ensure inc/admin/composer.php exists.', 'postpress-ai' )
-		   . '</p></div>';
+			. esc_html__( 'Composer UI not found. Ensure inc/admin/composer.php exists.', 'postpress-ai' )
+			. '</p></div>';
 	}
 }
+
+/**
+ * Settings renderer (submenu).
+ * Includes inc/admin/settings.php; the settings file owns the UI rendering.
+ */
+if ( ! function_exists( 'ppa_render_settings' ) ) {                                             // CHANGED:
+	function ppa_render_settings() {                                                            // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {                                          // CHANGED:
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) ); // CHANGED:
+		}                                                                                        // CHANGED:
+
+		$settings = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/settings.php';                 // CHANGED:
+
+		if ( file_exists( $settings ) ) {                                                        // CHANGED:
+			error_log( 'PPA: including settings.php' );                                           // CHANGED:
+			require $settings;                                                                    // CHANGED:
+			return;                                                                               // CHANGED:
+		}                                                                                        // CHANGED:
+
+		error_log( 'PPA: settings.php missing at ' . $settings );                                 // CHANGED:
+		echo '<div class="wrap"><h1>PostPress AI Settings</h1><p>'                                 // CHANGED:
+			. esc_html__( 'Settings UI not found. Ensure inc/admin/settings.php exists.', 'postpress-ai' ) // CHANGED:
+			. '</p></div>';                                                                       // CHANGED:
+	}                                                                                            // CHANGED:
+}                                                                                                // CHANGED:
 
 /**
  * Testbed renderer (submenu).
@@ -118,12 +257,11 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
  */
 if ( ! function_exists( 'ppa_render_testbed' ) ) {
 	function ppa_render_testbed() {
-		if ( ! current_user_can( 'edit_posts' ) ) {
+		if ( ! current_user_can( 'manage_options' ) ) {                                          // CHANGED:
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
 		}
 
-		// Prefer constant-defined base dir for reliability.                                              // CHANGED:
-		$base = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/';                                         // CHANGED:
+		$base = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/';                                 // CHANGED:
 
 		// Prefer the new template name first, then legacy.
 		$candidates = array(
@@ -165,6 +303,5 @@ if ( ! function_exists( 'ppa_render_testbed' ) ) {
 			<pre id="ppa-testbed-output" aria-live="polite" aria-label="<?php echo esc_attr__( 'Preview or store response output', 'postpress-ai' ); ?>"></pre>
 		</div>
 		<?php
-		// End fallback markup
 	}
 }
