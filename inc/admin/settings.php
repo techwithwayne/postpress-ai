@@ -4,7 +4,7 @@
  * Path: inc/admin/settings.php
  *
  * Provides:
- * - Settings UI under PostPress AI.
+ * - Settings UI renderer for PostPress AI.
  * - License key storage (admin-only) + license actions that call Django /license/* (server-side only).
  * - Test Connection action that calls Django /version/ and /health/ (server-side only).
  * - Display-only caching of last licensing response for admin visibility (no enforcement).
@@ -14,9 +14,8 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
- * 2025-12-27: FIX: When this file is included by menu.php page callback, it now renders the Settings UI.      // CHANGED:
- * 2025-12-27: FIX: Do NOT register a second Settings submenu from inside this file (menu.php owns menus).    // CHANGED:
- * 2025-12-27: FIX: Add a one-time render guard to prevent double output.                                     // CHANGED:
+ * 2025-12-27: FIX: Remove submenu registration from this file; menu.php is the single menu registrar.          // CHANGED:
+ *             Settings screen is routed here via ppa_render_settings() include from menu.php.                 // CHANGED:
  *
  * 2025-11-19: Initial settings screen & connectivity test (Django URL + shared key).                              // CHANGED:
  * 2025-12-25: Add license UI + admin-post handlers to call Django /license/* endpoints (server-side).            // CHANGED:
@@ -40,7 +39,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 	/**
 	 * Admin Settings for PostPress AI.
 	 *
-	 * Note: This file is self-initializing via PPA_Admin_Settings::init().
+	 * Note:
+	 * - This file is included by inc/admin/menu.php when visiting the Settings screen.
+	 * - Menu registration is owned by menu.php (single registrar).                                      // CHANGED:
 	 */
 	class PPA_Admin_Settings {
 
@@ -62,14 +63,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		 * Bootstrap hooks.
 		 */
 		public static function init() {
-
-			/**
-			 * IMPORTANT:
-			 * Menus are owned by inc/admin/menu.php.
-			 * Do NOT register another Settings submenu from this file, or you will get duplicates
-			 * and confusing routing.
-			 */
-			// add_action( 'admin_menu', array( __CLASS__, 'register_menu' ) ); // CHANGED: intentionally disabled
+			// IMPORTANT: menu.php owns the submenu entry now.                                         // CHANGED:
+			// We only register settings + handlers here.                                               // CHANGED:
 
 			// Settings API registration.
 			add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
@@ -81,23 +76,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			add_action( 'admin_post_ppa_license_verify', array( __CLASS__, 'handle_license_verify' ) );
 			add_action( 'admin_post_ppa_license_activate', array( __CLASS__, 'handle_license_activate' ) );
 			add_action( 'admin_post_ppa_license_deactivate', array( __CLASS__, 'handle_license_deactivate' ) );
-		}
-
-		/**
-		 * (Legacy) Add "Settings" submenu under the existing PostPress AI menu.
-		 * NOTE: Disabled in init() because menu.php owns menus now.                                  // CHANGED:
-		 */
-		public static function register_menu() {
-			$parent_slug = 'postpress-ai'; // This matches the Composer screen slug.
-
-			add_submenu_page(
-				$parent_slug,
-				__( 'PostPress AI Settings', 'postpress-ai' ),
-				__( 'Settings', 'postpress-ai' ),
-				self::cap(),
-				'postpress-ai-settings',
-				array( __CLASS__, 'render_page' )
-			);
 		}
 
 		/**
@@ -305,6 +283,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			return 'unknown';                                                                      // CHANGED:
 		}
 
+		// Legacy helpers (kept registered, not shown in UI now).
 		public static function section_connection_intro() {
 			?>
 			<p class="ppa-help">
@@ -374,9 +353,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				$base = (string) PPA_DJANGO_URL;
 			} else {
 				$base = (string) get_option( 'ppa_django_url', 'https://apps.techwithwayne.com/postpress-ai/' );
-				if ( '' === trim( $base ) ) {                                                     // CHANGED:
-					$base = 'https://apps.techwithwayne.com/postpress-ai/';                         // CHANGED:
-				}                                                                                   // CHANGED:
+				if ( '' === trim( $base ) ) {
+					$base = 'https://apps.techwithwayne.com/postpress-ai/';
+				}
 			}
 			$base = esc_url_raw( $base );
 			$base = untrailingslashit( $base );
@@ -404,10 +383,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
-			$lic = self::get_license_key();                                                       // CHANGED:
-			if ( '' !== $lic ) {                                                                  // CHANGED:
-				return $lic;                                                                       // CHANGED:
-			}                                                                                      // CHANGED:
+			$lic = self::get_license_key();
+			if ( '' !== $lic ) {
+				return $lic;
+			}
 
 			return '';
 		}
@@ -426,14 +405,14 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			check_admin_referer( 'ppa-test-connectivity' );
 
 			$base = self::get_django_base_url();
-			$key  = self::resolve_shared_key();                                                   // CHANGED:
+			$key  = self::resolve_shared_key();
 
 			if ( '' === $base ) {
-				self::redirect_with_test_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ) ); // CHANGED:
+				self::redirect_with_test_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ) );
 			}
 
 			if ( '' === $key ) {
-				self::redirect_with_test_result( 'error', __( 'Please add your License Key first, then click Save.', 'postpress-ai' ) ); // CHANGED:
+				self::redirect_with_test_result( 'error', __( 'Please add your License Key first, then click Save.', 'postpress-ai' ) );
 			}
 
 			$headers = array(
@@ -449,8 +428,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'health'  => trailingslashit( $base ) . 'health/',
 			);
 
-			$ok_count  = 0;
-			$messages  = array();
+			$ok_count = 0;
+			$messages = array();
 
 			foreach ( $endpoints as $label => $url ) {
 				$response = wp_remote_get(
@@ -489,7 +468,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				);
 			}
 
-			$msg = __( 'Not connected yet. Please double-check your License Key.', 'postpress-ai' ); // CHANGED:
+			$msg = __( 'Not connected yet. Please double-check your License Key.', 'postpress-ai' );
 			if ( ! empty( $messages ) ) {
 				$msg .= ' ' . implode( ' ', $messages );
 			}
@@ -522,19 +501,19 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			check_admin_referer( 'ppa-license-' . $action );
 
 			$base = self::get_django_base_url();
-			$key  = self::resolve_shared_key();                                                   // CHANGED:
+			$key  = self::resolve_shared_key();
 			$lic  = self::get_license_key();
 
 			if ( '' === $base ) {
-				self::redirect_with_license_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Missing server configuration. Please contact support.', 'postpress-ai' ), array() );
 			}
 
 			if ( '' === $lic ) {
-				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() );
 			}
 
 			if ( '' === $key ) {
-				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() ); // CHANGED:
+				self::redirect_with_license_result( 'error', __( 'Please paste your License Key first, then click Save.', 'postpress-ai' ), array() );
 			}
 
 			$endpoint = trailingslashit( $base ) . 'license/' . $action . '/';
@@ -543,7 +522,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'Accept'           => 'application/json; charset=utf-8',
 				'Content-Type'     => 'application/json; charset=utf-8',
 				'User-Agent'       => 'PostPressAI-WordPress/' . ( defined( 'PPA_VERSION' ) ? PPA_VERSION : 'dev' ),
-				'X-PPA-Key'        => $key,                                                         // CHANGED:
+				'X-PPA-Key'        => $key,
 				'X-PPA-View'       => 'settings_license',
 				'X-Requested-With' => 'XMLHttpRequest',
 			);
@@ -565,13 +544,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$result = self::normalize_django_response( $response );
 			self::cache_last_license_result( $result );
 
-			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {      // CHANGED:
-				if ( 'activate' === $action ) {                                                   // CHANGED:
-					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );               // CHANGED:
-				} elseif ( 'deactivate' === $action ) {                                           // CHANGED:
-					delete_option( self::OPT_ACTIVE_SITE );                                       // CHANGED:
-				}                                                                                 // CHANGED:
-			}                                                                                      // CHANGED:
+			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
+				if ( 'activate' === $action ) {
+					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );
+				} elseif ( 'deactivate' === $action ) {
+					delete_option( self::OPT_ACTIVE_SITE );
+				}
+			}
 
 			$notice = self::notice_from_license_result( ucfirst( $action ), $result );
 			$status = ( isset( $result['ok'] ) && true === $result['ok'] ) ? 'ok' : 'error';
@@ -711,13 +690,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$last = get_transient( self::TRANSIENT_LAST_LIC );
 
-			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );                      // CHANGED:
-			$val_license = self::sanitize_license_key( $val_license );                             // CHANGED:
+			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );
+			$val_license = self::sanitize_license_key( $val_license );
 
-			$has_key          = ( '' !== $val_license );                                           // CHANGED:
-			$activation_state = self::derive_activation_state( $last );                            // CHANGED:
-			$is_active_here   = ( 'active' === $activation_state );                                // CHANGED:
-			$is_inactive_here = ( 'inactive' === $activation_state );                              // CHANGED:
+			$has_key          = ( '' !== $val_license );
+			$activation_state = self::derive_activation_state( $last );
+			$is_active_here   = ( 'active' === $activation_state );
+			$is_inactive_here = ( 'inactive' === $activation_state );
 			?>
 			<div class="wrap ppa-admin ppa-settings">
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
@@ -841,18 +820,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 	}
 
 	PPA_Admin_Settings::init();
+
+	// Render immediately when included by menu.php’s ppa_render_settings()                         // CHANGED:
+	PPA_Admin_Settings::render_page();                                                             // CHANGED:
 }
-
-/**
- * When inc/admin/menu.php uses this file as the page callback include,
- * we MUST explicitly render the page, because includes do not auto-echo.
- * This prevents the “blank settings page” problem.                                             // CHANGED:
- */
-if ( is_admin() && ! defined( 'PPA_SETTINGS_RENDERED' ) ) {                                     // CHANGED:
-	define( 'PPA_SETTINGS_RENDERED', true );                                                    // CHANGED:
-
-	$page = isset( $_GET['page'] ) ? (string) sanitize_key( wp_unslash( $_GET['page'] ) ) : ''; // CHANGED:
-	if ( 'postpress-ai-settings' === $page && class_exists( 'PPA_Admin_Settings' ) ) {          // CHANGED:
-		PPA_Admin_Settings::render_page();                                                       // CHANGED:
-	}                                                                                            // CHANGED:
-}                                                                                                // CHANGED:
