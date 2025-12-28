@@ -14,6 +14,8 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2025-12-28: FIX: Prevent duplicate plan-limit notice by suppressing querystring license notice
+ *              when site_limit_reached is true (persistent notice handles it).                    // CHANGED:
  * 2025-12-28: UX: If last license response shows plan_limit + site_limit_reached, show friendly message
  *              and disable "Activate This Site" (UX only; no enforcement; endpoints unchanged).     // CHANGED:
  * 2025-12-28: FIX: Prevent fatal "Call to undefined function submit_button()" by defensively loading
@@ -812,7 +814,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					if ( '' !== $test_status && '' !== $test_msg ) {
 						self::render_notice( $test_status, $test_msg );
 					}
-					if ( ! $site_limit_reached && '' !== $lic_status && '' !== $lic_msg ) {
+					if ( ! $site_limit_reached && '' !== $lic_status && '' !== $lic_msg ) { // CHANGED:
 						self::render_notice( $lic_status, $lic_msg );
 					}
 
