@@ -14,6 +14,11 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2025-12-28: UX: If last license response shows plan_limit + site_limit_reached, show friendly message
+ *              and disable "Activate This Site" (UX only; no enforcement; endpoints unchanged).     // CHANGED:
+ * 2025-12-28: FIX: Prevent fatal "Call to undefined function submit_button()" by defensively loading
+ *              wp-admin/includes/template.php inside render_page() and providing a last-resort shim. // CHANGED:
+ *
  * 2025-12-27: FIX: Remove submenu registration from this file; menu.php is the single menu registrar.          // CHANGED:
  *             Settings screen is routed here via ppa_render_settings() include from menu.php.                 // CHANGED:
  *
@@ -33,6 +38,38 @@
  */
 
 defined( 'ABSPATH' ) || exit;
+
+/* PPA_SUBMIT_BUTTON_GUARD_START */
+ // CHANGED: Prevent fatal error if wp-admin template helpers aren't loaded yet (submit_button()).
+ // CHANGED: This can happen if Settings renders early in admin bootstrap or on admin-post requests.
+
+if ( is_admin() && ! function_exists( 'submit_button' ) ) { // CHANGED:
+    $ppa_tpl = ABSPATH . 'wp-admin/includes/template.php'; // CHANGED:
+    if ( file_exists( $ppa_tpl ) ) { // CHANGED:
+        require_once $ppa_tpl; // CHANGED:
+    } // CHANGED:
+} // CHANGED:
+
+// CHANGED: Last-resort shim — only if submit_button STILL doesn't exist after template include.
+if ( ! function_exists( 'submit_button' ) ) { // CHANGED:
+    function submit_button( $text = null, $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = null ) { // CHANGED:
+        $text = $text ?: __( 'Save Changes' ); // CHANGED:
+        $classes = 'button button-' . $type; // CHANGED:
+        $attrs = ''; // CHANGED:
+
+        if ( is_array( $other_attributes ) ) { // CHANGED:
+            foreach ( $other_attributes as $k => $v ) { // CHANGED:
+                $attrs .= ' ' . esc_attr( $k ) . '="' . esc_attr( $v ) . '"'; // CHANGED:
+            } // CHANGED:
+        } elseif ( is_string( $other_attributes ) && trim( $other_attributes ) !== '' ) { // CHANGED:
+            $attrs .= ' ' . trim( $other_attributes ); // CHANGED:
+        } // CHANGED:
+
+        $btn = '<input type="submit" name="' . esc_attr( $name ) . '" id="' . esc_attr( $name ) . '" class="' . esc_attr( $classes ) . '" value="' . esc_attr( $text ) . '"' . $attrs . ' />'; // CHANGED:
+        echo $wrap ? '<p class="submit">' . $btn . '</p>' : $btn; // CHANGED:
+    } // CHANGED:
+} // CHANGED:
+/* PPA_SUBMIT_BUTTON_GUARD_END */
 
 if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
@@ -68,6 +105,12 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			// Settings API registration.
 			add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
+
+			// If this file loads after admin_init (e.g. via admin_menu), admin_init already ran.
+			// Register settings immediately so options.php will accept option_page=ppa_settings.
+			if ( did_action( 'admin_init' ) ) {
+				self::register_settings();
+			}
 
 			// Test Connection handler (admin-post).
 			add_action( 'admin_post_ppa_test_connectivity', array( __CLASS__, 'handle_test_connectivity' ) );
@@ -210,6 +253,37 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			</div>
 			<?php
 		}
+
+		/**
+		 * Detect plan-limit site cap response.
+		 *
+		 * Requirements (Option A):
+		 * - error.type = plan_limit
+		 * - error.code = site_limit_reached
+		 *
+		 * NOTE: This is UX-only (disable Activate + show clearer message). No enforcement.
+		 *
+		 * @param mixed $result
+		 * @return bool
+		 */
+		private static function is_plan_limit_site_limit_reached( $result ) {                   // CHANGED:
+			if ( ! is_array( $result ) ) {                                                     // CHANGED:
+				return false;                                                                  // CHANGED:
+			}                                                                                  // CHANGED:
+
+			$err = array();                                                                    // CHANGED:
+
+			if ( isset( $result['error'] ) && is_array( $result['error'] ) ) {                  // CHANGED:
+				$err = $result['error'];                                                       // CHANGED:
+			} elseif ( isset( $result['data']['error'] ) && is_array( $result['data']['error'] ) ) { // CHANGED:
+				$err = $result['data']['error'];                                               // CHANGED:
+			}                                                                                  // CHANGED:
+
+			$type = isset( $err['type'] ) ? strtolower( trim( (string) $err['type'] ) ) : '';  // CHANGED:
+			$code = isset( $err['code'] ) ? strtolower( trim( (string) $err['code'] ) ) : '';  // CHANGED:
+
+			return ( 'plan_limit' === $type && 'site_limit_reached' === $code );                // CHANGED:
+		}                                                                                      // CHANGED:
 
 		/**
 		 * Local “active on this site” helper.
@@ -611,6 +685,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				return __( 'Done.', 'postpress-ai' );
 			}
 
+			// CHANGED: Friendlier message for site limit reached (no endpoints changed; UX only).
+			if ( self::is_plan_limit_site_limit_reached( $result ) ) {                            // CHANGED:
+				return __( 'Plan limit reached: your account has hit its site limit. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); // CHANGED:
+			}                                                                                      // CHANGED:
+
 			$code = '';
 			if ( is_array( $result ) && isset( $result['error']['code'] ) ) {
 				$code = (string) $result['error']['code'];
@@ -676,6 +755,32 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				wp_die( esc_html__( 'You are not allowed to access this page.', 'postpress-ai' ) );
 			}
 
+			// CHANGED: submit_button() lives in wp-admin/includes/template.php. Load it defensively to avoid fatal.
+			$ppa_tpl = ABSPATH . 'wp-admin/includes/template.php'; // CHANGED:
+			if ( ! function_exists( 'submit_button' ) && file_exists( $ppa_tpl ) ) { // CHANGED:
+				require_once $ppa_tpl; // CHANGED:
+			} // CHANGED:
+
+			// CHANGED: Last-resort shim (only if template.php STILL didn't provide submit_button()).
+			if ( ! function_exists( 'submit_button' ) ) { // CHANGED:
+				function submit_button( $text = null, $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = null ) { // CHANGED:
+					$text    = $text ?: __( 'Save Changes' ); // CHANGED:
+					$classes = 'button button-' . $type; // CHANGED:
+					$attrs   = ''; // CHANGED:
+
+					if ( is_array( $other_attributes ) ) { // CHANGED:
+						foreach ( $other_attributes as $k => $v ) { // CHANGED:
+							$attrs .= ' ' . esc_attr( $k ) . '="' . esc_attr( $v ) . '"'; // CHANGED:
+						} // CHANGED:
+					} elseif ( is_string( $other_attributes ) && trim( $other_attributes ) !== '' ) { // CHANGED:
+						$attrs .= ' ' . trim( $other_attributes ); // CHANGED:
+					} // CHANGED:
+
+					$btn = '<input type="submit" name="' . esc_attr( $name ) . '" id="' . esc_attr( $name ) . '" class="' . esc_attr( $classes ) . '" value="' . esc_attr( $text ) . '"' . $attrs . ' />'; // CHANGED:
+					echo $wrap ? '<p class="submit">' . $btn . '</p>' : $btn; // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
 			$test_status = isset( $_GET['ppa_test'] ) ? sanitize_key( wp_unslash( $_GET['ppa_test'] ) ) : '';
 			$test_msg    = isset( $_GET['ppa_test_msg'] ) ? wp_unslash( $_GET['ppa_test_msg'] ) : '';
 			if ( is_string( $test_msg ) && '' !== $test_msg ) {
@@ -693,10 +798,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );
 			$val_license = self::sanitize_license_key( $val_license );
 
-			$has_key          = ( '' !== $val_license );
-			$activation_state = self::derive_activation_state( $last );
-			$is_active_here   = ( 'active' === $activation_state );
-			$is_inactive_here = ( 'inactive' === $activation_state );
+			$has_key            = ( '' !== $val_license );
+			$activation_state   = self::derive_activation_state( $last );
+			$is_active_here     = ( 'active' === $activation_state );
+			$is_inactive_here   = ( 'inactive' === $activation_state );
+			$site_limit_reached = self::is_plan_limit_site_limit_reached( $last );               // CHANGED:
 			?>
 			<div class="wrap ppa-admin ppa-settings">
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
@@ -706,9 +812,14 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					if ( '' !== $test_status && '' !== $test_msg ) {
 						self::render_notice( $test_status, $test_msg );
 					}
-					if ( '' !== $lic_status && '' !== $lic_msg ) {
+					if ( ! $site_limit_reached && '' !== $lic_status && '' !== $lic_msg ) {
 						self::render_notice( $lic_status, $lic_msg );
 					}
+
+					// CHANGED: Persistent, clearer UX for plan limit site cap (based on last cached license response).
+					if ( $site_limit_reached ) {                                                    // CHANGED:
+						self::render_notice( 'error', __( 'Plan limit reached: your account has hit its site limit. You can’t activate this site until you upgrade your plan or deactivate another site.', 'postpress-ai' ) ); // CHANGED:
+					}                                                                                  // CHANGED:
 					?>
 
 					<h2 class="title"><?php esc_html_e( 'Setup', 'postpress-ai' ); ?></h2>
@@ -777,7 +888,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 							<?php wp_nonce_field( 'ppa-license-activate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_activate" />
 							<?php
-							$disable_activate = ( ! $has_key ) || $is_active_here;
+							$disable_activate = ( ! $has_key ) || $is_active_here || $site_limit_reached; // CHANGED:
 							$attrs            = $disable_activate ? array( 'disabled' => 'disabled' ) : array();
 							submit_button( __( 'Activate This Site', 'postpress-ai' ), 'primary', 'ppa_license_activate_btn', false, $attrs );
 							?>
@@ -785,6 +896,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first. Then you can activate.', 'postpress-ai' ); ?></p>
 							<?php elseif ( $is_active_here ) : ?>
 								<p class="description ppa-inline-help"><?php esc_html_e( 'This site is already active.', 'postpress-ai' ); ?></p>
+							<?php elseif ( $site_limit_reached ) : ?>
+								<p class="description ppa-inline-help"><?php esc_html_e( 'Plan limit reached. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); ?></p>
 							<?php endif; ?>
 						</form>
 
@@ -821,6 +934,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 	PPA_Admin_Settings::init();
 
-	// Render immediately when included by menu.php’s ppa_render_settings()                         // CHANGED:
-	PPA_Admin_Settings::render_page();                                                             // CHANGED:
+	if ( is_admin() && isset( $_GET['page'] ) && $_GET['page'] === 'postpress-ai-settings' && ( ! isset( $GLOBALS['pagenow'] ) || $GLOBALS['pagenow'] !== 'admin-post.php' ) ) { // CHANGED:
+		PPA_Admin_Settings::render_page(); // CHANGED:
+	} // CHANGED:
+
 }
