@@ -1,0 +1,184 @@
+<?php
+/**
+ * CHANGE LOG
+ * 2025-10-19 — Cleaned UI: removed visible "# CHANGED" artifacts from markup.
+ * 2025-10-19 — Composer page layout (dark, two-column) with Subject, Genre, Tone, Word Count,
+ *               Optional brief, and actions (Preview, Save Draft, Publish).
+ * - Capability checks are delegated to the menu registration in postpress-ai.php.
+ * - Inline JS is a defensive fallback; main wiring should live in assets/js/admin.js.
+ */
+
+/** Exit if accessed directly. */
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+error_log( 'PPA: composer.php rendering at ' . date( 'c' ) ); // CHANGED
+
+// Nonce for AJAX (header X-PPA-Nonce) — validated server-side where applicable
+$ppa_nonce = wp_create_nonce( 'ppa_admin_nonce' ); // CHANGED
+?>
+<div id="ppa-composer" class="ppa-composer ppa-composer-wrap" style="color:#fff;">
+    <style>
+        /* Fallback styles — primary styles should live in assets/css/admin.css */
+        .ppa-composer-wrap { display:grid; grid-template-columns: 1fr 1fr; gap:24px; }
+        .ppa-form-panel, .ppa-preview-panel {
+            background:#111; border:1px solid #222; border-radius:8px; padding:18px;
+        }
+        .ppa-composer-wrap h1 { margin:0 0 12px; font-size:22px; }
+        .ppa-composer-wrap label { display:block; margin:8px 0 4px; font-weight:600; }
+        .ppa-composer-wrap input[type="text"],
+        .ppa-composer-wrap select,
+        .ppa-composer-wrap input[type="number"],
+        .ppa-composer-wrap textarea {
+            width:100%; padding:8px; border-radius:6px; border:1px solid #333;
+            background:#0f0f0f; color:#fff;
+        }
+        .ppa-composer-wrap textarea { min-height:90px; }
+        .ppa-actions { margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .ppa-btn { font-weight:600; padding:8px 16px; border-radius:6px; cursor:pointer; border:none; }
+        .ppa-btn-primary { background:#ff6c00; color:#121212; }
+        .ppa-btn-secondary { background:#222; color:#fff; border:1px solid #333; }
+        .ppa-note { font-size:13px; color:#bbb; margin-top:8px; display:block; }
+        #ppa-preview-pane { margin-top:12px; padding:12px; border-radius:6px; min-height:120px; background:#fff; color:#121212; }
+        @media (max-width: 1100px) { .ppa-composer-wrap { grid-template-columns: 1fr; } }
+    </style>
+
+    <?php printf( '<input type="hidden" id="ppa-nonce" value="%s" />', esc_attr( $ppa_nonce ) ); ?>
+
+    <div class="ppa-form-panel">
+        <h1>PostPress AI Composer</h1>
+
+        <label for="ppa-subject">Subject / Title</label>
+        <input id="ppa-subject" name="ppa_subject" type="text" placeholder="e.g. 5 ways to improve your website speed" value="" />
+
+        <label for="ppa-subject-extra">Optional brief / instructions</label>
+        <textarea id="ppa-subject-extra" name="ppa_subject_extra" rows="3" placeholder="(optional: additional context or outline)"></textarea>
+
+        <label for="ppa-genre">Genre</label>
+        <select id="ppa-genre" name="ppa_genre">
+            <option value="blog">Blog Post</option>
+            <option value="news">News Article</option>
+            <option value="listicle">Listicle</option>
+            <option value="tutorial">Tutorial</option>
+        </select>
+
+        <label for="ppa-tone">Tone</label>
+        <select id="ppa-tone" name="ppa_tone">
+            <option value="casual">Casual</option>
+            <option value="professional">Professional</option>
+            <option value="friendly" selected>Friendly</option>
+        </select>
+
+        <label for="ppa-wordcount">Approx. word count</label>
+        <input id="ppa-wordcount" name="ppa_wordcount" type="number" min="50" max="2000" value="300" />
+
+        <div class="ppa-actions">
+            <button id="ppa-preview-btn" class="ppa-btn ppa-btn-primary" type="button">Preview</button>
+            <button id="ppa-save-btn" class="ppa-btn ppa-btn-secondary" type="button">Save Draft</button>
+            <button id="ppa-publish-btn" class="ppa-btn ppa-btn-secondary" type="button">Publish</button>
+            <span class="ppa-note">Preview uses the AI backend. “Save Draft” creates a draft in WordPress. “Publish” will publish immediately.</span>
+        </div>
+    </div>
+
+    <div class="ppa-preview-panel">
+        <div id="ppa-preview-pane" aria-live="polite"><em style="color:#666;">(Preview will appear here once generated.)</em></div>
+    </div>
+</div>
+
+<script>
+// Defensive fallback wiring; primary logic should live in assets/js/admin.js
+console.info('PPA: composer.php inline script init'); // CHANGED
+(function(){
+    const $ = (id) => document.getElementById(id);
+    const previewBtn = $('ppa-preview-btn');
+    const saveBtn    = $('ppa-save-btn');
+    const publishBtn = $('ppa-publish-btn');
+    const previewPane = $('ppa-preview-pane');
+    const nonceEl = $('ppa-nonce');
+
+    function getPayload(){
+        return {
+            subject: ($('ppa-subject')||{}).value || '',
+            extra:   ($('ppa-subject-extra')||{}).value || '',
+            genre:   ($('ppa-genre')||{}).value || '',
+            tone:    ($('ppa-tone')||{}).value || 'friendly',
+            word_count: parseInt((($('ppa-wordcount')||{}).value)||'300',10)||300
+        };
+    }
+
+    async function callAjax(action, body){
+        const headers = { 'Content-Type': 'application/json' };
+        if (nonceEl && nonceEl.value) headers['X-PPA-Nonce'] = nonceEl.value;
+        const url = (window.ajaxurl || '/wp-admin/admin-ajax.php') + '?action=' + encodeURIComponent(action);
+        const res = await fetch(url, { method:'POST', credentials:'same-origin', headers, body: JSON.stringify(body||{}) });
+        const text = await res.text();
+        try { return JSON.parse(text); } catch(e){ throw new Error('Non-JSON: ' + text.slice(0,400)); }
+    }
+
+    function extractHTML(json){
+        if (!json) return '';
+        if (typeof json.html==='string') return json.html;
+        if (json.result && typeof json.result.html==='string') return json.result.html;
+        if (json.data && typeof json.data.html==='string') return json.data.html;
+        if (typeof json.content==='string') return json.content;
+        if (typeof json.preview==='string') return json.preview;
+        return '';
+    }
+
+    previewBtn && previewBtn.addEventListener('click', async () => {
+        console.info('PPA: Preview clicked'); // CHANGED
+        const payload = getPayload();
+        previewPane.innerHTML = '<p style="color:#666;margin:0;">Requesting preview…</p>';
+        try{
+            const json = await callAjax('ppa_preview', payload);
+            const html = extractHTML(json);
+            previewPane.innerHTML = html || '<div class="notice notice-error"><p>No preview HTML in response.</p></div>';
+        }catch(err){
+            console.error('PPA: Preview error', err); // CHANGED
+            previewPane.innerHTML = '<div class="notice notice-error"><p>Preview failed. Check console.</p></div>';
+        }
+    });
+
+    saveBtn && saveBtn.addEventListener('click', async () => {
+        console.info('PPA: Save Draft clicked'); // CHANGED
+        const p = getPayload();
+        try{
+            const json = await callAjax('ppa_store', {
+                title: p.subject || 'Untitled',
+                content: previewPane.innerHTML || (p.extra ? '<p>'+p.extra+'</p>' : '<p></p>'),
+                status: 'draft',
+                meta: { genre:p.genre, tone:p.tone, word_count:p.word_count }
+            });
+            const ok = json && (json.ok===true || json.success===true);
+            const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
+            alert(ok ? ('Draft saved. Post ID: '+id) : 'Save failed — see console.');
+            if (!ok) console.error('PPA: Save response', json); // CHANGED
+        }catch(err){
+            alert('Save failed — see console.');
+            console.error('PPA: Save error', err); // CHANGED
+        }
+    });
+
+    publishBtn && publishBtn.addEventListener('click', async () => {
+        if (!confirm('Publish now?')) return;
+        console.info('PPA: Publish clicked'); // CHANGED
+        const p = getPayload();
+        try{
+            const json = await callAjax('ppa_store', {
+                title: p.subject || 'Untitled',
+                content: previewPane.innerHTML || (p.extra ? '<p>'+p.extra+'</p>' : '<p></p>'),
+                status: 'publish',
+                meta: { genre:p.genre, tone:p.tone, word_count:p.word_count }
+            });
+            const ok = json && (json.ok===true || json.success===true);
+            const id = (json && (json.id || (json.data && json.data.id))) || 'N/A';
+            alert(ok ? ('Published. Post ID: '+id) : 'Publish failed — see console.');
+            if (!ok) console.error('PPA: Publish response', json); // CHANGED
+        }catch(err){
+            alert('Publish failed — see console.');
+            console.error('PPA: Publish error', err); // CHANGED
+        }
+    });
+})();
+</script>
