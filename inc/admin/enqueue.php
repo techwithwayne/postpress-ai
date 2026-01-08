@@ -3,6 +3,10 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
+ * 2026-01-07 • HARDEN: Composer CSS isolation — arm a late admin_print_styles purge that removes ANY other
+ *              PostPress AI CSS on the Composer screen, ensuring ONLY admin-composer.css prints even if a
+ *              later hook enqueues admin.css afterward.                                                   // CHANGED:
+ *
  * 2026-01-03 • FIX: Guard ppa-admin-editor.js enqueue when file missing; adjust deps so no 404 + no breakage. // CHANGED:
  *
  * 2026-01-01 • HARDEN: Sanitize page param with wp_unslash() before sanitize_key() (consistent + safer).        // CHANGED:
@@ -356,6 +360,45 @@ if (!function_exists('ppa_admin_enqueue')) {
 
         // Enqueue assets
         if ($is_main_ui || $is_testbed) {
+
+            // -----------------------------------------------------------------
+            // Composer CSS isolation (late purge): keep ONLY admin-composer.css
+            // -----------------------------------------------------------------
+            if ($is_main_ui) {                                                                                       // CHANGED:
+                $purge_ppai_styles_except_composer = function() use ($rel_path, $admin_composer_css_rel) {            // CHANGED:
+                    $st = function_exists('wp_styles') ? wp_styles() : null;                                         // CHANGED:
+                    if (!$st || empty($st->registered)) {                                                             // CHANGED:
+                        return;                                                                                       // CHANGED:
+                    }                                                                                                 // CHANGED:
+                    foreach ($st->registered as $h => $dep) {                                                         // CHANGED:
+                        $src = isset($dep->src) ? (string) $dep->src : '';                                            // CHANGED:
+                        if (!$src) {                                                                                  // CHANGED:
+                            continue;                                                                                 // CHANGED:
+                        }                                                                                             // CHANGED:
+                        if (strpos($src, $rel_path) === false) {                                                      // CHANGED:
+                            continue;                                                                                 // CHANGED:
+                        }                                                                                             // CHANGED:
+                        // Keep ONLY admin-composer.css on Composer screen.                                           // CHANGED:
+                        if (strpos($src, $admin_composer_css_rel) !== false) {                                        // CHANGED:
+                            continue;                                                                                 // CHANGED:
+                        }                                                                                             // CHANGED:
+                        if (wp_style_is($h, 'enqueued')) {                                                            // CHANGED:
+                            wp_dequeue_style($h);                                                                     // CHANGED:
+                        }                                                                                             // CHANGED:
+                        if (wp_style_is($h, 'registered')) {                                                          // CHANGED:
+                            wp_deregister_style($h);                                                                  // CHANGED:
+                        }                                                                                             // CHANGED:
+                    }                                                                                                 // CHANGED:
+                };                                                                                                    // CHANGED:
+                                                                                                                      // CHANGED:
+                // Run now (in case something enqueued earlier) + run late (in case something enqueues after us).    // CHANGED:
+                $purge_ppai_styles_except_composer();                                                                 // CHANGED:
+                static $ppa_composer_purge_armed = false;                                                             // CHANGED:
+                if (!$ppa_composer_purge_armed) {                                                                     // CHANGED:
+                    $ppa_composer_purge_armed = true;                                                                 // CHANGED:
+                    add_action('admin_print_styles', $purge_ppai_styles_except_composer, 999);                        // CHANGED:
+                }                                                                                                     // CHANGED:
+            }                                                                                                         // CHANGED:
 
             // CSS — per-screen first, fallback to legacy admin.css
             if ($is_main_ui && file_exists($admin_composer_css_file)) {                                              // CHANGED:
