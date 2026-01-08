@@ -1,0 +1,48 @@
+# PostPress AI — Git Ignore (plugin repo)
+
+# OS / Editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local env / secrets
+.env
+.env.*
+*.local
+*.secret
+*.key
+
+# Node / build artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.tmp/
+tmp/
+.cache/
+coverage/
+*.map
+
+# PHP tooling artifacts
+vendor/
+composer.phar
+.phpunit.result.cache
+
+# Local backups / exports
+*.tgz
+*.tar.gz
+*.zip
+*.bak
+*.old
+*.orig
+
+# Logs (plugin-side, if any ever appear)
+*.log
+
+# (Intentionally NOT ignoring: assets/, inc/, postpress-ai.php, readme, etc.)
