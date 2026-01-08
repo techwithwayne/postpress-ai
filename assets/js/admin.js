@@ -6,6 +6,7 @@
  * ========= CHANGE LOG =========
  * 2026-01-03.1: FIX: De-dupe redundant title line in Outline/Body for Preview + Generate autofill. No endpoint/payload changes. // CHANGED:
  * 2026-01-07.1: UX: Add Outline toggle + safe Markdown/URL links in preview (target=_blank). No endpoint/payload changes. // CHANGED:
+ * 2026-01-07.2: UX: Sync Composer button copy in JS notices/labels to "Generate Preview" + "Save Draft (Store)". No endpoint/payload changes. // CHANGED:
  * 2025-12-30.1: UX: After successful Save Draft (store), open the draft edit screen in a new tab (popup-safe via about:blank) and render/update a "View Draft" link right after the Save Draft button. No endpoint/payload changes. // CHANGED:
  * 2025-12-22.1: Preview outline cleanup: stop rendering Outline in a <pre> block; render Outline via markdownToHtml() inside a <div class="ppa-outline"> to prevent pre overflow/wrap issues; broaden list hardening scope to the full preview pane so Outline + Body bullets render reliably. // CHANGED:
  *               No contract changes. No endpoint changes. No payload shape changes. Preview pane placement preserved. // CHANGED:
@@ -52,7 +53,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-07.1'; // CHANGED: // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-07.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -742,6 +743,7 @@
     }
     if (btnGenerate) {
       try { btnGenerate.textContent = 'Generate Preview'; } catch (e) {}
+      try { if (btnDraft) btnDraft.textContent = 'Save Draft (Store)'; } catch (e) {} // CHANGED:
     }
   })();
 
@@ -1134,7 +1136,7 @@
       a.target = '_blank'; // CHANGED:
       a.rel = 'noopener noreferrer'; // CHANGED:
 
-      // Prefer: immediately after the Save Draft button (btnDraft). // CHANGED:
+      // Prefer: immediately after the Save Draft (Store) button (btnDraft). // CHANGED:
       var wrap = document.getElementById('ppa-view-draft-wrap'); // CHANGED:
       if (!wrap) { // CHANGED:
         wrap = document.createElement('span'); // CHANGED:
@@ -1337,7 +1339,7 @@
           var filled = applyGenerateResult(django);
           try { console.info('PPA: applyGenerateResult →', filled); } catch (e2) {}
 
-          renderNotice('success', 'AI draft generated. Review, tweak, then Save Draft or Publish.');
+          renderNotice('success', 'Preview generated. When ready, click Save Draft (Store) to save it as a WordPress draft.'); // CHANGED:
         });
       }, 'generate');
     }, true);
