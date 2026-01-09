@@ -4,6 +4,10 @@
  * Path: inc/admin/composer.php
  *
  * ========= CHANGE LOG =========
+ * 2026-01-09 — HARDEN: Add safe Composer DOM data attrs (data-ppa-view, data-ppa-site-url) for admin.js parity. // CHANGED:
+ *            - NO secrets exposed (no license key in HTML).                                                            // CHANGED:
+ *            - NO UI/CSS changes.                                                                                       // CHANGED:
+ *
  * 2026-01-07 — FIX: Match locked Composer button labels: “Generate Preview” + “Save Draft (Store)”. // CHANGED:
  * 2026-01-07: FIX: Composer button labels align with product + JS behavior:
  *            - "Generate Preview" (calls /generate/ pipeline and renders preview)
@@ -31,10 +35,23 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 $ppa_nonce    = wp_create_nonce( 'ppa-admin' );
 $current_user = wp_get_current_user();
 
+// CHANGED: Safe DOM attrs for admin.js parity (NO secrets). Keep this in-sync with JS expectations.
+$ppa_view = 'composer'; // CHANGED:
+$ppa_site_url = home_url( '/' ); // CHANGED:
+if ( function_exists( 'set_url_scheme' ) ) { // CHANGED:
+	$ppa_site_url = set_url_scheme( $ppa_site_url, 'https' ); // CHANGED:
+} // CHANGED:
+
 ?>
 <!-- (No inline CSS; centralized enqueue supplies admin-composer.css and admin.js) -->
 
-<div class="wrap ppa-composer-wrap" id="ppa-composer" data-ppa-nonce="<?php echo esc_attr( $ppa_nonce ); ?>">
+<div
+	class="wrap ppa-composer-wrap"
+	id="ppa-composer"
+	data-ppa-nonce="<?php echo esc_attr( $ppa_nonce ); ?>"
+	data-ppa-view="<?php echo esc_attr( $ppa_view ); ?>"                         
+	data-ppa-site-url="<?php echo esc_url( $ppa_site_url ); ?>"                  
+>
 
 	<div class="ppa-form-panel" aria-label="<?php echo esc_attr__( 'PostPress AI Composer', 'postpress-ai' ); ?>">
 		<h1><?php echo esc_html__( 'PostPress Composer', 'postpress-ai' ); ?></h1>
