@@ -14,6 +14,10 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2026-01-09: UX: Add “Plan & Usage” card that only shows fields that actually exist in the last
+ *            license response. Fix Sites display so an activated site never shows 0/x when server
+ *            doesn’t provide a site-count field. (Fallback: if activation.activated=true → 1/x). // CHANGED:
+ *
  * 2026-01-07: FIX: Seed transient ppa_license_last_result with a local snapshot when missing to avoid WP-CLI warnings
  *            and keep the “Last response” box useful even before the first license action. No network calls.     // CHANGED:
  * 2026-01-07: FIX: derive_activation_state() now falls back to persisted OPT_LICENSE_STATE (active/inactive).   // CHANGED:
@@ -1024,10 +1028,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$err = get_option( self::OPT_LICENSE_LAST_ERROR_CODE, '' );                           // CHANGED:
 			$err = is_string( $err ) ? strtolower( trim( $err ) ) : '';                           // CHANGED:
 
-			$checked_at = (int) get_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0 );               // CHANGED:
+			$checked_at  = (int) get_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0 );              // CHANGED:
 			$checked_iso = ( $checked_at > 0 ) ? gmdate( 'c', $checked_at ) : '';                 // CHANGED:
 
-			$home = untrailingslashit( home_url( '/' ) );                                         // CHANGED:
+			$home          = untrailingslashit( home_url( '/' ) );                                // CHANGED:
 			$stored_active = get_option( self::OPT_ACTIVE_SITE, '' );                             // CHANGED:
 			$stored_active = is_string( $stored_active ) ? untrailingslashit( trim( $stored_active ) ) : ''; // CHANGED:
 
@@ -1057,7 +1061,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'ver'          => 'license.v1',                                                   // CHANGED:
 				'_http_status' => 0,                                                              // CHANGED:
 				'_local_seed'  => true,                                                           // CHANGED:
-			);                                                                                     // CHANGED:
+			);                                                                                    // CHANGED:
 
 			if ( '' !== $err ) {                                                                  // CHANGED:
 				$seed['ok'] = false;                                                              // CHANGED:
@@ -1072,7 +1076,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			set_transient( self::TRANSIENT_LAST_LIC, $seed, 5 * MINUTE_IN_SECONDS );              // CHANGED:
 
 			return $seed;                                                                         // CHANGED:
-		}                                                                                           // CHANGED:
+		}                                                                                          // CHANGED:
 
 		private static function notice_from_license_result( $label, $result ) {
 			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
@@ -1118,6 +1122,280 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 			return substr( $value, 0, 4 ) . str_repeat( '*', max( 0, $len - 8 ) ) . substr( $value, -4 );
 		}
+
+		/**
+		 * CHANGED: Allow ONLY http/https URLs for any “account/upgrade” links we might render. // CHANGED:
+		 *
+		 * @param mixed $url
+		 * @return string
+		 */
+		private static function safe_http_url( $url ) {                                           // CHANGED:
+			$url = is_string( $url ) ? trim( $url ) : '';                                         // CHANGED:
+			if ( '' === $url ) {                                                                  // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			$parsed = wp_parse_url( $url );                                                       // CHANGED:
+			if ( ! is_array( $parsed ) || empty( $parsed['scheme'] ) ) {                          // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			$scheme = strtolower( (string) $parsed['scheme'] );                                   // CHANGED:
+			if ( ! in_array( $scheme, array( 'http', 'https' ), true ) ) {                        // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			return esc_url( $url );                                                               // CHANGED:
+		}                                                                                          // CHANGED:
+
+		/**
+		 * CHANGED: Extract plan + usage info from the last license result in a “best effort” way,
+		 * but NEVER show misleading “0/x” when this site is activated and the server didn’t include
+		 * a sites-used field. Fallback: if activation.activated=true → sites_used is at least 1. // CHANGED:
+		 *
+		 * @param mixed $last
+		 * @return array
+		 */
+		private static function extract_plan_usage_from_last( $last ) {                            // CHANGED:
+			$out = array(                                                                          // CHANGED:
+				'plan_slug'        => '',                                                          // CHANGED:
+				'status'           => '',                                                          // CHANGED:
+				'max_sites'        => 0,                                                           // CHANGED:
+				'unlimited_sites'  => false,                                                       // CHANGED:
+				'sites_used'       => null,                                                        // CHANGED:
+				'activation_live'  => false,                                                       // CHANGED:
+				'tokens_used'      => null,                                                        // CHANGED:
+				'tokens_limit'     => null,                                                        // CHANGED:
+				'account_url'      => '',                                                          // CHANGED:
+				'upgrade_url'      => '',                                                          // CHANGED:
+			);                                                                                      // CHANGED:
+
+			if ( ! is_array( $last ) ) {                                                           // CHANGED:
+				return $out;                                                                       // CHANGED:
+			}                                                                                      // CHANGED:
+
+			$data = ( isset( $last['data'] ) && is_array( $last['data'] ) ) ? $last['data'] : array(); // CHANGED:
+			$lic  = ( isset( $data['license'] ) && is_array( $data['license'] ) ) ? $data['license'] : array(); // CHANGED:
+			$act  = ( isset( $data['activation'] ) && is_array( $data['activation'] ) ) ? $data['activation'] : array(); // CHANGED:
+
+			// Plan basics.                                                                         // CHANGED:
+			if ( isset( $lic['plan_slug'] ) ) {                                                    // CHANGED:
+				$out['plan_slug'] = is_string( $lic['plan_slug'] ) ? trim( $lic['plan_slug'] ) : (string) $lic['plan_slug']; // CHANGED:
+			}                                                                                      // CHANGED:
+			if ( isset( $lic['status'] ) ) {                                                       // CHANGED:
+				$out['status'] = is_string( $lic['status'] ) ? trim( $lic['status'] ) : (string) $lic['status']; // CHANGED:
+			}                                                                                      // CHANGED:
+			if ( isset( $lic['max_sites'] ) ) {                                                    // CHANGED:
+				$out['max_sites'] = (int) $lic['max_sites'];                                       // CHANGED:
+			}                                                                                      // CHANGED:
+			if ( isset( $lic['unlimited_sites'] ) ) {                                              // CHANGED:
+				$out['unlimited_sites'] = (bool) $lic['unlimited_sites'];                          // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Activation truth for THIS site.                                                      // CHANGED:
+			if ( array_key_exists( 'activated', $act ) ) {                                         // CHANGED:
+				$v = $act['activated'];                                                            // CHANGED:
+				if ( is_bool( $v ) ) {                                                             // CHANGED:
+					$out['activation_live'] = $v;                                                   // CHANGED:
+				} elseif ( is_string( $v ) ) {                                                     // CHANGED:
+					$vv = strtolower( trim( $v ) );                                                 // CHANGED:
+					$out['activation_live'] = in_array( $vv, array( '1', 'true', 'yes', 'on', 'active', 'activated' ), true ); // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Sites used: attempt multiple known shapes.                                            // CHANGED:
+			$sites_used = null;                                                                    // CHANGED:
+
+			// Shape A: license.active_sites = [ ... ]                                               // CHANGED:
+			if ( isset( $lic['active_sites'] ) && is_array( $lic['active_sites'] ) ) {             // CHANGED:
+				$sites_used = count( $lic['active_sites'] );                                       // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Shape B: data.active_sites = [ ... ]                                                  // CHANGED:
+			if ( null === $sites_used && isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) { // CHANGED:
+				$sites_used = count( $data['active_sites'] );                                      // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Shape C: numeric counter fields (sites_used / site_count / used_sites).              // CHANGED:
+			$numeric_keys = array( 'sites_used', 'site_count', 'used_sites', 'active_site_count' ); // CHANGED:
+			if ( null === $sites_used ) {                                                          // CHANGED:
+				foreach ( $numeric_keys as $k ) {                                                   // CHANGED:
+					if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {                        // CHANGED:
+						$sites_used = (int) $lic[ $k ];                                             // CHANGED:
+						break;                                                                      // CHANGED:
+					}                                                                               // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+			if ( null === $sites_used && isset( $data['usage'] ) && is_array( $data['usage'] ) ) { // CHANGED:
+				foreach ( $numeric_keys as $k ) {                                                   // CHANGED:
+					if ( isset( $data['usage'][ $k ] ) && is_numeric( $data['usage'][ $k ] ) ) {    // CHANGED:
+						$sites_used = (int) $data['usage'][ $k ];                                   // CHANGED:
+						break;                                                                      // CHANGED:
+					}                                                                               // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Fallback: if THIS site is activated, we know sites_used is at least 1.               // CHANGED:
+			if ( $out['activation_live'] ) {                                                       // CHANGED:
+				if ( null === $sites_used || $sites_used < 1 ) {                                   // CHANGED:
+					$sites_used = 1;                                                               // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Final normalize.                                                                      // CHANGED:
+			if ( null === $sites_used ) {                                                          // CHANGED:
+				$sites_used = 0;                                                                   // CHANGED:
+			}                                                                                      // CHANGED:
+			$out['sites_used'] = (int) $sites_used;                                                // CHANGED:
+
+			// Tokens (only if server gives them).                                                   // CHANGED:
+			$tok_used_keys  = array( 'tokens_used', 'token_used', 'used_tokens' );                 // CHANGED:
+			$tok_limit_keys = array( 'tokens_limit', 'token_limit', 'max_tokens' );                // CHANGED:
+			foreach ( $tok_used_keys as $k ) {                                                     // CHANGED:
+				if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {                          // CHANGED:
+					$out['tokens_used'] = (int) $data[ $k ];                                       // CHANGED:
+					break;                                                                          // CHANGED:
+				}                                                                                  // CHANGED:
+				if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {                            // CHANGED:
+					$out['tokens_used'] = (int) $lic[ $k ];                                        // CHANGED:
+					break;                                                                          // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+			foreach ( $tok_limit_keys as $k ) {                                                    // CHANGED:
+				if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {                          // CHANGED:
+					$out['tokens_limit'] = (int) $data[ $k ];                                      // CHANGED:
+					break;                                                                          // CHANGED:
+				}                                                                                  // CHANGED:
+				if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {                            // CHANGED:
+					$out['tokens_limit'] = (int) $lic[ $k ];                                       // CHANGED:
+					break;                                                                          // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Account / upgrade links (only if present + safe).                                     // CHANGED:
+			if ( isset( $data['links'] ) && is_array( $data['links'] ) ) {                          // CHANGED:
+				if ( isset( $data['links']['account'] ) ) {                                        // CHANGED:
+					$out['account_url'] = self::safe_http_url( $data['links']['account'] );        // CHANGED:
+				}                                                                                  // CHANGED:
+				if ( isset( $data['links']['upgrade'] ) ) {                                        // CHANGED:
+					$out['upgrade_url'] = self::safe_http_url( $data['links']['upgrade'] );        // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			return $out;                                                                            // CHANGED:
+		}                                                                                          // CHANGED:
+
+		/**
+		 * CHANGED: Render the “Plan & Usage” card cleanly:
+		 * - Show only real values.
+		 * - Never show Tokens/Account rows unless data exists.                                   // CHANGED:
+		 *
+		 * @param mixed $last
+		 */
+		private static function render_plan_usage_card( $last ) {                                  // CHANGED:
+			$u = self::extract_plan_usage_from_last( $last );                                      // CHANGED:
+
+			$has_any =
+				( '' !== (string) $u['plan_slug'] ) ||                                             // CHANGED:
+				( '' !== (string) $u['status'] ) ||                                               // CHANGED:
+				( (int) $u['max_sites'] > 0 ) ||                                                   // CHANGED:
+				( true === (bool) $u['unlimited_sites'] ) ||                                       // CHANGED:
+				( null !== $u['tokens_used'] ) ||                                                  // CHANGED:
+				( null !== $u['tokens_limit'] ) ||                                                 // CHANGED:
+				( '' !== (string) $u['account_url'] ) ||                                           // CHANGED:
+				( '' !== (string) $u['upgrade_url'] );                                             // CHANGED:
+
+			if ( ! $has_any ) {                                                                    // CHANGED:
+				return;                                                                            // CHANGED:
+			}                                                                                      // CHANGED:
+
+			$plan = (string) $u['plan_slug'];                                                      // CHANGED:
+			$plan = ( '' !== $plan ) ? ucfirst( $plan ) : '';                                      // CHANGED:
+
+			$status = (string) $u['status'];                                                       // CHANGED:
+			$status = ( '' !== $status ) ? ucfirst( $status ) : '';                                // CHANGED:
+
+			$sites_text = '';                                                                       // CHANGED:
+			if ( true === (bool) $u['unlimited_sites'] ) {                                         // CHANGED:
+				$sites_text = __( 'Unlimited', 'postpress-ai' );                                   // CHANGED:
+			} else {                                                                                // CHANGED:
+				$max = (int) $u['max_sites'];                                                      // CHANGED:
+				$used = is_numeric( $u['sites_used'] ) ? (int) $u['sites_used'] : 0;               // CHANGED:
+				if ( $max > 0 ) {                                                                  // CHANGED:
+					$sites_text = sprintf( '%d / %d', $used, $max );                                // CHANGED:
+				} else {                                                                            // CHANGED:
+					$sites_text = (string) $used;                                                  // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			// Tokens text only if both exist OR at least one exists.                               // CHANGED:
+			$tokens_text = '';                                                                     // CHANGED:
+			if ( null !== $u['tokens_used'] || null !== $u['tokens_limit'] ) {                     // CHANGED:
+				$tu = ( null !== $u['tokens_used'] ) ? (int) $u['tokens_used'] : null;             // CHANGED:
+				$tl = ( null !== $u['tokens_limit'] ) ? (int) $u['tokens_limit'] : null;           // CHANGED:
+				if ( null !== $tu && null !== $tl && $tl > 0 ) {                                   // CHANGED:
+					$tokens_text = sprintf( '%d / %d', $tu, $tl );                                  // CHANGED:
+				} elseif ( null !== $tu ) {                                                         // CHANGED:
+					$tokens_text = (string) $tu;                                                    // CHANGED:
+				} elseif ( null !== $tl ) {                                                         // CHANGED:
+					$tokens_text = (string) $tl;                                                    // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+
+			?>
+			<div class="ppa-card"> <!-- CHANGED: -->
+				<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2> <!-- CHANGED: -->
+				<p class="ppa-help"><?php esc_html_e( 'This is pulled from your last “Check License” response.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+
+				<table class="form-table" role="presentation"> <!-- CHANGED: -->
+					<tbody>
+						<?php if ( '' !== $plan ) : ?> <!-- CHANGED: -->
+							<tr>
+								<th scope="row"><?php esc_html_e( 'Plan', 'postpress-ai' ); ?></th>
+								<td><?php echo esc_html( $plan ); ?></td>
+							</tr>
+						<?php endif; ?>
+
+						<?php if ( '' !== $status ) : ?> <!-- CHANGED: -->
+							<tr>
+								<th scope="row"><?php esc_html_e( 'Status', 'postpress-ai' ); ?></th>
+								<td><?php echo esc_html( $status ); ?></td>
+							</tr>
+						<?php endif; ?>
+
+						<tr> <!-- CHANGED: -->
+							<th scope="row"><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
+							<td><?php echo esc_html( $sites_text ); ?></td> <!-- CHANGED: -->
+						</tr>
+
+						<?php if ( '' !== $tokens_text ) : ?> <!-- CHANGED: -->
+							<tr>
+								<th scope="row"><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th>
+								<td><?php echo esc_html( $tokens_text ); ?></td>
+							</tr>
+						<?php endif; ?>
+
+						<?php if ( '' !== (string) $u['account_url'] || '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
+							<tr>
+								<th scope="row"><?php esc_html_e( 'Account', 'postpress-ai' ); ?></th>
+								<td>
+									<?php if ( '' !== (string) $u['account_url'] ) : ?> <!-- CHANGED: -->
+										<a href="<?php echo esc_url( $u['account_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Open account', 'postpress-ai' ); ?></a>
+									<?php endif; ?>
+
+									<?php if ( '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
+										<?php if ( '' !== (string) $u['account_url'] ) : ?> &nbsp;|&nbsp; <?php endif; ?>
+										<a href="<?php echo esc_url( $u['upgrade_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Upgrade', 'postpress-ai' ); ?></a>
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endif; ?>
+					</tbody>
+				</table>
+
+				<p class="ppa-help" style="margin-top:10px;"> <!-- CHANGED: -->
+					<?php esc_html_e( 'If you don’t see tokens or account links yet, that just means your server response isn’t sending those fields yet.', 'postpress-ai' ); ?> <!-- CHANGED: -->
+				</p> <!-- CHANGED: -->
+			</div>
+			<?php
+		}                                                                                          // CHANGED:
 
 		private static function redirect_with_test_result( $status, $message ) {
 			$status  = ( 'ok' === $status ) ? 'ok' : 'error';
@@ -1174,7 +1452,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			// CHANGED: If transient is missing, seed a safe local snapshot (keeps UI clean + avoids WP-CLI warning).
 			$last = self::seed_last_license_transient_if_missing( $last ); // CHANGED:
-			
+
 			// CHANGED: Heal persisted options from cached server truth (no network calls).
 			self::sync_persisted_state_from_cached_last_result( $last ); // CHANGED:
 
@@ -1350,6 +1628,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						<?php endif; ?>
 					</form>
 				</div>
+
+				<?php self::render_plan_usage_card( $last ); // CHANGED: Clean Plan & Usage card ?>
+
 			</div>
 			<?php
 		}
