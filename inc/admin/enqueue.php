@@ -3,6 +3,7 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
+ * 2026-01-07 • CLEAN: Remove self-hooking at file load; postpress-ai.php owns admin_enqueue_scripts hook. // CHANGED:
  * 2026-01-07 • HARDEN: Composer CSS isolation — arm a late admin_print_styles purge that removes ANY other
  *              PostPress AI CSS on the Composer screen, ensuring ONLY admin-composer.css prints even if a
  *              later hook enqueues admin.css afterward.                                                   // CHANGED:
@@ -505,11 +506,6 @@ if (!function_exists('ppa_admin_enqueue')) {
     }
 }
 
-// Hook (guard against accidental double-hooking in edge includes)
-if (function_exists('add_action') && function_exists('has_action')) {
-    if (false === has_action('admin_enqueue_scripts', 'ppa_admin_enqueue')) { // CHANGED:
-        add_action('admin_enqueue_scripts', 'ppa_admin_enqueue', 10, 1);
-    }
-} else {
-    add_action('admin_enqueue_scripts', 'ppa_admin_enqueue', 10, 1);
-}
+
+// NOTE (2026-01-07): Do NOT self-hook here. postpress-ai.php is the single source of truth that attaches
+// ppa_admin_enqueue() at priority 99 after includes load. This prevents any accidental double-hooking.
