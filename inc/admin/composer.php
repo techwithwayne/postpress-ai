@@ -4,6 +4,7 @@
  * Path: inc/admin/composer.php
  *
  * ========= CHANGE LOG =========
+ * 2026-01-07 — FIX: Match locked Composer button labels: “Generate Preview” + “Save Draft (Store)”. // CHANGED:
  * 2026-01-07: FIX: Composer button labels align with product + JS behavior:
  *            - "Generate Preview" (calls /generate/ pipeline and renders preview)
  *            - "Save Draft (Store)" (stores as WP draft via /store/ pipeline)                         // CHANGED:

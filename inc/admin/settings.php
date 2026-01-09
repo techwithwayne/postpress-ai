@@ -1172,11 +1172,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$last = get_transient( self::TRANSIENT_LAST_LIC );
 
-			// CHANGED: Heal persisted options from cached server truth (no network calls).
-			self::sync_persisted_state_from_cached_last_result( $last ); // CHANGED:
-
 			// CHANGED: If transient is missing, seed a safe local snapshot (keeps UI clean + avoids WP-CLI warning).
 			$last = self::seed_last_license_transient_if_missing( $last ); // CHANGED:
+			
+			// CHANGED: Heal persisted options from cached server truth (no network calls).
+			self::sync_persisted_state_from_cached_last_result( $last ); // CHANGED:
 
 			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );
 			$val_license = self::sanitize_license_key( $val_license );
