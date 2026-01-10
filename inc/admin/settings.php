@@ -14,6 +14,13 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2026-01-09.3: UX: Fix Plan & Usage card rendering:
+ *             - Only show rows supported by last real Check License response.
+ *             - Sites is human-friendly when max is unknown (no lonely "1").
+ *             - Remove inline style usage (use ppa-help--note class).
+ *             - Add class hooks: ppa-kv, ppa-kv__label, ppa-kv__value for dark UI styling in CSS later.
+ *             - Only show helper note when relevant; add truth-guard for _local_seed. // CHANGED:
+ *
  * 2026-01-09.2: UX: Fix Plan & Usage readability — render Status as a badge and Sites/Tokens in <code>
  *             so values don’t get “washed out” on dark cards. No data/contract changes. // CHANGED:
  *
@@ -1287,134 +1294,197 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 		/**
 		 * CHANGED: Render the “Plan & Usage” card cleanly:
-		 * - Show only real values.
-		 * - Never show Tokens/Account rows unless data exists.                                   // CHANGED:
+		 * - Only show rows supported by the last real response.
+		 * - Sites is human-friendly when max is unknown.
+		 * - Adds class hooks for dark UI styling via admin-settings.css.
+		 * - Helper note is conditional and never shows on status/sites-only cards.
+		 * - Truth guard: if _local_seed and no server fields, show “Run Check License…” note.     // CHANGED:
 		 *
 		 * @param mixed $last
 		 */
 		private static function render_plan_usage_card( $last ) {                                  // CHANGED:
-			$u = self::extract_plan_usage_from_last( $last );                                      // CHANGED:
-
-			$has_any =
-				( '' !== (string) $u['plan_slug'] ) ||                                             // CHANGED:
-				( '' !== (string) $u['status'] ) ||                                               // CHANGED:
-				( (int) $u['max_sites'] > 0 ) ||                                                   // CHANGED:
-				( true === (bool) $u['unlimited_sites'] ) ||                                       // CHANGED:
-				( null !== $u['tokens_used'] ) ||                                                  // CHANGED:
-				( null !== $u['tokens_limit'] ) ||                                                 // CHANGED:
-				( '' !== (string) $u['account_url'] ) ||                                           // CHANGED:
-				( '' !== (string) $u['upgrade_url'] );                                             // CHANGED:
-
-			if ( ! $has_any ) {                                                                    // CHANGED:
+			if ( ! is_array( $last ) ) {                                                           // CHANGED:
 				return;                                                                            // CHANGED:
 			}                                                                                      // CHANGED:
 
-			$plan = (string) $u['plan_slug'];                                                      // CHANGED:
-			$plan = ( '' !== $plan ) ? ucfirst( $plan ) : '';                                      // CHANGED:
+			$data = ( isset( $last['data'] ) && is_array( $last['data'] ) ) ? $last['data'] : array(); // CHANGED:
+			$lic  = ( isset( $data['license'] ) && is_array( $data['license'] ) ) ? $data['license'] : array(); // CHANGED:
+			$act  = ( isset( $data['activation'] ) && is_array( $data['activation'] ) ) ? $data['activation'] : array(); // CHANGED:
 
-			$status = (string) $u['status'];                                                       // CHANGED:
-			$status = ( '' !== $status ) ? ucfirst( $status ) : '';                                // CHANGED:
+			$is_local_seed = ( ! empty( $last['_local_seed'] ) || ! empty( $data['_local_seed'] ) ); // CHANGED:
 
-			// CHANGED: Status can be hard to read on dark cards depending on WP admin theme/CSS.
-			// Render it as a badge for consistent contrast (reuses existing badge classes).        // CHANGED:
-			$status_badge_class = 'ppa-badge ppa-badge--unknown';                                  // CHANGED:
-			$status_lc = strtolower( trim( (string) $u['status'] ) );                              // CHANGED:
-			if ( '' !== $status_lc ) {                                                             // CHANGED:
-				if ( in_array( $status_lc, array( 'active', 'activated', 'enabled', 'ok' ), true ) ) { // CHANGED:
-					$status_badge_class = 'ppa-badge ppa-badge--active';                           // CHANGED:
-				} elseif ( in_array( $status_lc, array( 'inactive', 'deactivated', 'disabled' ), true ) ) { // CHANGED:
-					$status_badge_class = 'ppa-badge ppa-badge--inactive';                         // CHANGED:
-				}                                                                                  // CHANGED:
-			}                                                                                      // CHANGED:
-			// If server didn’t send a license status but this site is activated, show Active badge. // CHANGED:
-			if ( '' === $status && true === (bool) $u['activation_live'] ) {                       // CHANGED:
-				$status = __( 'Active', 'postpress-ai' );                                          // CHANGED:
-				$status_badge_class = 'ppa-badge ppa-badge--active';                               // CHANGED:
-			}                                                                                      // CHANGED:
+			// CHANGED: "truth" guard — if this is only the seeded snapshot and we don't have
+			// server plan/usage fields, do NOT present it like real plan/usage data.                // CHANGED:
+			$has_server_fields = false;                                                             // CHANGED:
+			if ( isset( $lic['plan_slug'] ) || isset( $lic['max_sites'] ) || isset( $lic['unlimited_sites'] ) ) { // CHANGED:
+				$has_server_fields = true;                                                          // CHANGED:
+			}                                                                                       // CHANGED:
+			if ( isset( $data['links'] ) && is_array( $data['links'] ) && ! empty( $data['links'] ) ) { // CHANGED:
+				$has_server_fields = true;                                                          // CHANGED:
+			}                                                                                       // CHANGED:
+			if ( isset( $data['usage'] ) && is_array( $data['usage'] ) && ! empty( $data['usage'] ) ) { // CHANGED:
+				$has_server_fields = true;                                                          // CHANGED:
+			}                                                                                       // CHANGED:
+			if ( isset( $data['tokens_used'] ) || isset( $data['tokens_limit'] ) || isset( $lic['tokens_used'] ) || isset( $lic['tokens_limit'] ) ) { // CHANGED:
+				$has_server_fields = true;                                                          // CHANGED:
+			}                                                                                       // CHANGED:
 
-			$sites_text = '';                                                                       // CHANGED:
-			if ( true === (bool) $u['unlimited_sites'] ) {                                         // CHANGED:
-				$sites_text = __( 'Unlimited', 'postpress-ai' );                                   // CHANGED:
-			} else {                                                                                // CHANGED:
-				$max = (int) $u['max_sites'];                                                      // CHANGED:
-				$used = is_numeric( $u['sites_used'] ) ? (int) $u['sites_used'] : 0;               // CHANGED:
-				if ( $max > 0 ) {                                                                  // CHANGED:
-					$sites_text = sprintf( '%d / %d', $used, $max );                                // CHANGED:
-				} else {                                                                            // CHANGED:
-					$sites_text = (string) $used;                                                  // CHANGED:
-				}                                                                                  // CHANGED:
-			}                                                                                      // CHANGED:
+			if ( $is_local_seed && ! $has_server_fields ) {                                         // CHANGED:
+				?>
+				<div class="ppa-card ppa-card--plan-usage"> <!-- CHANGED: -->
+					<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2> <!-- CHANGED: -->
+					<p class="ppa-help ppa-help--note"><?php esc_html_e( 'Run “Check License” to load plan details.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+				</div>
+				<?php
+				return;                                                                             // CHANGED:
+			}                                                                                       // CHANGED:
 
-			// Tokens text only if both exist OR at least one exists.                               // CHANGED:
-			$tokens_text = '';                                                                     // CHANGED:
-			if ( null !== $u['tokens_used'] || null !== $u['tokens_limit'] ) {                     // CHANGED:
-				$tu = ( null !== $u['tokens_used'] ) ? (int) $u['tokens_used'] : null;             // CHANGED:
-				$tl = ( null !== $u['tokens_limit'] ) ? (int) $u['tokens_limit'] : null;           // CHANGED:
-				if ( null !== $tu && null !== $tl && $tl > 0 ) {                                   // CHANGED:
-					$tokens_text = sprintf( '%d / %d', $tu, $tl );                                  // CHANGED:
-				} elseif ( null !== $tu ) {                                                         // CHANGED:
-					$tokens_text = (string) $tu;                                                    // CHANGED:
-				} elseif ( null !== $tl ) {                                                         // CHANGED:
-					$tokens_text = (string) $tl;                                                    // CHANGED:
-				}                                                                                  // CHANGED:
-			}                                                                                      // CHANGED:
+			$u = self::extract_plan_usage_from_last( $last );                                       // CHANGED:
+
+			// Determine "supported" rows based on actual presence.
+			$plan_slug_present   = ( isset( $lic['plan_slug'] ) && '' !== trim( (string) $lic['plan_slug'] ) ); // CHANGED:
+			$status_present      = ( isset( $lic['status'] ) && '' !== trim( (string) $lic['status'] ) );       // CHANGED:
+			$activation_present  = ( is_array( $act ) && array_key_exists( 'activated', $act ) );                // CHANGED:
+
+			$plan  = $plan_slug_present ? ucfirst( trim( (string) $lic['plan_slug'] ) ) : '';       // CHANGED:
+			$status_raw = $status_present ? trim( (string) $lic['status'] ) : '';                   // CHANGED:
+			$status = ( '' !== $status_raw ) ? ucfirst( $status_raw ) : '';                          // CHANGED:
+
+			// Status badge (only if status OR activation is present).                                // CHANGED:
+			$status_badge_class = 'ppa-badge ppa-badge--unknown';                                     // CHANGED:
+			if ( '' !== $status_raw ) {                                                              // CHANGED:
+				$slc = strtolower( $status_raw );                                                     // CHANGED:
+				if ( in_array( $slc, array( 'active', 'activated', 'enabled', 'ok' ), true ) ) {     // CHANGED:
+					$status_badge_class = 'ppa-badge ppa-badge--active';                               // CHANGED:
+				} elseif ( in_array( $slc, array( 'inactive', 'deactivated', 'disabled' ), true ) ) { // CHANGED:
+					$status_badge_class = 'ppa-badge ppa-badge--inactive';                             // CHANGED:
+				}                                                                                    // CHANGED:
+			} elseif ( $activation_present ) {                                                        // CHANGED:
+				// Derive status from activation when license.status is absent.                      // CHANGED:
+				$activated_bool = (bool) $u['activation_live'];                                      // CHANGED:
+				$status = $activated_bool ? __( 'Active', 'postpress-ai' ) : __( 'Not active', 'postpress-ai' ); // CHANGED:
+				$status_badge_class = $activated_bool ? 'ppa-badge ppa-badge--active' : 'ppa-badge ppa-badge--inactive'; // CHANGED:
+			}                                                                                        // CHANGED:
+
+			// Sites value (human-friendly rules).
+			$sites_text = '';                                                                        // CHANGED:
+			if ( true === (bool) $u['unlimited_sites'] ) {                                           // CHANGED:
+				$sites_text = __( 'Unlimited', 'postpress-ai' );                                     // CHANGED:
+			} else {                                                                                  // CHANGED:
+				$max  = (int) $u['max_sites'];                                                       // CHANGED:
+				$used = is_numeric( $u['sites_used'] ) ? (int) $u['sites_used'] : 0;                // CHANGED:
+
+				if ( $max > 0 ) {                                                                    // CHANGED:
+					// Server has a max; show used/max.
+					$sites_text = sprintf( '%d / %d', $used, $max );                                  // CHANGED:
+				} else {                                                                              // CHANGED:
+					// No max. If we only know this site is activated, show human text.              // CHANGED:
+					if ( true === (bool) $u['activation_live'] ) {                                    // CHANGED:
+						$sites_text = __( 'This site is active', 'postpress-ai' );                   // CHANGED:
+					} elseif ( $used > 0 ) {                                                          // CHANGED:
+						$sites_text = ( 1 === $used )
+							? __( '1 site active', 'postpress-ai' )
+							: sprintf( __( '%d sites active', 'postpress-ai' ), $used );            // CHANGED:
+					}                                                                                 // CHANGED:
+				}                                                                                      // CHANGED:
+			}                                                                                          // CHANGED:
+
+			// Tokens text only if present in data.
+			$tokens_text = '';                                                                        // CHANGED:
+			if ( null !== $u['tokens_used'] || null !== $u['tokens_limit'] ) {                        // CHANGED:
+				$tu = ( null !== $u['tokens_used'] ) ? (int) $u['tokens_used'] : null;                // CHANGED:
+				$tl = ( null !== $u['tokens_limit'] ) ? (int) $u['tokens_limit'] : null;              // CHANGED:
+				if ( null !== $tu && null !== $tl && $tl > 0 ) {                                      // CHANGED:
+					$tokens_text = sprintf( '%d / %d', $tu, $tl );                                     // CHANGED:
+				} elseif ( null !== $tu ) {                                                            // CHANGED:
+					$tokens_text = (string) $tu;                                                       // CHANGED:
+				} elseif ( null !== $tl ) {                                                            // CHANGED:
+					$tokens_text = (string) $tl;                                                       // CHANGED:
+				}                                                                                      // CHANGED:
+			}                                                                                          // CHANGED:
+
+			$has_account_links = ( '' !== (string) $u['account_url'] || '' !== (string) $u['upgrade_url'] ); // CHANGED:
+
+			// Build row list — ONLY supported rows render.
+			$rows = array();                                                                          // CHANGED:
+
+			if ( $plan_slug_present && '' !== $plan ) {                                               // CHANGED:
+				$rows[] = array( 'label' => __( 'Plan', 'postpress-ai' ), 'html' => esc_html( $plan ) ); // CHANGED:
+			}                                                                                          // CHANGED:
+
+			if ( ( $status_present || $activation_present ) && '' !== $status ) {                    // CHANGED:
+				$rows[] = array(
+					'label' => __( 'Status', 'postpress-ai' ),                                        // CHANGED:
+					'html'  => '<span class="' . esc_attr( $status_badge_class ) . '">' . esc_html( $status ) . '</span>', // CHANGED:
+				);                                                                                    // CHANGED:
+			}                                                                                          // CHANGED:
+
+			// Sites row is only meaningful if we have a max/unlimited, a positive count, or activation=true.
+			$sites_supported = ( true === (bool) $u['unlimited_sites'] ) || ( (int) $u['max_sites'] > 0 ) || ( true === (bool) $u['activation_live'] ) || ( is_numeric( $u['sites_used'] ) && (int) $u['sites_used'] > 0 ); // CHANGED:
+			if ( $sites_supported && '' !== $sites_text ) {                                           // CHANGED:
+				$rows[] = array(
+					'label' => __( 'Sites', 'postpress-ai' ),                                         // CHANGED:
+					'html'  => '<code>' . esc_html( $sites_text ) . '</code>',                        // CHANGED:
+				);                                                                                    // CHANGED:
+			}                                                                                          // CHANGED:
+
+			if ( '' !== $tokens_text ) {                                                              // CHANGED:
+				$rows[] = array(
+					'label' => __( 'Tokens', 'postpress-ai' ),                                        // CHANGED:
+					'html'  => '<code>' . esc_html( $tokens_text ) . '</code>',                       // CHANGED:
+				);                                                                                    // CHANGED:
+			}                                                                                          // CHANGED:
+
+			if ( $has_account_links ) {                                                               // CHANGED:
+				$links_html = '';                                                                     // CHANGED:
+				if ( '' !== (string) $u['account_url'] ) {                                            // CHANGED:
+					$links_html .= '<a href="' . esc_url( $u['account_url'] ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Open account', 'postpress-ai' ) . '</a>'; // CHANGED:
+				}                                                                                      // CHANGED:
+				if ( '' !== (string) $u['upgrade_url'] ) {                                            // CHANGED:
+					if ( '' !== $links_html ) {                                                       // CHANGED:
+						$links_html .= ' &nbsp;|&nbsp; ';                                             // CHANGED:
+					}                                                                                  // CHANGED:
+					$links_html .= '<a href="' . esc_url( $u['upgrade_url'] ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Upgrade', 'postpress-ai' ) . '</a>'; // CHANGED:
+				}                                                                                      // CHANGED:
+				if ( '' !== $links_html ) {                                                           // CHANGED:
+					$rows[] = array(
+						'label' => __( 'Account', 'postpress-ai' ),                                   // CHANGED:
+						'html'  => $links_html,                                                       // CHANGED:
+					);                                                                                // CHANGED:
+				}                                                                                      // CHANGED:
+			}                                                                                          // CHANGED:
+
+			// If after filtering we have nothing meaningful, don't render.
+			if ( empty( $rows ) ) {                                                                   // CHANGED:
+				return;                                                                              // CHANGED:
+			}                                                                                          // CHANGED:
+
+			// Helper-line logic:
+			// - Only show if we have real plan/usage (Plan or Max/Unlimited sites) BUT tokens+links are missing.
+			$has_plan_data = ( $plan_slug_present || ( (int) $u['max_sites'] > 0 ) || ( true === (bool) $u['unlimited_sites'] ) ); // CHANGED:
+			$missing_tokens_and_links = ( '' === $tokens_text && ! $has_account_links );            // CHANGED:
+			$show_helper_note = ( $has_plan_data && $missing_tokens_and_links );                    // CHANGED:
 
 			?>
-			<div class="ppa-card"> <!-- CHANGED: -->
+			<div class="ppa-card ppa-card--plan-usage"> <!-- CHANGED: -->
 				<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2> <!-- CHANGED: -->
-				<p class="ppa-help"><?php esc_html_e( 'This is pulled from your last “Check License” response.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
 
-				<table class="form-table" role="presentation"> <!-- CHANGED: -->
+				<table class="ppa-kv" role="presentation"> <!-- CHANGED: -->
 					<tbody>
-						<?php if ( '' !== $plan ) : ?> <!-- CHANGED: -->
+						<?php foreach ( $rows as $r ) : ?>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'Plan', 'postpress-ai' ); ?></th>
-								<td><?php echo esc_html( $plan ); ?></td>
+								<th class="ppa-kv__label" scope="row"><?php echo esc_html( (string) $r['label'] ); ?></th> <!-- CHANGED: -->
+								<td class="ppa-kv__value"><?php echo (string) $r['html']; ?></td> <!-- CHANGED: -->
 							</tr>
-						<?php endif; ?>
-
-						<?php if ( '' !== $status ) : ?> <!-- CHANGED: -->
-							<tr>
-								<th scope="row"><?php esc_html_e( 'Status', 'postpress-ai' ); ?></th>
-								<td>
-									<span class="<?php echo esc_attr( $status_badge_class ); ?>"><?php echo esc_html( $status ); ?></span> <!-- CHANGED: -->
-								</td>
-							</tr>
-						<?php endif; ?>
-
-						<tr> <!-- CHANGED: -->
-							<th scope="row"><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
-							<td><code><?php echo esc_html( $sites_text ); ?></code></td> <!-- CHANGED: -->
-						</tr>
-
-						<?php if ( '' !== $tokens_text ) : ?> <!-- CHANGED: -->
-							<tr>
-								<th scope="row"><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th>
-								<td><code><?php echo esc_html( $tokens_text ); ?></code></td> <!-- CHANGED: -->
-							</tr>
-						<?php endif; ?>
-
-						<?php if ( '' !== (string) $u['account_url'] || '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
-							<tr>
-								<th scope="row"><?php esc_html_e( 'Account', 'postpress-ai' ); ?></th>
-								<td>
-									<?php if ( '' !== (string) $u['account_url'] ) : ?> <!-- CHANGED: -->
-										<a href="<?php echo esc_url( $u['account_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Open account', 'postpress-ai' ); ?></a>
-									<?php endif; ?>
-
-									<?php if ( '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
-										<?php if ( '' !== (string) $u['account_url'] ) : ?> &nbsp;|&nbsp; <?php endif; ?>
-										<a href="<?php echo esc_url( $u['upgrade_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Upgrade', 'postpress-ai' ); ?></a>
-									<?php endif; ?>
-								</td>
-							</tr>
-						<?php endif; ?>
+						<?php endforeach; ?>
 					</tbody>
 				</table>
 
-				<p class="ppa-help" style="margin-top:10px;"> <!-- CHANGED: -->
-					<?php esc_html_e( 'If you don’t see tokens or account links yet, that just means your server response isn’t sending those fields yet.', 'postpress-ai' ); ?> <!-- CHANGED: -->
-				</p> <!-- CHANGED: -->
+				<?php if ( $show_helper_note ) : ?> <!-- CHANGED: -->
+					<p class="ppa-help ppa-help--note">
+						<?php esc_html_e( 'Account / upgrade links will appear here after a full “Check License” response from the server.', 'postpress-ai' ); ?>
+					</p>
+				<?php endif; ?>
 			</div>
 			<?php
 		}                                                                                          // CHANGED:
