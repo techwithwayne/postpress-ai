@@ -1,5 +1,3 @@
-/* /home/u3007-tenkoaygp3je/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/css/admin-settings.css */
-
 /*
  * PostPress AI — Admin Settings CSS (Modular)
  *
@@ -32,6 +30,8 @@
  * 2025-12-28 — POLISH: Deactivate button (danger) gets clearer affordance: thicker border + subtle tint + hover fill. // CHANGED:
  *
  * 2026-01-09 — FIX: Style Plan & Usage KV table (.ppa-kv) + note helper (.ppa-help--note) for dark UI readability. // CHANGED:
+ *
+ * 2026-01-10 — FIX: Prevent grid overlap when 4+ .ppa-card blocks exist (Plan & Usage was stacking on Test Connection). // CHANGED:
  */
 
 body.postpress-ai_page_postpress-ai-settings {
@@ -210,21 +210,20 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
   letter-spacing: .1px;
 }
 
-/* Stable card placement (no nth-of-type; notices won’t break it) */
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card {
-  grid-column: 1;
-  grid-row: 2 / span 2;
-}
+/* ===================================================================== */
+/* Stable card placement (no overlap, works with 4+ cards)                 */
+/* ===================================================================== */
+/* CHANGED: The old "+ + +" selector matched multiple cards (3rd AND 4th), causing overlap. */
+/* CHANGED: This uses "nth-child(of .ppa-card)" so it targets card order ONLY among .ppa-card nodes. */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card:nth-child(1 of .ppa-card) { /* CHANGED: */
+  grid-column: 1; /* CHANGED: */
+  grid-row: auto; /* CHANGED: */
+} /* CHANGED: */
 
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card + .ppa-card {
-  grid-column: 2;
-  grid-row: 2;
-}
-
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card + .ppa-card + .ppa-card {
-  grid-column: 2;
-  grid-row: 3;
-}
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card:nth-child(n+2 of .ppa-card) { /* CHANGED: */
+  grid-column: 2; /* CHANGED: */
+  grid-row: auto; /* CHANGED: */
+} /* CHANGED: */
 
 /* Form table -> “form groups” feel */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.form-table {
@@ -614,12 +613,11 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
     grid-template-columns: 1fr;
   }
 
-  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card,
-  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card + .ppa-card,
-  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card + .ppa-card + .ppa-card {
-    grid-column: 1;
-    grid-row: auto;
-  }
+  /* CHANGED: All cards become single-column cleanly (no manual row rules needed). */
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card { /* CHANGED: */
+    grid-column: 1; /* CHANGED: */
+    grid-row: auto; /* CHANGED: */
+  } /* CHANGED: */
 
   body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.form-table th {
     width: 150px;
