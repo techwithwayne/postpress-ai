@@ -30,6 +30,8 @@
  * 2025-12-26 — FINAL POLISH: Subtle hover/focus transitions + calmer card hover, without changing layout.  // CHANGED:
  *
  * 2025-12-28 — POLISH: Deactivate button (danger) gets clearer affordance: thicker border + subtle tint + hover fill. // CHANGED:
+ *
+ * 2026-01-09 — FIX: Style Plan & Usage KV table (.ppa-kv) + note helper (.ppa-help--note) for dark UI readability. // CHANGED:
  */
 
 body.postpress-ai_page_postpress-ai-settings {
@@ -191,6 +193,15 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-h
   font-size: var(--ppa-body-size);
 }
 
+/* CHANGED: Note-style helper line (used by Plan & Usage card) */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-help.ppa-help--note { /* CHANGED: */
+  margin-top: 10px; /* CHANGED: replaces removed inline style */
+  margin-bottom: 0; /* CHANGED: tighten end-of-card spacing */
+  padding-top: 10px; /* CHANGED: subtle separation */
+  border-top: 1px solid rgba(255,255,255,.06); /* CHANGED: */
+  color: rgba(245,245,245,.68); /* CHANGED: slightly stronger than muted-2 */
+} /* CHANGED: */
+
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card h3 {
   color: var(--ppa-text);
   margin: 16px 0 8px; /* CHANGED: calm separation */
@@ -252,6 +263,66 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.
   line-height: 1.5;
   font-size: var(--ppa-body-size);
 }
+
+/* ===================================================================== */
+/* Plan & Usage — Key/Value table (.ppa-kv)                                */
+/* ===================================================================== */
+/* CHANGED: This is intentionally scoped to the new class hooks so it only impacts the Plan & Usage card. */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv { /* CHANGED: */
+  width: 100%;
+  margin: 8px 0 0; /* CHANGED: slight separation from help line */
+  border-collapse: separate;
+  border-spacing: 0;
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv tr { /* CHANGED: */
+  border-top: 1px solid rgba(255,255,255,.06);
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv tr:first-child { /* CHANGED: */
+  border-top: 0;
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv th.ppa-kv__label,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value { /* CHANGED: */
+  padding: 10px 0; /* CHANGED: calmer density than the default form-table */
+  vertical-align: middle; /* CHANGED: keeps badges/code pills aligned */
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv th.ppa-kv__label { /* CHANGED: */
+  width: 140px; /* CHANGED: compact for the right column */
+  padding-right: 14px;
+  color: rgba(245,245,245,.74); /* CHANGED: readable label, not washed out */
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: .10px;
+  text-transform: none;
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value { /* CHANGED: */
+  color: var(--ppa-text);
+  font-weight: 800; /* CHANGED: values should read “primary” */
+  font-size: 13px;
+  letter-spacing: .05px;
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value code { /* CHANGED: */
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.16);
+  color: var(--ppa-text);
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value a { /* CHANGED: */
+  color: var(--ppa-accent) !important;
+  font-weight: 900;
+  text-decoration: none;
+} /* CHANGED: */
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value a:hover,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value a:focus { /* CHANGED: */
+  color: var(--ppa-accent-2) !important;
+  text-decoration: underline;
+} /* CHANGED: */
 
 /* Inputs */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings input[type="text"],
@@ -553,6 +624,11 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
   body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.form-table th {
     width: 150px;
   }
+
+  /* CHANGED: KV table label width shrinks on smaller screens */
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv th.ppa-kv__label { /* CHANGED: */
+    width: 120px; /* CHANGED: */
+  } /* CHANGED: */
 }
 
 @media (max-width: 782px) {
@@ -570,4 +646,16 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
   body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.form-table th {
     padding-right: 0;
   }
+
+  /* CHANGED: KV table stacks cleanly on mobile */
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv th.ppa-kv__label,
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv td.ppa-kv__value { /* CHANGED: */
+    display: block; /* CHANGED: */
+    width: 100%; /* CHANGED: */
+    padding: 8px 0; /* CHANGED: */
+  } /* CHANGED: */
+
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings table.ppa-kv th.ppa-kv__label { /* CHANGED: */
+    padding-bottom: 0; /* CHANGED: */
+  } /* CHANGED: */
 }
