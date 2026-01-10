@@ -14,6 +14,9 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2026-01-09.2: UX: Fix Plan & Usage readability — render Status as a badge and Sites/Tokens in <code>
+ *             so values don’t get “washed out” on dark cards. No data/contract changes. // CHANGED:
+ *
  * 2026-01-09: UX: Add “Plan & Usage” card that only shows fields that actually exist in the last
  *            license response. Fix Sites display so an activated site never shows 0/x when server
  *            doesn’t provide a site-count field. (Fallback: if activation.activated=true → 1/x). // CHANGED:
@@ -1312,6 +1315,23 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$status = (string) $u['status'];                                                       // CHANGED:
 			$status = ( '' !== $status ) ? ucfirst( $status ) : '';                                // CHANGED:
 
+			// CHANGED: Status can be hard to read on dark cards depending on WP admin theme/CSS.
+			// Render it as a badge for consistent contrast (reuses existing badge classes).        // CHANGED:
+			$status_badge_class = 'ppa-badge ppa-badge--unknown';                                  // CHANGED:
+			$status_lc = strtolower( trim( (string) $u['status'] ) );                              // CHANGED:
+			if ( '' !== $status_lc ) {                                                             // CHANGED:
+				if ( in_array( $status_lc, array( 'active', 'activated', 'enabled', 'ok' ), true ) ) { // CHANGED:
+					$status_badge_class = 'ppa-badge ppa-badge--active';                           // CHANGED:
+				} elseif ( in_array( $status_lc, array( 'inactive', 'deactivated', 'disabled' ), true ) ) { // CHANGED:
+					$status_badge_class = 'ppa-badge ppa-badge--inactive';                         // CHANGED:
+				}                                                                                  // CHANGED:
+			}                                                                                      // CHANGED:
+			// If server didn’t send a license status but this site is activated, show Active badge. // CHANGED:
+			if ( '' === $status && true === (bool) $u['activation_live'] ) {                       // CHANGED:
+				$status = __( 'Active', 'postpress-ai' );                                          // CHANGED:
+				$status_badge_class = 'ppa-badge ppa-badge--active';                               // CHANGED:
+			}                                                                                      // CHANGED:
+
 			$sites_text = '';                                                                       // CHANGED:
 			if ( true === (bool) $u['unlimited_sites'] ) {                                         // CHANGED:
 				$sites_text = __( 'Unlimited', 'postpress-ai' );                                   // CHANGED:
@@ -1356,19 +1376,21 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						<?php if ( '' !== $status ) : ?> <!-- CHANGED: -->
 							<tr>
 								<th scope="row"><?php esc_html_e( 'Status', 'postpress-ai' ); ?></th>
-								<td><?php echo esc_html( $status ); ?></td>
+								<td>
+									<span class="<?php echo esc_attr( $status_badge_class ); ?>"><?php echo esc_html( $status ); ?></span> <!-- CHANGED: -->
+								</td>
 							</tr>
 						<?php endif; ?>
 
 						<tr> <!-- CHANGED: -->
 							<th scope="row"><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
-							<td><?php echo esc_html( $sites_text ); ?></td> <!-- CHANGED: -->
+							<td><code><?php echo esc_html( $sites_text ); ?></code></td> <!-- CHANGED: -->
 						</tr>
 
 						<?php if ( '' !== $tokens_text ) : ?> <!-- CHANGED: -->
 							<tr>
 								<th scope="row"><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th>
-								<td><?php echo esc_html( $tokens_text ); ?></td>
+								<td><code><?php echo esc_html( $tokens_text ); ?></code></td> <!-- CHANGED: -->
 							</tr>
 						<?php endif; ?>
 
