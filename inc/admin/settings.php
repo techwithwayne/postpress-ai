@@ -1,7 +1,6 @@
 <?php
 /**
  * PostPress AI — Admin Settings
- * Path: inc/admin/settings.php
  *
  * Provides:
  * - Settings UI renderer for PostPress AI.
@@ -14,6 +13,9 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key. // CHANGED:
  *
  * ========= CHANGE LOG =========
+ * 2026-01-10: FIX: Add stable per-card class hooks (setup/license/test/plan) so CSS grid placement is deterministic
+ *            and Plan & Usage never overlaps Test Connection.                                      // CHANGED:
+ *
  * 2026-01-09.3: UX: Plan & Usage card cleanup:
  *             - Add kv table hooks (ppa-kv / ppa-kv__label / ppa-kv__value)
  *             - Sites value becomes human if max_sites missing (no lonely "1")
@@ -117,10 +119,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 	/**
 	 * Admin Settings for PostPress AI.
-	 *
-	 * Note:
-	 * - This file is included by inc/admin/menu.php when visiting the Settings screen.
-	 * - Menu registration is owned by menu.php (single registrar).                                      // CHANGED:
 	 */
 	class PPA_Admin_Settings {
 
@@ -173,9 +171,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				return; // CHANGED:
 			} // CHANGED:
 			self::$booted = true; // CHANGED:
-
-			// IMPORTANT: menu.php owns the submenu entry now.                                         // CHANGED:
-			// We only register settings + handlers here.                                               // CHANGED:
 
 			// Settings API registration.
 			add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
@@ -861,7 +856,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			if ( 2 === $ok_count ) {
-				// CHANGED: no success logs — keep debug.log quiet unless something fails.
 				self::redirect_with_test_result(
 					'ok',
 					__( 'Connected! This site can reach PostPress AI.', 'postpress-ai' )
@@ -948,10 +942,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$result = self::normalize_django_response( $response );
 			self::cache_last_license_result( $result );
 
-			// CHANGED: Persist state for enforcement + sync stale local flags after Verify.
 			self::persist_license_state_from_action( $action, $result ); // CHANGED:
 
-			// CHANGED: failure-only logging (no success chatter; no secret dumps).
 			$http = ( is_array( $result ) && isset( $result['_http_status'] ) ) ? (int) $result['_http_status'] : 0; // CHANGED:
 			$ok   = ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ); // CHANGED:
 			if ( ! $ok ) { // CHANGED:
@@ -1010,20 +1002,66 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			set_transient( self::TRANSIENT_LAST_LIC, $result, self::LAST_LIC_TTL_SECONDS );
 		}
 
-		/**
-		 * CHANGED: Seed the license last_result transient when it is missing.
-		 *
-		 * Why:
-		 * - WP-CLI prints: "Warning: Transient with key ppa_license_last_result is not set." when absent. // CHANGED:
-		 * - Admin UI “Last response” looks better if we show a local snapshot instead of empty.        // CHANGED:
-		 *
-		 * IMPORTANT:
-		 * - No network calls.                                                                         // CHANGED:
-		 * - No enforcement changes.                                                                    // CHANGED:
-		 *
-		 * @param mixed $last
-		 * @return array|null
-		 */
+		private static function notice_from_license_result( $label, $result ) {
+			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
+				if ( 'Verify' === $label ) {
+					return __( 'License looks good.', 'postpress-ai' );
+				}
+				if ( 'Activate' === $label ) {
+					return __( 'This site is now activated.', 'postpress-ai' );
+				}
+				if ( 'Deactivate' === $label ) {
+					return __( 'This site is now deactivated.', 'postpress-ai' );
+				}
+				return __( 'Done.', 'postpress-ai' );
+			}
+
+			if ( self::is_plan_limit_site_limit_reached( $result ) ) {                            // CHANGED:
+				return __( 'Plan limit reached: your account has hit its site limit. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); // CHANGED:
+			}                                                                                      // CHANGED:
+
+			$code = '';
+			if ( is_array( $result ) && isset( $result['error']['code'] ) ) {
+				$code = (string) $result['error']['code'];
+			} elseif ( is_array( $result ) && isset( $result['error']['type'] ) ) {
+				$code = (string) $result['error']['type'];
+			}
+
+			if ( '' !== $code ) {
+				return sprintf( __( 'Something went wrong (%s).', 'postpress-ai' ), $code );
+			}
+
+			return __( 'Something went wrong.', 'postpress-ai' );
+		}
+
+		private static function mask_secret( $value ) {
+			$value = is_string( $value ) ? trim( $value ) : '';
+			if ( '' === $value ) {
+				return '(none)';
+			}
+			$len = strlen( $value );
+			if ( $len <= 8 ) {
+				return str_repeat( '*', $len );
+			}
+			return substr( $value, 0, 4 ) . str_repeat( '*', max( 0, $len - 8 ) ) . substr( $value, -4 );
+		}
+
+		private static function safe_http_url( $url ) {                                           // CHANGED:
+			$url = is_string( $url ) ? trim( $url ) : '';                                         // CHANGED:
+			if ( '' === $url ) {                                                                  // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			$parsed = wp_parse_url( $url );                                                       // CHANGED:
+			if ( ! is_array( $parsed ) || empty( $parsed['scheme'] ) ) {                          // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			$scheme = strtolower( (string) $parsed['scheme'] );                                   // CHANGED:
+			if ( ! in_array( $scheme, array( 'http', 'https' ), true ) ) {                        // CHANGED:
+				return '';                                                                        // CHANGED:
+			}                                                                                     // CHANGED:
+			return esc_url( $url );                                                               // CHANGED:
+		}                                                                                          // CHANGED:
+
 		private static function seed_last_license_transient_if_missing( $last ) {                // CHANGED:
 			if ( is_array( $last ) ) {                                                           // CHANGED:
 				return $last;                                                                    // CHANGED:
@@ -1082,87 +1120,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				);                                                                                // CHANGED:
 			}                                                                                    // CHANGED:
 
-			// CHANGED: Short TTL seed — real server responses overwrite this on the next action.
 			set_transient( self::TRANSIENT_LAST_LIC, $seed, 5 * MINUTE_IN_SECONDS );              // CHANGED:
-
 			return $seed;                                                                         // CHANGED:
 		}                                                                                          // CHANGED:
 
-		private static function notice_from_license_result( $label, $result ) {
-			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
-				if ( 'Verify' === $label ) {
-					return __( 'License looks good.', 'postpress-ai' );
-				}
-				if ( 'Activate' === $label ) {
-					return __( 'This site is now activated.', 'postpress-ai' );
-				}
-				if ( 'Deactivate' === $label ) {
-					return __( 'This site is now deactivated.', 'postpress-ai' );
-				}
-				return __( 'Done.', 'postpress-ai' );
-			}
-
-			// CHANGED: Friendlier message for site limit reached (no endpoints changed; UX only).
-			if ( self::is_plan_limit_site_limit_reached( $result ) ) {                            // CHANGED:
-				return __( 'Plan limit reached: your account has hit its site limit. Upgrade your plan or deactivate another site, then try again.', 'postpress-ai' ); // CHANGED:
-			}                                                                                      // CHANGED:
-
-			$code = '';
-			if ( is_array( $result ) && isset( $result['error']['code'] ) ) {
-				$code = (string) $result['error']['code'];
-			} elseif ( is_array( $result ) && isset( $result['error']['type'] ) ) {
-				$code = (string) $result['error']['type'];
-			}
-
-			if ( '' !== $code ) {
-				return sprintf( __( 'Something went wrong (%s).', 'postpress-ai' ), $code );
-			}
-
-			return __( 'Something went wrong.', 'postpress-ai' );
-		}
-
-		private static function mask_secret( $value ) {
-			$value = is_string( $value ) ? trim( $value ) : '';
-			if ( '' === $value ) {
-				return '(none)';
-			}
-			$len = strlen( $value );
-			if ( $len <= 8 ) {
-				return str_repeat( '*', $len );
-			}
-			return substr( $value, 0, 4 ) . str_repeat( '*', max( 0, $len - 8 ) ) . substr( $value, -4 );
-		}
-
-		/**
-		 * CHANGED: Allow ONLY http/https URLs for any “account/upgrade” links we might render. // CHANGED:
-		 *
-		 * @param mixed $url
-		 * @return string
-		 */
-		private static function safe_http_url( $url ) {                                           // CHANGED:
-			$url = is_string( $url ) ? trim( $url ) : '';                                         // CHANGED:
-			if ( '' === $url ) {                                                                  // CHANGED:
-				return '';                                                                        // CHANGED:
-			}                                                                                     // CHANGED:
-			$parsed = wp_parse_url( $url );                                                       // CHANGED:
-			if ( ! is_array( $parsed ) || empty( $parsed['scheme'] ) ) {                          // CHANGED:
-				return '';                                                                        // CHANGED:
-			}                                                                                     // CHANGED:
-			$scheme = strtolower( (string) $parsed['scheme'] );                                   // CHANGED:
-			if ( ! in_array( $scheme, array( 'http', 'https' ), true ) ) {                        // CHANGED:
-				return '';                                                                        // CHANGED:
-			}                                                                                     // CHANGED:
-			return esc_url( $url );                                                               // CHANGED:
-		}                                                                                          // CHANGED:
-
-		/**
-		 * CHANGED: Extract plan + usage info from the last license result in a “best effort” way,
-		 * but NEVER show misleading “0/x” when this site is activated and the server didn’t include
-		 * a sites-used field. Fallback: if activation.activated=true → sites_used is at least 1. // CHANGED:
-		 *
-		 * @param mixed $last
-		 * @return array
-		 */
 		private static function extract_plan_usage_from_last( $last ) {                            // CHANGED:
 			$out = array(                                                                          // CHANGED:
 				'plan_slug'        => '',                                                          // CHANGED:
@@ -1185,7 +1146,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$lic  = ( isset( $data['license'] ) && is_array( $data['license'] ) ) ? $data['license'] : array(); // CHANGED:
 			$act  = ( isset( $data['activation'] ) && is_array( $data['activation'] ) ) ? $data['activation'] : array(); // CHANGED:
 
-			// Plan basics.                                                                         // CHANGED:
 			if ( isset( $lic['plan_slug'] ) ) {                                                    // CHANGED:
 				$out['plan_slug'] = is_string( $lic['plan_slug'] ) ? trim( $lic['plan_slug'] ) : (string) $lic['plan_slug']; // CHANGED:
 			}                                                                                      // CHANGED:
@@ -1199,7 +1159,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				$out['unlimited_sites'] = (bool) $lic['unlimited_sites'];                          // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Activation truth for THIS site.                                                      // CHANGED:
 			if ( array_key_exists( 'activated', $act ) ) {                                         // CHANGED:
 				$v = $act['activated'];                                                            // CHANGED:
 				if ( is_bool( $v ) ) {                                                             // CHANGED:
@@ -1210,20 +1169,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Sites used: attempt multiple known shapes.                                            // CHANGED:
 			$sites_used = null;                                                                    // CHANGED:
-
-			// Shape A: license.active_sites = [ ... ]                                               // CHANGED:
 			if ( isset( $lic['active_sites'] ) && is_array( $lic['active_sites'] ) ) {             // CHANGED:
 				$sites_used = count( $lic['active_sites'] );                                       // CHANGED:
 			}                                                                                      // CHANGED:
-
-			// Shape B: data.active_sites = [ ... ]                                                  // CHANGED:
 			if ( null === $sites_used && isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) { // CHANGED:
 				$sites_used = count( $data['active_sites'] );                                      // CHANGED:
 			}                                                                                      // CHANGED:
-
-			// Shape C: numeric counter fields (sites_used / site_count / used_sites).              // CHANGED:
 			$numeric_keys = array( 'sites_used', 'site_count', 'used_sites', 'active_site_count' ); // CHANGED:
 			if ( null === $sites_used ) {                                                          // CHANGED:
 				foreach ( $numeric_keys as $k ) {                                                   // CHANGED:
@@ -1242,20 +1194,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Fallback: if THIS site is activated, we know sites_used is at least 1.               // CHANGED:
 			if ( $out['activation_live'] ) {                                                       // CHANGED:
 				if ( null === $sites_used || $sites_used < 1 ) {                                   // CHANGED:
 					$sites_used = 1;                                                               // CHANGED:
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Final normalize.                                                                      // CHANGED:
 			if ( null === $sites_used ) {                                                          // CHANGED:
 				$sites_used = 0;                                                                   // CHANGED:
 			}                                                                                      // CHANGED:
 			$out['sites_used'] = (int) $sites_used;                                                // CHANGED:
 
-			// Tokens (only if server gives them).                                                   // CHANGED:
 			$tok_used_keys  = array( 'tokens_used', 'token_used', 'used_tokens' );                 // CHANGED:
 			$tok_limit_keys = array( 'tokens_limit', 'token_limit', 'max_tokens' );                // CHANGED:
 			foreach ( $tok_used_keys as $k ) {                                                     // CHANGED:
@@ -1279,7 +1228,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Account / upgrade links (only if present + safe).                                     // CHANGED:
 			if ( isset( $data['links'] ) && is_array( $data['links'] ) ) {                          // CHANGED:
 				if ( isset( $data['links']['account'] ) ) {                                        // CHANGED:
 					$out['account_url'] = self::safe_http_url( $data['links']['account'] );        // CHANGED:
@@ -1292,13 +1240,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			return $out;                                                                            // CHANGED:
 		}                                                                                          // CHANGED:
 
-		/**
-		 * CHANGED: Render the “Plan & Usage” card cleanly:
-		 * - Show only real values.
-		 * - Never show Tokens/Account rows unless data exists.                                   // CHANGED:
-		 *
-		 * @param mixed $last
-		 */
 		private static function render_plan_usage_card( $last ) {                                  // CHANGED:
 			$u = self::extract_plan_usage_from_last( $last );                                      // CHANGED:
 
@@ -1314,11 +1255,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				return;                                                                            // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// CHANGED (truth guard): If this is the seeded local snapshot and it doesn't contain real plan/usage fields,
-			// don't pretend this is a full “Check License” payload. Show a small nudge instead.
 			if ( $is_local_seed && ! ( $has_plan_data || $has_tokens_data || $has_links_data ) ) : // CHANGED:
 				?>
-				<div class="ppa-card"> <!-- CHANGED: -->
+				<div class="ppa-card ppa-card--plan"> <!-- CHANGED: -->
 					<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2> <!-- CHANGED: -->
 					<p class="ppa-help ppa-help--note"><?php esc_html_e( 'Run “Check License” to load plan details.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
 				</div>
@@ -1332,8 +1271,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$status = (string) $u['status'];                                                       // CHANGED:
 			$status = ( '' !== $status ) ? ucfirst( $status ) : '';                                // CHANGED:
 
-			// CHANGED: Status can be hard to read on dark cards depending on WP admin theme/CSS.
-			// Render it as a badge for consistent contrast (reuses existing badge classes).        // CHANGED:
 			$status_badge_class = 'ppa-badge ppa-badge--unknown';                                  // CHANGED:
 			$status_lc = strtolower( trim( (string) $u['status'] ) );                              // CHANGED:
 			if ( '' !== $status_lc ) {                                                             // CHANGED:
@@ -1343,13 +1280,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					$status_badge_class = 'ppa-badge ppa-badge--inactive';                         // CHANGED:
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
-			// If server didn’t send a license status but this site is activated, show Active badge. // CHANGED:
 			if ( '' === $status && true === (bool) $u['activation_live'] ) {                       // CHANGED:
 				$status = __( 'Active', 'postpress-ai' );                                          // CHANGED:
 				$status_badge_class = 'ppa-badge ppa-badge--active';                               // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// CHANGED: Only show Sites row if we can show something meaningful (max/unlimited/activation/used>0).
 			$show_sites_row = ( true === (bool) $u['unlimited_sites'] ) || ( (int) $u['max_sites'] > 0 ) || ( true === (bool) $u['activation_live'] ) || ( (int) $u['sites_used'] > 0 ); // CHANGED:
 
 			$sites_text    = '';                                                                   // CHANGED:
@@ -1366,7 +1301,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						$sites_text    = sprintf( '%d / %d', $used, $max );                         // CHANGED:
 						$sites_is_mono = true;                                                      // CHANGED:
 					} else {                                                                        // CHANGED:
-						// CHANGED: No max_sites provided → keep it human (avoid lonely “1”).
 						if ( true === (bool) $u['activation_live'] && $used <= 1 ) {               // CHANGED:
 							$sites_text = __( 'This site is active', 'postpress-ai' );             // CHANGED:
 						} elseif ( $used > 0 ) {                                                    // CHANGED:
@@ -1381,7 +1315,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// Tokens text only if both exist OR at least one exists.                               // CHANGED:
 			$tokens_text = '';                                                                     // CHANGED:
 			if ( null !== $u['tokens_used'] || null !== $u['tokens_limit'] ) {                     // CHANGED:
 				$tu = ( null !== $u['tokens_used'] ) ? (int) $u['tokens_used'] : null;             // CHANGED:
@@ -1395,63 +1328,60 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}                                                                                  // CHANGED:
 			}                                                                                      // CHANGED:
 
-			// CHANGED: Only show the “missing fields” helper line when it’s actually relevant.
-			// Rule: show ONLY when plan/usage data exists, but tokens + account/upgrade links are missing.
 			$missing_extras            = ( '' === $tokens_text && '' === (string) $u['account_url'] && '' === (string) $u['upgrade_url'] ); // CHANGED:
 			$show_missing_fields_note  = ( $has_plan_data && $missing_extras );                    // CHANGED:
-
 			?>
-			<div class="ppa-card"> <!-- CHANGED: -->
+			<div class="ppa-card ppa-card--plan"> <!-- CHANGED: -->
 				<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2> <!-- CHANGED: -->
 				<p class="ppa-help"><?php esc_html_e( 'This comes from your last “Check License” response.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
 
 				<table class="ppa-kv" role="presentation"> <!-- CHANGED: -->
 					<tbody>
-						<?php if ( '' !== $plan ) : ?> <!-- CHANGED: -->
+						<?php if ( '' !== $plan ) : ?>
 							<tr>
-								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Plan', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
-								<td class="ppa-kv__value"><?php echo esc_html( $plan ); ?></td> <!-- CHANGED: -->
+								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Plan', 'postpress-ai' ); ?></th>
+								<td class="ppa-kv__value"><?php echo esc_html( $plan ); ?></td>
 							</tr>
 						<?php endif; ?>
 
-						<?php if ( '' !== $status ) : ?> <!-- CHANGED: -->
+						<?php if ( '' !== $status ) : ?>
 							<tr>
-								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Status', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
+								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Status', 'postpress-ai' ); ?></th>
 								<td class="ppa-kv__value">
-									<span class="<?php echo esc_attr( $status_badge_class ); ?>"><?php echo esc_html( $status ); ?></span> <!-- CHANGED: -->
+									<span class="<?php echo esc_attr( $status_badge_class ); ?>"><?php echo esc_html( $status ); ?></span>
 								</td>
 							</tr>
 						<?php endif; ?>
 
-						<?php if ( $show_sites_row && '' !== $sites_text ) : ?> <!-- CHANGED: -->
+						<?php if ( $show_sites_row && '' !== $sites_text ) : ?>
 							<tr>
-								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
+								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th>
 								<td class="ppa-kv__value">
-									<?php if ( $sites_is_mono ) : ?> <!-- CHANGED: -->
-										<code><?php echo esc_html( $sites_text ); ?></code> <!-- CHANGED: -->
-									<?php else : ?> <!-- CHANGED: -->
-										<?php echo esc_html( $sites_text ); ?> <!-- CHANGED: -->
+									<?php if ( $sites_is_mono ) : ?>
+										<code><?php echo esc_html( $sites_text ); ?></code>
+									<?php else : ?>
+										<?php echo esc_html( $sites_text ); ?>
 									<?php endif; ?>
 								</td>
 							</tr>
 						<?php endif; ?>
 
-						<?php if ( '' !== $tokens_text ) : ?> <!-- CHANGED: -->
+						<?php if ( '' !== $tokens_text ) : ?>
 							<tr>
-								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
-								<td class="ppa-kv__value"><code><?php echo esc_html( $tokens_text ); ?></code></td> <!-- CHANGED: -->
+								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th>
+								<td class="ppa-kv__value"><code><?php echo esc_html( $tokens_text ); ?></code></td>
 							</tr>
 						<?php endif; ?>
 
-						<?php if ( '' !== (string) $u['account_url'] || '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
+						<?php if ( '' !== (string) $u['account_url'] || '' !== (string) $u['upgrade_url'] ) : ?>
 							<tr>
-								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Account', 'postpress-ai' ); ?></th> <!-- CHANGED: -->
+								<th scope="row" class="ppa-kv__label"><?php esc_html_e( 'Account', 'postpress-ai' ); ?></th>
 								<td class="ppa-kv__value">
-									<?php if ( '' !== (string) $u['account_url'] ) : ?> <!-- CHANGED: -->
+									<?php if ( '' !== (string) $u['account_url'] ) : ?>
 										<a href="<?php echo esc_url( $u['account_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Open account', 'postpress-ai' ); ?></a>
 									<?php endif; ?>
 
-									<?php if ( '' !== (string) $u['upgrade_url'] ) : ?> <!-- CHANGED: -->
+									<?php if ( '' !== (string) $u['upgrade_url'] ) : ?>
 										<?php if ( '' !== (string) $u['account_url'] ) : ?> &nbsp;|&nbsp; <?php endif; ?>
 										<a href="<?php echo esc_url( $u['upgrade_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Upgrade', 'postpress-ai' ); ?></a>
 									<?php endif; ?>
@@ -1461,9 +1391,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					</tbody>
 				</table>
 
-				<?php if ( $show_missing_fields_note ) : ?> <!-- CHANGED: -->
+				<?php if ( $show_missing_fields_note ) : ?>
 					<p class="ppa-help ppa-help--note">
-						<?php esc_html_e( 'Tokens and account links will show here when your server response includes them.', 'postpress-ai' ); ?> <!-- CHANGED: -->
+						<?php esc_html_e( 'Tokens and account links will show here when your server response includes them.', 'postpress-ai' ); ?>
 					</p>
 				<?php endif; ?>
 			</div>
@@ -1522,11 +1452,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			$last = get_transient( self::TRANSIENT_LAST_LIC );
-
-			// CHANGED: If transient is missing, seed a safe local snapshot (keeps UI clean + avoids WP-CLI warning).
 			$last = self::seed_last_license_transient_if_missing( $last ); // CHANGED:
-
-			// CHANGED: Heal persisted options from cached server truth (no network calls).
 			self::sync_persisted_state_from_cached_last_result( $last ); // CHANGED:
 
 			$val_license = (string) get_option( self::OPT_LICENSE_KEY, '' );
@@ -1538,13 +1464,12 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$is_inactive_here   = ( 'inactive' === $activation_state );
 			$site_limit_reached = self::is_plan_limit_site_limit_reached( $last );               // CHANGED:
 
-			// CHANGED: Connection Key detection (masked) — helps explain licensing vs proxy behavior.
 			$ck = self::detect_connection_key_info();                                             // CHANGED:
 			?>
 			<div class="wrap ppa-admin ppa-settings">
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
 
-				<div class="ppa-card">
+				<div class="ppa-card ppa-card--setup"> <!-- CHANGED: -->
 					<?php
 					if ( '' !== $test_status && '' !== $test_msg ) {
 						self::render_notice( $test_status, $test_msg );
@@ -1553,7 +1478,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						self::render_notice( $lic_status, $lic_msg );
 					}
 
-					// CHANGED: Persistent, clearer UX for plan limit site cap (based on last cached license response).
 					if ( $site_limit_reached ) {                                                    // CHANGED:
 						self::render_notice( 'error', __( 'Plan limit reached: your account has hit its site limit. You can’t activate this site until you upgrade your plan or deactivate another site.', 'postpress-ai' ) ); // CHANGED:
 					}                                                                                  // CHANGED:
@@ -1566,7 +1490,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						<p class="ppa-help">
 							<strong><?php esc_html_e( 'Heads up:', 'postpress-ai' ); ?></strong>
 							<?php echo esc_html( sprintf(
-								/* translators: 1: source (wp-config.php/settings option), 2: masked key */
 								__( 'A Connection Key is detected from %1$s (%2$s). Customers usually don’t need this. If Settings says “Not active” but Composer still works, this is why.', 'postpress-ai' ),
 								(string) $ck['source'],
 								(string) $ck['masked']
@@ -1604,7 +1527,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					</form>
 				</div>
 
-				<div class="ppa-card">
+				<div class="ppa-card ppa-card--license"> <!-- CHANGED: -->
 					<h2 class="title"><?php esc_html_e( 'License Actions', 'postpress-ai' ); ?></h2>
 					<p class="ppa-help">
 						<?php esc_html_e( 'Use these buttons to check or activate this site.', 'postpress-ai' ); ?>
@@ -1661,8 +1584,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 							<?php wp_nonce_field( 'ppa-license-deactivate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_deactivate" />
 							<?php
-							// CHANGED: Deactivate is disabled ONLY when we *know* it's not active.
-							// If status is Unknown, keep enabled so user can still attempt a clean deactivation.
 							$disable_deactivate = ( ! $has_key ) || $is_inactive_here;                    // CHANGED:
 							$attrs_deactivate   = $disable_deactivate ? array( 'disabled' => 'disabled' ) : array(); // CHANGED:
 							submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false, $attrs_deactivate ); // CHANGED:
@@ -1676,13 +1597,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					</div>
 
 					<h3><?php esc_html_e( 'Last response (optional)', 'postpress-ai' ); ?></h3>
-					<p class="ppa-help"><?php esc_html_e( 'Only for troubleshooting if something fails. Click “Check License” to refresh.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+					<p class="ppa-help"><?php esc_html_e( 'Only for troubleshooting if something fails. Click “Check License” to refresh.', 'postpress-ai' ); ?></p>
 					<textarea readonly class="ppa-debug-box"><?php
 						echo esc_textarea( $last ? wp_json_encode( $last, JSON_PRETTY_PRINT ) : 'No recent result yet.' );
 					?></textarea>
 				</div>
 
-				<div class="ppa-card">
+				<div class="ppa-card ppa-card--test"> <!-- CHANGED: -->
 					<h2 class="title"><?php esc_html_e( 'Test Connection', 'postpress-ai' ); ?></h2>
 					<p class="ppa-help">
 						<?php esc_html_e( 'Click to make sure this site can reach PostPress AI.', 'postpress-ai' ); ?>
@@ -1709,10 +1630,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		}
 	}
 
-	// Boot hooks (safe/idempotent).
 	PPA_Admin_Settings::init();
 
-	// CHANGED: Render ONLY on the real settings screen (admin.php). Never render on admin-post (prevents output/redirect issues).
 	if ( is_admin() ) { // CHANGED:
 		global $pagenow; // CHANGED:
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : ''; // CHANGED:

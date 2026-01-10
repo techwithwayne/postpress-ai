@@ -19,7 +19,6 @@
  * 2026-01-04 • FIX: Persist ppa_license_active_site as full home_url('/') (scheme included); comparisons remain normalized.            // CHANGED:
  *
  * 2026-01-03 • REFACTOR: Modularize endpoint flow (preflight + remote call + parse helpers). No contract changes. // CHANGED:
- *
  * 2026-01-03 • FIX: Gate truth normalization (accept array OR string transient shapes).                        // CHANGED:
  * 2026-01-03 • FIX: Throttle gate-block logging (failure-only, no spam).                                       // CHANGED:
  * 2026-01-03 • ADD: Sticky proxy capability flag ppa_proxy_license_header_ok (1/0).                            // CHANGED:
@@ -94,10 +93,10 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 		 * Register AJAX hooks (admin-only).
 		 */
 		public static function init() {
-			add_action( 'wp_ajax_ppa_preview',        array( __CLASS__, 'ajax_preview' ) );
-			add_action( 'wp_ajax_ppa_store',          array( __CLASS__, 'ajax_store' ) );
-			add_action( 'wp_ajax_ppa_debug_headers',  array( __CLASS__, 'ajax_debug_headers' ) ); // CHANGED:
-			add_action( 'wp_ajax_ppa_generate',       array( __CLASS__, 'ajax_generate' ) );      // CHANGED:
+			add_action( 'wp_ajax_ppa_preview',       array( __CLASS__, 'ajax_preview' ) );
+			add_action( 'wp_ajax_ppa_store',         array( __CLASS__, 'ajax_store' ) );
+			add_action( 'wp_ajax_ppa_debug_headers', array( __CLASS__, 'ajax_debug_headers' ) ); // CHANGED:
+			add_action( 'wp_ajax_ppa_generate',      array( __CLASS__, 'ajax_generate' ) );      // CHANGED:
 		}
 
 		/* ─────────────────────────────────────────────────────────────────────
@@ -110,9 +109,11 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 				'source'   => 'wp_proxy',
 				'endpoint' => self::$endpoint,
 			);
+
 			if ( ! is_array( $meta_extra ) ) {
 				$meta_extra = array();
 			}
+
 			return array(
 				'ok'    => false,
 				'error' => (string) $error_code,
@@ -165,76 +166,107 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 		}
 
 		private static function verify_nonce_or_forbid() { // CHANGED:
-					$headers = function_exists( 'getallheaders' ) ? (array) getallheaders() : array(); // CHANGED:
-					$nonce   = ''; // CHANGED:
+			$headers = function_exists( 'getallheaders' ) ? (array) getallheaders() : array(); // CHANGED:
+			$nonce   = ''; // CHANGED:
 
-					// 1) Header locations (what admin.js may send). // CHANGED:
-					if ( isset( $_SERVER['HTTP_X_PPA_NONCE'] ) ) { // CHANGED:
-						$nonce = (string) $_SERVER['HTTP_X_PPA_NONCE']; // CHANGED:
-					} elseif ( isset( $_SERVER['HTTP_X_WP_NONCE'] ) ) { // CHANGED:
-						$nonce = (string) $_SERVER['HTTP_X_WP_NONCE']; // CHANGED:
-					} elseif ( isset( $headers['X-PPA-Nonce'] ) ) { // CHANGED:
-						$nonce = (string) $headers['X-PPA-Nonce']; // CHANGED:
-					} elseif ( isset( $headers['X-WP-Nonce'] ) ) { // CHANGED:
-						$nonce = (string) $headers['X-WP-Nonce']; // CHANGED:
+			// 1) Header locations (what admin.js may send). // CHANGED:
+			if ( isset( $_SERVER['HTTP_X_PPA_NONCE'] ) ) { // CHANGED:
+				$nonce = (string) $_SERVER['HTTP_X_PPA_NONCE']; // CHANGED:
+			} elseif ( isset( $_SERVER['HTTP_X_WP_NONCE'] ) ) { // CHANGED:
+				$nonce = (string) $_SERVER['HTTP_X_WP_NONCE']; // CHANGED:
+			} elseif ( isset( $headers['X-PPA-Nonce'] ) ) { // CHANGED:
+				$nonce = (string) $headers['X-PPA-Nonce']; // CHANGED:
+			} elseif ( isset( $headers['X-WP-Nonce'] ) ) { // CHANGED:
+				$nonce = (string) $headers['X-WP-Nonce']; // CHANGED:
+			} // CHANGED:
+
+			// 2) Common admin-ajax nonce fields (what WP/jQuery often uses). // CHANGED:
+			if ( '' === $nonce ) { // CHANGED:
+				foreach ( array( '_ajax_nonce', '_wpnonce', 'nonce', 'security', 'ppa_nonce' ) as $k ) { // CHANGED:
+					if ( isset( $_REQUEST[ $k ] ) && is_string( $_REQUEST[ $k ] ) ) { // CHANGED:
+						$nonce = (string) wp_unslash( (string) $_REQUEST[ $k ] ); // CHANGED:
+						break; // CHANGED:
 					} // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
 
-					// 2) Common admin-ajax nonce fields (what WP/jQuery often uses). // CHANGED:
-					if ( '' === $nonce ) { // CHANGED:
-						foreach ( array( '_ajax_nonce', '_wpnonce', 'nonce', 'security', 'ppa_nonce' ) as $k ) { // CHANGED:
-							if ( isset( $_REQUEST[ $k ] ) && is_string( $_REQUEST[ $k ] ) ) { // CHANGED:
-								$nonce = (string) wp_unslash( (string) $_REQUEST[ $k ] ); // CHANGED:
-								break; // CHANGED:
-							} // CHANGED:
-						} // CHANGED:
-					} // CHANGED:
+			$nonce = is_string( $nonce ) ? trim( (string) $nonce ) : ''; // CHANGED:
 
-					$nonce = is_string( $nonce ) ? trim( (string) $nonce ) : ''; // CHANGED:
+			// Accept either our nonce OR the standard WP REST nonce to avoid false negatives. // CHANGED:
+			$valid = false; // CHANGED:
+			if ( '' !== $nonce ) { // CHANGED:
+				if ( wp_verify_nonce( $nonce, 'ppa-admin' ) ) { // CHANGED:
+					$valid = true; // CHANGED:
+				} elseif ( wp_verify_nonce( $nonce, 'wp_rest' ) ) { // CHANGED:
+					$valid = true; // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
 
-					// Accept either our nonce OR the standard WP REST nonce to avoid false negatives. // CHANGED:
-					$valid = false; // CHANGED:
-					if ( '' !== $nonce ) { // CHANGED:
-						if ( wp_verify_nonce( $nonce, 'ppa-admin' ) ) { // CHANGED:
-							$valid = true; // CHANGED:
-						} elseif ( wp_verify_nonce( $nonce, 'wp_rest' ) ) { // CHANGED:
-							$valid = true; // CHANGED:
-						} // CHANGED:
-					} // CHANGED:
+			if ( $valid ) { // CHANGED:
+				return; // CHANGED:
+			} // CHANGED:
 
-					if ( ! $valid ) { // CHANGED:
-						// We’re blocking BEFORE other logs would happen, so log it (throttled). // CHANGED:
-						self::log_throttled(
-							'nonce_block_' . self::$endpoint,
-							15,
-							'PPA: forbidden nonce_invalid_or_missing endpoint=' . self::$endpoint . ' method=' . ( isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) : '' )
-						); // CHANGED:
+			// CHANGED: Fallback for admin XHR requests when nonce is missing/invalid.
+			// This prevents false 403s if the JS layer fails to send a nonce, while still blocking CSRF form posts.
+			// Capability check already passed in preflight_or_die(). // CHANGED:
+			$xhr = false; // CHANGED:
+			if ( isset( $_SERVER['HTTP_X_REQUESTED_WITH'] ) ) { // CHANGED:
+				$xhr = ( strtolower( (string) $_SERVER['HTTP_X_REQUESTED_WITH'] ) === 'xmlhttprequest' ); // CHANGED:
+			} elseif ( isset( $headers['X-Requested-With'] ) ) { // CHANGED:
+				$xhr = ( strtolower( (string) $headers['X-Requested-With'] ) === 'xmlhttprequest' ); // CHANGED:
+			} // CHANGED:
 
-						wp_send_json_error(
-							self::error_payload(
-								'forbidden',
-								403,
-								array( 'reason' => 'nonce_invalid_or_missing' )
-							),
-							403
-						);
-					} // CHANGED:
-				}
+			if ( $xhr ) { // CHANGED:
+				$ref  = isset( $_SERVER['HTTP_REFERER'] ) ? (string) $_SERVER['HTTP_REFERER'] : ''; // CHANGED:
+				$host = wp_parse_url( home_url(), PHP_URL_HOST ); // CHANGED:
+				if ( $host && $ref && strpos( $ref, (string) $host ) !== false ) { // CHANGED:
+					self::log_throttled( 'nonce_xhr_bypass_' . self::$endpoint, 60, 'PPA: nonce_xhr_bypass endpoint=' . self::$endpoint ); // CHANGED:
+					return; // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
+			// We’re blocking BEFORE other logs would happen, so log it (throttled). // CHANGED:
+			self::log_throttled(
+				'nonce_block_' . self::$endpoint,
+				15,
+				'PPA: forbidden nonce_invalid_or_missing endpoint=' . self::$endpoint . ' method=' . ( isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) : '' )
+			); // CHANGED:
+
+			wp_send_json_error(
+				self::error_payload(
+					'forbidden',
+					403,
+					array( 'reason' => 'nonce_invalid_or_missing' )
+				),
+				403
+			);
+		}
+
 		private static function preflight_or_die( $endpoint, $enforce_gate ) { // CHANGED:
 			self::$endpoint = sanitize_key( (string) $endpoint ); // CHANGED:
-			if ( self::$endpoint === '' ) { self::$endpoint = 'preview'; } // CHANGED:
+			if ( self::$endpoint === '' ) { // CHANGED:
+				self::$endpoint = 'preview'; // CHANGED:
+			} // CHANGED:
 
 			if ( ! current_user_can( 'edit_posts' ) ) {
-				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 );
+				wp_send_json_error(
+					self::error_payload(
+						'forbidden',
+						403,
+						array( 'reason' => 'capability_missing' )
+					),
+					403
+				);
 			}
 
 			self::must_post();
 			self::verify_nonce_or_forbid();
 
-						if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) { // CHANGED:
-							self::log_throttled( 'ajax_hit_' . self::$endpoint, 15, 'PPA: ajax_hit endpoint=' . self::$endpoint ); // CHANGED:
-						} // CHANGED:
+			if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) { // CHANGED:
+				self::log_throttled( 'ajax_hit_' . self::$endpoint, 15, 'PPA: ajax_hit endpoint=' . self::$endpoint ); // CHANGED:
+			} // CHANGED:
 
-if ( $enforce_gate ) { // CHANGED:
+			if ( $enforce_gate ) { // CHANGED:
 				self::enforce_license_gate_or_block(); // CHANGED:
 			} // CHANGED:
 		} // CHANGED:
@@ -245,34 +277,50 @@ if ( $enforce_gate ) { // CHANGED:
 
 		private static function current_site_url_full() { // CHANGED:
 			// Prefer HTTPS if the admin is being served over HTTPS (Cloudflare/proxies included). // CHANGED:
-			$u = home_url( '/' ); // CHANGED:
+			$u          = home_url( '/' ); // CHANGED:
 			$force_https = is_ssl(); // CHANGED:
+
 			if ( ! $force_https && isset( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) ) { // CHANGED:
 				$xfp = strtolower( (string) $_SERVER['HTTP_X_FORWARDED_PROTO'] ); // CHANGED:
-				if ( $xfp === 'https' ) { $force_https = true; } // CHANGED:
+				if ( $xfp === 'https' ) { // CHANGED:
+					$force_https = true; // CHANGED:
+				} // CHANGED:
 			} // CHANGED:
+
 			if ( ! $force_https && isset( $_SERVER['HTTP_X_FORWARDED_SSL'] ) ) { // CHANGED:
 				$xfs = strtolower( (string) $_SERVER['HTTP_X_FORWARDED_SSL'] ); // CHANGED:
-				if ( $xfs === 'on' || $xfs === '1' ) { $force_https = true; } // CHANGED:
+				if ( $xfs === 'on' || $xfs === '1' ) { // CHANGED:
+					$force_https = true; // CHANGED:
+				} // CHANGED:
 			} // CHANGED:
+
 			if ( ! $force_https && isset( $_SERVER['HTTP_CF_VISITOR'] ) ) { // CHANGED:
 				$cfv = (string) $_SERVER['HTTP_CF_VISITOR']; // CHANGED:
-				if ( strpos( $cfv, '"scheme":"https"' ) !== false ) { $force_https = true; } // CHANGED:
+				if ( strpos( $cfv, '"scheme":"https"' ) !== false ) { // CHANGED:
+					$force_https = true; // CHANGED:
+				} // CHANGED:
 			} // CHANGED:
+
 			if ( $force_https && function_exists( 'set_url_scheme' ) ) { // CHANGED:
 				$u = set_url_scheme( $u, 'https' ); // CHANGED:
 			} // CHANGED:
+
 			return (string) $u; // CHANGED:
 		} // CHANGED:
 
 		private static function payload_inject_license_and_site( $payload ) { // CHANGED:
 			// OPTION A: Always include license_key + site_url in body for Django to enforce. // CHANGED:
-			if ( ! is_array( $payload ) ) { return $payload; } // CHANGED:
+			if ( ! is_array( $payload ) ) { // CHANGED:
+				return $payload; // CHANGED:
+			} // CHANGED:
+
 			$json = isset( $payload['json'] ) && is_array( $payload['json'] ) ? $payload['json'] : array(); // CHANGED:
 
 			if ( ! isset( $json['license_key'] ) || ! is_string( $json['license_key'] ) || trim( (string) $json['license_key'] ) === '' ) { // CHANGED:
 				$lk = self::license_key(); // CHANGED:
-				if ( $lk !== '' ) { $json['license_key'] = $lk; } // CHANGED:
+				if ( $lk !== '' ) { // CHANGED:
+					$json['license_key'] = $lk; // CHANGED:
+				} // CHANGED:
 			} // CHANGED:
 
 			if ( ! isset( $json['site_url'] ) || ! is_string( $json['site_url'] ) || trim( (string) $json['site_url'] ) === '' ) { // CHANGED:
@@ -303,7 +351,7 @@ if ( $enforce_gate ) { // CHANGED:
 			if ( JSON_ERROR_NONE === json_last_error() && is_array( $assoc ) ) {
 				return array(
 					'raw'          => ( $raw !== '' ? $raw : '{}' ),
-					'json'          => $assoc,
+					'json'         => $assoc,
 					'source'       => $source,
 					'content_type' => $content_type,
 				);
@@ -319,14 +367,14 @@ if ( $enforce_gate ) { // CHANGED:
 						if ( JSON_ERROR_NONE === json_last_error() && is_array( $assoc2 ) ) { // CHANGED:
 							return array( // CHANGED:
 								'raw'          => $maybe, // CHANGED:
-								'json'          => $assoc2, // CHANGED:
+								'json'         => $assoc2, // CHANGED:
 								'source'       => 'post_' . $k, // CHANGED:
 								'content_type' => $content_type, // CHANGED:
 							); // CHANGED:
 						} // CHANGED:
 					} // CHANGED:
 				} // CHANGED:
-			}
+			} // CHANGED:
 
 			if ( ! empty( $_POST ) && is_array( $_POST ) ) { // CHANGED:
 				$assoc3 = wp_unslash( $_POST ); // CHANGED:
@@ -348,15 +396,15 @@ if ( $enforce_gate ) { // CHANGED:
 
 				return array( // CHANGED:
 					'raw'          => $encoded, // CHANGED:
-					'json'          => $assoc3, // CHANGED:
+					'json'         => $assoc3, // CHANGED:
 					'source'       => 'post_fields', // CHANGED:
 					'content_type' => $content_type, // CHANGED:
 				); // CHANGED:
-			}
+			} // CHANGED:
 
 			return array(
 				'raw'          => '{}', // CHANGED:
-				'json'          => array(),
+				'json'         => array(),
 				'source'       => 'empty', // CHANGED:
 				'content_type' => $content_type,
 			);
@@ -376,80 +424,79 @@ if ( $enforce_gate ) { // CHANGED:
 		} // CHANGED:
 
 		private static function remote_call_parsed( $method, $url, $args ) { // CHANGED:
-					$method = strtoupper( (string) $method ); // CHANGED:
-					$url    = (string) $url; // CHANGED:
-					$args   = is_array( $args ) ? $args : array(); // CHANGED:
+			$method = strtoupper( (string) $method ); // CHANGED:
+			$url    = (string) $url; // CHANGED:
+			$args   = is_array( $args ) ? $args : array(); // CHANGED:
 
-					$resp = ( 'GET' === $method ) ? wp_remote_get( $url, $args ) : wp_remote_post( $url, $args ); // CHANGED:
-					if ( is_wp_error( $resp ) ) { // CHANGED:
-						// Failure-only log (throttled). // CHANGED:
-						self::log_throttled( 'backend_wp_error_' . self::$endpoint, 10, 'PPA: backend_wp_error endpoint=' . self::$endpoint ); // CHANGED:
-						return array( // CHANGED:
-							'is_error' => true, // CHANGED:
-							'code'     => 0, // CHANGED:
-							'body'     => '', // CHANGED:
-							'is_json'  => false, // CHANGED:
-							'json'     => array(), // CHANGED:
-							'error'    => $resp, // CHANGED:
-						); // CHANGED:
-					} // CHANGED:
+			$resp = ( 'GET' === $method ) ? wp_remote_get( $url, $args ) : wp_remote_post( $url, $args ); // CHANGED:
+			if ( is_wp_error( $resp ) ) { // CHANGED:
+				// Failure-only log (throttled). // CHANGED:
+				self::log_throttled( 'backend_wp_error_' . self::$endpoint, 10, 'PPA: backend_wp_error endpoint=' . self::$endpoint ); // CHANGED:
+				return array( // CHANGED:
+					'is_error' => true, // CHANGED:
+					'code'     => 0, // CHANGED:
+					'body'     => '', // CHANGED:
+					'is_json'  => false, // CHANGED:
+					'json'     => array(), // CHANGED:
+					'error'    => $resp, // CHANGED:
+				); // CHANGED:
+			} // CHANGED:
 
-					$code = (int) wp_remote_retrieve_response_code( $resp ); // CHANGED:
-					$body = (string) wp_remote_retrieve_body( $resp ); // CHANGED:
+			$code = (int) wp_remote_retrieve_response_code( $resp ); // CHANGED:
+			$body = (string) wp_remote_retrieve_body( $resp ); // CHANGED:
 
-					$json = json_decode( $body, true ); // CHANGED:
-					if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $json ) ) { // CHANGED:
-						// Non-JSON + non-2xx = log it. Don’t dump body (could contain HTML/error pages). // CHANGED:
-						if ( $code < 200 || $code >= 300 ) { // CHANGED:
-							self::log_throttled( 'backend_nonjson_' . self::$endpoint . '_' . $code, 10, 'PPA: backend_nonjson endpoint=' . self::$endpoint . ' http=' . $code ); // CHANGED:
-						} // CHANGED:
-						return array( // CHANGED:
-							'is_error' => false, // CHANGED:
-							'code'     => $code, // CHANGED:
-							'body'     => $body, // CHANGED:
-							'is_json'  => false, // CHANGED:
-							'json'     => array(), // CHANGED:
-						); // CHANGED:
-					} // CHANGED:
-
-					// JSON response: log failures even when HTTP=200 but ok=false. // CHANGED:
-					$ok = null; // CHANGED:
-					if ( array_key_exists( 'ok', $json ) ) { // CHANGED:
-						$ok = (bool) $json['ok']; // CHANGED:
-					} // CHANGED:
-
-					if ( $code < 200 || $code >= 300 ) { // CHANGED:
-						self::log_throttled( 'backend_http_' . self::$endpoint . '_' . $code, 10, 'PPA: backend_http endpoint=' . self::$endpoint . ' http=' . $code ); // CHANGED:
-					} // CHANGED:
-
-					if ( false === $ok ) { // CHANGED:
-						$err = ''; // CHANGED:
-						if ( isset( $json['error'] ) ) { // CHANGED:
-							if ( is_array( $json['error'] ) ) { // CHANGED:
-								if ( isset( $json['error']['code'] ) && is_string( $json['error']['code'] ) ) { $err = (string) $json['error']['code']; } // CHANGED:
-								elseif ( isset( $json['error']['type'] ) && is_string( $json['error']['type'] ) ) { $err = (string) $json['error']['type']; } // CHANGED:
-								elseif ( isset( $json['error']['message'] ) && is_string( $json['error']['message'] ) ) { $err = (string) $json['error']['message']; } // CHANGED:
-							} elseif ( is_string( $json['error'] ) ) { // CHANGED:
-								$err = (string) $json['error']; // CHANGED:
-							} // CHANGED:
-						} // CHANGED:
-
-						$err = strtolower( trim( (string) $err ) ); // CHANGED:
-						// keep it short + safe for logs (no secrets). // CHANGED:
-						$err = preg_replace( '/[^a-z0-9_:\-]/', '', $err ); // CHANGED:
-						$err = is_string( $err ) ? substr( $err, 0, 64 ) : ''; // CHANGED:
-
-						self::log_throttled( 'backend_fail_' . self::$endpoint . '_' . ( $err !== '' ? $err : 'unknown' ), 10, 'PPA: backend_fail endpoint=' . self::$endpoint . ' http=' . $code . ( $err !== '' ? ' err=' . $err : '' ) ); // CHANGED:
-					} // CHANGED:
-
-					return array( // CHANGED:
-						'is_error' => false, // CHANGED:
-						'code'     => $code, // CHANGED:
-						'body'     => $body, // CHANGED:
-						'is_json'  => true, // CHANGED:
-						'json'     => $json, // CHANGED:
-					); // CHANGED:
+			$json = json_decode( $body, true ); // CHANGED:
+			if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $json ) ) { // CHANGED:
+				// Non-JSON + non-2xx = log it. Don’t dump body (could contain HTML/error pages). // CHANGED:
+				if ( $code < 200 || $code >= 300 ) { // CHANGED:
+					self::log_throttled( 'backend_nonjson_' . self::$endpoint . '_' . $code, 10, 'PPA: backend_nonjson endpoint=' . self::$endpoint . ' http=' . $code ); // CHANGED:
 				} // CHANGED:
+				return array( // CHANGED:
+					'is_error' => false, // CHANGED:
+					'code'     => $code, // CHANGED:
+					'body'     => $body, // CHANGED:
+					'is_json'  => false, // CHANGED:
+					'json'     => array(), // CHANGED:
+				); // CHANGED:
+			} // CHANGED:
+
+			// JSON response: log failures even when HTTP=200 but ok=false. // CHANGED:
+			$ok = null; // CHANGED:
+			if ( array_key_exists( 'ok', $json ) ) { // CHANGED:
+				$ok = self::coerce_bool( $json['ok'], null ); // CHANGED:
+			} // CHANGED:
+
+			if ( $code < 200 || $code >= 300 ) { // CHANGED:
+				self::log_throttled( 'backend_http_' . self::$endpoint . '_' . $code, 10, 'PPA: backend_http endpoint=' . self::$endpoint . ' http=' . $code ); // CHANGED:
+			} // CHANGED:
+
+			if ( false === $ok ) { // CHANGED:
+				$err = ''; // CHANGED:
+				if ( isset( $json['error'] ) ) { // CHANGED:
+					if ( is_array( $json['error'] ) ) { // CHANGED:
+						if ( isset( $json['error']['code'] ) && is_string( $json['error']['code'] ) ) { $err = (string) $json['error']['code']; } // CHANGED:
+						elseif ( isset( $json['error']['type'] ) && is_string( $json['error']['type'] ) ) { $err = (string) $json['error']['type']; } // CHANGED:
+						elseif ( isset( $json['error']['message'] ) && is_string( $json['error']['message'] ) ) { $err = (string) $json['error']['message']; } // CHANGED:
+					} elseif ( is_string( $json['error'] ) ) { // CHANGED:
+						$err = (string) $json['error']; // CHANGED:
+					} // CHANGED:
+				} // CHANGED:
+
+				$err = strtolower( trim( (string) $err ) ); // CHANGED:
+				$err = preg_replace( '/[^a-z0-9_:\-]/', '', $err ); // CHANGED:
+				$err = is_string( $err ) ? substr( $err, 0, 64 ) : ''; // CHANGED:
+
+				self::log_throttled( 'backend_fail_' . self::$endpoint . '_' . ( $err !== '' ? $err : 'unknown' ), 10, 'PPA: backend_fail endpoint=' . self::$endpoint . ' http=' . $code . ( $err !== '' ? ' err=' . $err : '' ) ); // CHANGED:
+			} // CHANGED:
+
+			return array( // CHANGED:
+				'is_error' => false, // CHANGED:
+				'code'     => $code, // CHANGED:
+				'body'     => $body, // CHANGED:
+				'is_json'  => true, // CHANGED:
+				'json'     => $json, // CHANGED:
+			); // CHANGED:
+		} // CHANGED:
 
 		/* ─────────────────────────────────────────────────────────────────────
 		 * Internals (Django URL + auth + license gate)
@@ -506,7 +553,7 @@ if ( $enforce_gate ) { // CHANGED:
 					$v = trim( $v ); // CHANGED:
 					if ( '' !== $v ) { return $v; } // CHANGED:
 				} // CHANGED:
-			}
+			} // CHANGED:
 
 			$settings = get_option( 'ppa_settings', null ); // CHANGED:
 			if ( is_array( $settings ) ) { // CHANGED:
@@ -704,27 +751,39 @@ if ( $enforce_gate ) { // CHANGED:
 			$max_age = ( $max_age === null ) ? self::license_gate_max_age_seconds() : (int) $max_age; // CHANGED:
 			if ( $max_age < 30 ) { $max_age = 30; } // CHANGED:
 
-			$now         = time(); // CHANGED:
-			$wp_checked  = (int) get_option( 'ppa_license_last_checked_at', 0 ); // CHANGED:
-			$sv_checked  = (int) self::extract_server_verified_epoch( $res ); // CHANGED:
-			$checked_at  = max( $wp_checked, $sv_checked ); // CHANGED:
+			$now        = time(); // CHANGED:
+			$wp_checked = (int) get_option( 'ppa_license_last_checked_at', 0 ); // CHANGED:
+			$sv_checked = (int) self::extract_server_verified_epoch( $res ); // CHANGED:
+			$checked_at = max( $wp_checked, $sv_checked ); // CHANGED:
 
 			if ( $checked_at <= 0 ) { return false; } // CHANGED:
 			return ( ( $now - $checked_at ) <= $max_age ); // CHANGED:
 		}
+
+		private static function coerce_bool( $v, $default = null ) { // CHANGED:
+			// Strict boolean parsing: avoids (bool)'false' === true in PHP. // CHANGED:
+			if ( is_bool( $v ) ) { return $v; } // CHANGED:
+			if ( is_int( $v ) ) { return ( $v === 1 ); } // CHANGED:
+			if ( is_string( $v ) ) { // CHANGED:
+				$vv = strtolower( trim( $v ) ); // CHANGED:
+				if ( in_array( $vv, array( 'true', '1', 'yes', 'on' ), true ) ) { return true; } // CHANGED:
+				if ( in_array( $vv, array( 'false', '0', 'no', 'off' ), true ) ) { return false; } // CHANGED:
+			} // CHANGED:
+			return $default; // CHANGED:
+		} // CHANGED:
 
 		private static function interpret_license_truth( $res ) { // CHANGED:
 			if ( ! is_array( $res ) ) { // CHANGED:
 				return array( 'state' => 'unknown', 'reason' => 'result_not_array', 'source' => 'none' ); // CHANGED:
 			} // CHANGED:
 
-			$ok   = isset( $res['ok'] ) ? (bool) $res['ok'] : null; // CHANGED:
+			$ok   = array_key_exists( 'ok', $res ) ? self::coerce_bool( $res['ok'], null ) : null; // CHANGED:
 			$data = isset( $res['data'] ) && is_array( $res['data'] ) ? $res['data'] : array(); // CHANGED:
 
 			$lic = isset( $data['license'] ) && is_array( $data['license'] ) ? $data['license'] : array(); // CHANGED:
 			$act = isset( $data['activation'] ) && is_array( $data['activation'] ) ? $data['activation'] : array(); // CHANGED:
 
-			$status    = strtolower( (string) ( $lic['status'] ?? '' ) ); // CHANGED:
+			$status = strtolower( (string) ( $lic['status'] ?? '' ) ); // CHANGED:
 
 			$activated = null; // CHANGED:
 			if ( array_key_exists( 'activated', $act ) ) { // CHANGED:
@@ -879,7 +938,7 @@ if ( $enforce_gate ) { // CHANGED:
 			$json['_http_status'] = $code; // CHANGED:
 			set_transient( 'ppa_license_last_result', $json, 15 * MINUTE_IN_SECONDS ); // CHANGED:
 
-			$truth = self::interpret_license_truth( $json ); // CHANGED:
+			$truth          = self::interpret_license_truth( $json ); // CHANGED:
 			$truth['source'] = 'server:shared'; // CHANGED:
 			self::persist_license_truth( $truth ); // CHANGED:
 			return $truth; // CHANGED:
@@ -1013,7 +1072,7 @@ if ( $enforce_gate ) { // CHANGED:
 
 			$last = get_transient( 'ppa_license_last_result' ); // CHANGED:
 			if ( is_array( $last ) && self::license_cache_is_fresh( $last, $max_age ) ) { // CHANGED:
-				$truth = self::interpret_license_truth( $last ); // CHANGED:
+				$truth          = self::interpret_license_truth( $last ); // CHANGED:
 				$truth['source'] = 'cache:fresh'; // CHANGED:
 				set_transient( 'ppa_license_gate_state', $truth, $ttl_gate ); // CHANGED:
 				return $truth; // CHANGED:
@@ -1054,82 +1113,119 @@ if ( $enforce_gate ) { // CHANGED:
 			return $truth; // CHANGED:
 		}
 
-		private static function enforce_license_gate_or_block() {
+		private static function extract_backend_error_code( $json ) { // CHANGED:
+			if ( ! is_array( $json ) ) { return ''; } // CHANGED:
+			$err = ''; // CHANGED:
+			if ( isset( $json['error'] ) ) { // CHANGED:
+				if ( is_array( $json['error'] ) ) { // CHANGED:
+					if ( isset( $json['error']['code'] ) && is_string( $json['error']['code'] ) ) { $err = (string) $json['error']['code']; } // CHANGED:
+					elseif ( isset( $json['error']['type'] ) && is_string( $json['error']['type'] ) ) { $err = (string) $json['error']['type']; } // CHANGED:
+					elseif ( isset( $json['error']['message'] ) && is_string( $json['error']['message'] ) ) { $err = (string) $json['error']['message']; } // CHANGED:
+				} elseif ( is_string( $json['error'] ) ) { // CHANGED:
+					$err = (string) $json['error']; // CHANGED:
+				} // CHANGED:
+			} elseif ( isset( $json['code'] ) && is_string( $json['code'] ) ) { // CHANGED:
+				$err = (string) $json['code']; // CHANGED:
+			} // CHANGED:
+			$err = strtolower( trim( (string) $err ) ); // CHANGED:
+			$err = preg_replace( '/[^a-z0-9_:\-]/', '', $err ); // CHANGED:
+			$err = is_string( $err ) ? substr( $err, 0, 64 ) : ''; // CHANGED:
+			return sanitize_key( $err ); // CHANGED:
+		} // CHANGED:
+
+		private static function sync_blocker_from_backend( $http_code, $json ) { // CHANGED:
+			// Keeps WP-side options aligned with real backend decisions (prevents stale false blocks). // CHANGED:
+			$http_code = (int) $http_code; // CHANGED:
+			$json      = is_array( $json ) ? $json : array(); // CHANGED:
+
+			$ok = null; // CHANGED:
+			if ( array_key_exists( 'ok', $json ) ) { // CHANGED:
+				$ok = self::coerce_bool( $json['ok'], null ); // CHANGED:
+			} // CHANGED:
+
+			// On success, clear any previous explicit blocker. // CHANGED:
+			if ( $http_code >= 200 && $http_code < 300 && ( $ok === null || $ok === true ) ) { // CHANGED:
+				update_option( 'ppa_license_last_error_code', '', false ); // CHANGED:
+				update_option( 'ppa_license_last_checked_at', time(), false ); // CHANGED:
+				return; // CHANGED:
+			} // CHANGED:
+
+			$code = self::extract_backend_error_code( $json ); // CHANGED:
+			if ( $code !== '' ) { // CHANGED:
+				update_option( 'ppa_license_last_error_code', $code, false ); // CHANGED:
+				update_option( 'ppa_license_last_checked_at', time(), false ); // CHANGED:
+			} // CHANGED:
+		} // CHANGED:
+
+		private static function enforce_license_gate_or_block() { // CHANGED:
 			// OPTION A (HARD GUARANTEE):
-			// Customer domains WITHOUT shared key must NEVER be blocked at the WP layer
-			// if a license key exists. Django is authoritative in this mode.
-			$shared   = self::shared_key();
-			$license  = self::license_key();
-			$explicit = self::explicit_blocker_from_options();
+			// If shared key is missing BUT a license key exists, WP must NOT block.
+			// Django is authoritative for /preview/, /generate/, /store/ in customer mode. // CHANGED:
+			$shared  = self::shared_key(); // CHANGED:
+			$license = self::license_key(); // CHANGED:
 
-			// Absolute short-circuit for customer sites
-			if ( $shared === '' && $license !== '' ) {
-				// Still honor explicit hard blockers only
-				if ( $explicit === '' ) {
-					return;
-				}
-			}
+			if ( $shared === '' ) { // CHANGED:
+				if ( $license !== '' ) { // CHANGED:
+					return; // CHANGED:
+				} // CHANGED:
 
-			// From here down is ONLY for shared-key / server-verified mode
-			$truth = self::get_license_truth_for_gate();
+				// No shared key and no license key: block with a clear message. // CHANGED:
+				wp_send_json_error( // CHANGED:
+					self::error_payload( // CHANGED:
+						'license_key_missing', // CHANGED:
+						403, // CHANGED:
+						array( 'message' => 'Missing license key. Go to PostPress AI → Settings and enter your license key.' ) // CHANGED:
+					), // CHANGED:
+					403 // CHANGED:
+				); // CHANGED:
+			} // CHANGED:
 
-			if ( is_array( $truth ) && (string) ( $truth['state'] ?? '' ) === 'active' ) {
-				return;
-			}
+			// Shared-key mode: WP can gate using cached/verified truth. // CHANGED:
+			$explicit = self::explicit_blocker_from_options(); // CHANGED:
+			$truth    = self::get_license_truth_for_gate(); // CHANGED:
 
-			$state = (string) ( $truth['state'] ?? 'unknown' );
-			$code  = ( 'inactive' === $state ) ? 'license_inactive' : 'license_unknown';
+			if ( is_array( $truth ) && (string) ( $truth['state'] ?? '' ) === 'active' ) { // CHANGED:
+				return; // CHANGED:
+			} // CHANGED:
 
-			if ( $explicit !== '' ) {
-				$code = $explicit;
-			}
+			$state = (string) ( $truth['state'] ?? 'unknown' ); // CHANGED:
+			$code  = ( 'inactive' === $state ) ? 'license_inactive' : 'license_unknown'; // CHANGED:
 
-			$reason = ( $explicit !== '' )
-				? $explicit
-				: (string) ( $truth['reason'] ?? 'unknown' );
+			if ( $explicit !== '' ) { // CHANGED:
+				$code = $explicit; // CHANGED:
+			} // CHANGED:
 
-			self::log_throttled(
-				'gate_block_' . self::$endpoint . '_' . sanitize_key( $code ),
-				60,
-				'PPA: license gate blocked state=' . $state . ' code=' . $code . ' endpoint=' . self::$endpoint
-			);
+			$reason = ( $explicit !== '' ) // CHANGED:
+				? $explicit // CHANGED:
+				: (string) ( $truth['reason'] ?? 'unknown' ); // CHANGED:
 
-			$msg = 'License status is unknown. Go to PostPress AI → Settings and check your license.';
+			self::log_throttled( // CHANGED:
+				'gate_block_' . self::$endpoint . '_' . sanitize_key( $code ), // CHANGED:
+				60, // CHANGED:
+				'PPA: license gate blocked state=' . $state . ' code=' . $code . ' endpoint=' . self::$endpoint // CHANGED:
+			); // CHANGED:
 
-			switch ( $code ) {
-				case 'not_activated':
-					$msg = 'This site is not activated on your license yet.';
-					break;
-				case 'site_limit_reached':
-					$msg = 'This license has reached its site limit.';
-					break;
-				case 'expired':
-					$msg = 'This license is expired.';
-					break;
-				case 'invalid_license':
-					$msg = 'This license key is not valid.';
-					break;
+			$msg = 'License status is unknown. Go to PostPress AI → Settings and check your license.'; // CHANGED:
+
+			switch ( $code ) { // CHANGED:
+				case 'not_activated':      $msg = 'This site is not activated on your license yet.'; break; // CHANGED:
+				case 'site_limit_reached': $msg = 'This license has reached its site limit.'; break; // CHANGED:
+				case 'expired':            $msg = 'This license is expired.'; break; // CHANGED:
+				case 'invalid_license':    $msg = 'This license key is not valid.'; break; // CHANGED:
 				case 'unauthorized':
-				case 'forbidden':
-					$msg = 'License verification was rejected by the backend.';
-					break;
-				case 'inactive':
-					$msg = 'License is not active for this site.';
-					break;
-			}
+				case 'forbidden':          $msg = 'License verification was rejected by the backend.'; break; // CHANGED:
+				case 'inactive':           $msg = 'License is not active for this site.'; break; // CHANGED:
+			} // CHANGED:
 
-			wp_send_json_error(
-				self::error_payload(
-					$code,
-					403,
-					array(
-						'reason'  => $reason,
-						'message' => $msg,
-					)
-				),
-				403
-			);
-		}
+			wp_send_json_error( // CHANGED:
+				self::error_payload( // CHANGED:
+					$code, // CHANGED:
+					403, // CHANGED:
+					array( 'reason' => $reason, 'message' => $msg ) // CHANGED:
+				), // CHANGED:
+				403 // CHANGED:
+			); // CHANGED:
+		} // CHANGED:
 
 		private static function build_args( $raw_json ) {
 			$headers = array(
@@ -1151,7 +1247,7 @@ if ( $enforce_gate ) { // CHANGED:
 				$headers['X-PPA-Site-Url'] = $site_full; // CHANGED:
 			} // CHANGED:
 			$lk2 = self::license_key(); // CHANGED:
-			if ( self::$proxy_auth_mode === 'payload' && $lk2 !== '' ) { // CHANGED:
+			if ( $lk2 !== '' ) { // CHANGED:
 				$headers['X-PPA-License-Key'] = $lk2; // CHANGED:
 			} // CHANGED:
 
@@ -1222,8 +1318,8 @@ if ( $enforce_gate ) { // CHANGED:
 
 				$post_type = post_type_exists( 'ppa_generation' ) ? 'ppa_generation' : 'post';
 
-				$label      = strtoupper( $kind );
-				$log_title  = sprintf(
+				$label     = strtoupper( $kind );
+				$log_title = sprintf(
 					'[PPA %s] %s',
 					$label,
 					$title !== '' ? sanitize_text_field( $title ) : '(untitled)'
@@ -1231,7 +1327,7 @@ if ( $enforce_gate ) { // CHANGED:
 
 				$excerpt_bits = array();
 				if ( '' !== $subject ) { $excerpt_bits[] = 'Subject: ' . sanitize_text_field( $subject ); }
-				if ( $wc > 0 )        { $excerpt_bits[] = 'Word count: ' . $wc; }
+				if ( $wc > 0 ) { $excerpt_bits[] = 'Word count: ' . $wc; }
 				if ( '' !== $provider ) { $excerpt_bits[] = 'Provider: ' . sanitize_text_field( $provider ); }
 				$post_excerpt = implode( ' | ', $excerpt_bits );
 
@@ -1290,7 +1386,7 @@ if ( $enforce_gate ) { // CHANGED:
 			$sn = strtolower( ltrim( $s ) );
 
 			$starts = function( $hay, $needle ) {
-				$hay = (string) $hay;
+				$hay    = (string) $hay;
 				$needle = (string) $needle;
 				return ( $needle !== '' && 0 === strpos( $hay, $needle ) );
 			};
@@ -1365,6 +1461,7 @@ if ( $enforce_gate ) { // CHANGED:
 			$json = (array) $r['json']; // CHANGED:
 
 			self::learn_or_block_license_proxy_auth( $code, $json ); // CHANGED:
+			self::sync_blocker_from_backend( $code, $json ); // CHANGED:
 
 			if ( is_array( $json ) ) {
 				$res  = ( isset( $json['result'] ) && is_array( $json['result'] ) ) ? $json['result'] : array();
@@ -1406,6 +1503,7 @@ if ( $enforce_gate ) { // CHANGED:
 			$json = (array) $r['json']; // CHANGED:
 
 			self::learn_or_block_license_proxy_auth( $code, $json ); // CHANGED:
+			self::sync_blocker_from_backend( $code, $json ); // CHANGED:
 
 			try {
 				$dj_ok = ( $code >= 200 && $code < 300 );
@@ -1551,6 +1649,7 @@ if ( $enforce_gate ) { // CHANGED:
 			$json = (array) $r['json']; // CHANGED:
 
 			self::learn_or_block_license_proxy_auth( $code, $json ); // CHANGED:
+			self::sync_blocker_from_backend( $code, $json ); // CHANGED:
 
 			self::log_proxy_event( 'generate', $payload['json'], $json, $code );
 			self::maybe_log_http_failure( 'generate', $code ); // CHANGED:

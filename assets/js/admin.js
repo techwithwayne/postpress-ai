@@ -4,6 +4,7 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2026-01-09.1: UX: Outline now renders as an ORDERED list (<ol>), and each outline item links to its corresponding heading in the Body. Adds automatic heading-id wiring + de-dupe. // CHANGED:
  * 2026-01-03.1: FIX: De-dupe redundant title line in Outline/Body for Preview + Generate autofill. No endpoint/payload changes. // CHANGED:
  * 2026-01-07.1: UX: Add Outline toggle + safe Markdown/URL links in preview (target=_blank). No endpoint/payload changes. // CHANGED:
  * 2026-01-07.2: UX: Sync Composer button copy in JS notices/labels to "Generate Preview" + "Save Draft (Store)". No endpoint/payload changes. // CHANGED:
@@ -53,7 +54,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-07.2'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-09.1'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -274,8 +275,14 @@
         continue; // CHANGED:
       } // CHANGED:
       try { a.setAttribute('href', safe); } catch (e4) {} // CHANGED:
-      try { a.setAttribute('target', '_blank'); } catch (e5) {} // CHANGED:
-      try { a.setAttribute('rel', 'noopener noreferrer'); } catch (e6) {} // CHANGED:
+      // Allow same-page hash links to NOT force _blank (Outline should stay in-pane). // CHANGED:
+      if (String(safe).charAt(0) === '#') { // CHANGED:
+        try { a.removeAttribute('target'); } catch (e5a) {} // CHANGED:
+        try { a.removeAttribute('rel'); } catch (e6a) {} // CHANGED:
+      } else { // CHANGED:
+        try { a.setAttribute('target', '_blank'); } catch (e5) {} // CHANGED:
+        try { a.setAttribute('rel', 'noopener noreferrer'); } catch (e6) {} // CHANGED:
+      } // CHANGED:
     } // CHANGED:
   } // CHANGED:
 
@@ -558,7 +565,6 @@
 
     // Inline code
     txt = txt.replace(/`([^`]+)`/g, '<code>$1</code>');
-
 
     // Links: [text](https://example.com) + bare https://example.com                        // CHANGED:
     txt = txt.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, function (_m, label, url) {        // CHANGED:
@@ -884,6 +890,9 @@
       var list = lists[i]; // CHANGED:
       if (!list || list.nodeType !== 1) continue; // CHANGED:
       try { // CHANGED:
+        list.style.listStylePosition == 'outside'; // CHANGED: (typo prevention: keep correct below)
+      } catch (eT) {} // CHANGED:
+      try { // CHANGED:
         list.style.listStylePosition = 'outside'; // CHANGED:
         list.style.paddingLeft = '1.25em'; // CHANGED: ensures markers are not clipped
         list.style.marginLeft = '0.75em'; // CHANGED:
@@ -909,35 +918,178 @@
     } // CHANGED:
   } // CHANGED:
 
+  // ---- Outline → Heading link wiring -------------------------------------- // CHANGED:
+
+  function parseOutlineItems(outlineMaybeArrayOrString) { // CHANGED:
+    // Accept: array, comma-separated string, newline string, markdown-ish bullets. // CHANGED:
+    if (!outlineMaybeArrayOrString) return []; // CHANGED:
+    if (Array.isArray(outlineMaybeArrayOrString)) { // CHANGED:
+      return outlineMaybeArrayOrString.map(function (x) { return String(x || '').trim(); }).filter(Boolean); // CHANGED:
+    } // CHANGED:
+
+    var s = String(outlineMaybeArrayOrString || '').trim(); // CHANGED:
+    if (!s) return []; // CHANGED:
+
+    // If it looks comma-separated with no newlines, split commas. // CHANGED:
+    if (s.indexOf('\n') === -1 && s.indexOf(',') !== -1) { // CHANGED:
+      return s.split(',').map(function (x) { return String(x || '').trim(); }).filter(Boolean); // CHANGED:
+    } // CHANGED:
+
+    // Otherwise split lines + strip common bullet prefixes. // CHANGED:
+    var lines = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n'); // CHANGED:
+    var out = []; // CHANGED:
+    for (var i = 0; i < lines.length; i++) { // CHANGED:
+      var line = String(lines[i] || '').trim(); // CHANGED:
+      if (!line) continue; // CHANGED:
+      line = line.replace(/^(\-|\*|\d+\.)\s+/, '').trim(); // CHANGED:
+      if (!line) continue; // CHANGED:
+      out.push(line); // CHANGED:
+    } // CHANGED:
+    return out; // CHANGED:
+  } // CHANGED:
+
+  function makeAnchorIdFromText(text) { // CHANGED:
+    var s = String(text || '').trim().toLowerCase(); // CHANGED:
+    if (!s) return ''; // CHANGED:
+    s = s.replace(/&amp;/g, 'and'); // CHANGED:
+    s = s.replace(/[^a-z0-9\s\-]/g, ''); // CHANGED:
+    s = s.replace(/\s+/g, '-'); // CHANGED:
+    s = s.replace(/\-+/g, '-'); // CHANGED:
+    s = s.replace(/^\-+|\-+$/g, ''); // CHANGED:
+    if (!s) s = 'section'; // CHANGED:
+    return 'ppa-h-' + s; // CHANGED:
+  } // CHANGED:
+
+  function assignHeadingIds(pane) { // CHANGED:
+    // Assign stable IDs to headings inside the Body so outline can link to them. // CHANGED:
+    if (!pane || pane.nodeType !== 1) return { headings: [], byNorm: {} }; // CHANGED:
+    var body = null; // CHANGED:
+    try { body = pane.querySelector('.ppa-body'); } catch (e0) { body = null; } // CHANGED:
+    if (!body) return { headings: [], byNorm: {} }; // CHANGED:
+
+    var hs = []; // CHANGED:
+    try { hs = Array.prototype.slice.call(body.querySelectorAll('h1,h2,h3,h4,h5,h6') || []); } catch (e1) { hs = []; } // CHANGED:
+
+    var used = {}; // CHANGED:
+    var byNorm = {}; // CHANGED:
+    for (var i = 0; i < hs.length; i++) { // CHANGED:
+      var h = hs[i]; // CHANGED:
+      if (!h || h.nodeType !== 1) continue; // CHANGED:
+      var txt = String(h.textContent || '').trim(); // CHANGED:
+      if (!txt) continue; // CHANGED:
+
+      var base = makeAnchorIdFromText(txt); // CHANGED:
+      if (!base) continue; // CHANGED:
+
+      var id = base; // CHANGED:
+      var n = 2; // CHANGED:
+      while (used[id] || document.getElementById(id)) { // CHANGED:
+        id = base + '-' + n; // CHANGED:
+        n++; // CHANGED:
+      } // CHANGED:
+      used[id] = true; // CHANGED:
+
+      // Only override existing IDs if empty OR previously auto-generated by us. // CHANGED:
+      var current = ''; // CHANGED:
+      try { current = String(h.getAttribute('id') || '').trim(); } catch (e2) { current = ''; } // CHANGED:
+      if (!current || current.indexOf('ppa-h-') === 0) { // CHANGED:
+        try { h.setAttribute('id', id); } catch (e3) {} // CHANGED:
+      } else { // CHANGED:
+        // Keep the existing id, but still ensure uniqueness map. // CHANGED:
+        id = current; // CHANGED:
+      } // CHANGED:
+
+      var norm = normalizeComparableText(txt); // CHANGED:
+      if (norm && !byNorm[norm]) byNorm[norm] = id; // CHANGED:
+    } // CHANGED:
+
+    return { headings: hs, byNorm: byNorm }; // CHANGED:
+  } // CHANGED:
+
+  function renderOutlineAsOrderedList(pane, outlineItems, headingMap) { // CHANGED:
+    if (!pane || pane.nodeType !== 1) return; // CHANGED:
+    var outlineEl = null; // CHANGED:
+    try { outlineEl = pane.querySelector('.ppa-outline'); } catch (e0) { outlineEl = null; } // CHANGED:
+    if (!outlineEl) return; // CHANGED:
+
+    var items = parseOutlineItems(outlineItems); // CHANGED:
+    if (!items.length) return; // CHANGED:
+
+    var byNorm = (headingMap && headingMap.byNorm) ? headingMap.byNorm : {}; // CHANGED:
+
+    var html = '<ol class="ppa-outline-list">'; // CHANGED:
+    for (var i = 0; i < items.length; i++) { // CHANGED:
+      var label = String(items[i] || '').trim(); // CHANGED:
+      if (!label) continue; // CHANGED:
+      var id = ''; // CHANGED:
+      var norm = normalizeComparableText(label); // CHANGED:
+      if (norm && byNorm[norm]) id = String(byNorm[norm] || ''); // CHANGED:
+
+      if (id) { // CHANGED:
+        html += '<li><a href="#' + escAttr(id) + '">' + escHtml(label) + '</a></li>'; // CHANGED:
+      } else { // CHANGED:
+        // If we can't match, still render the item (no broken link). // CHANGED:
+        html += '<li>' + escHtml(label) + '</li>'; // CHANGED:
+      } // CHANGED:
+    } // CHANGED:
+    html += '</ol>'; // CHANGED:
+
+    outlineEl.innerHTML = html; // CHANGED:
+  } // CHANGED:
+
+  function wireOutlineLinks(pane) { // CHANGED:
+    // Uses outline items (from data attribute) and wires them to body headings. // CHANGED:
+    if (!pane || pane.nodeType !== 1) return; // CHANGED:
+    var outlineEl = null; // CHANGED:
+    try { outlineEl = pane.querySelector('.ppa-outline'); } catch (e0) { outlineEl = null; } // CHANGED:
+    if (!outlineEl) return; // CHANGED:
+
+    var items = null; // CHANGED:
+    try { items = outlineEl.getAttribute('data-ppa-outline-items'); } catch (e1) { items = null; } // CHANGED:
+
+    var parsed = null; // CHANGED:
+    if (items) { // CHANGED:
+      try { parsed = JSON.parse(items); } catch (e2) { parsed = items; } // CHANGED:
+    } // CHANGED:
+
+    var headingMap = assignHeadingIds(pane); // CHANGED:
+    renderOutlineAsOrderedList(pane, parsed || outlineEl.textContent || '', headingMap); // CHANGED:
+  } // CHANGED:
+
   function buildPreviewHtml(result) {
     var title = '';
-    var outline = '';
+    var outlineRaw = null; // CHANGED:
+    var outlineStr = ''; // CHANGED:
     var bodyMd = '';
     var meta = null;
 
     if (result && typeof result === 'object') {
       title = String(result.title || '').trim();
-      outline = String(result.outline || '');
+      outlineRaw = (Object.prototype.hasOwnProperty.call(result, 'outline') ? result.outline : null); // CHANGED:
+      outlineStr = (typeof result.outline === 'string') ? String(result.outline || '') : ''; // CHANGED:
       bodyMd = String(result.body_markdown || result.body || '');
       meta = result.meta || result.seo || null;
     }
 
     title = ppaCleanTitle(title); // CHANGED:
-    if (title) { // CHANGED:
-      outline = stripTitleFromOutline(outline, title); // CHANGED:
-      bodyMd = stripLeadingTitleFromMarkdown(bodyMd, title); // CHANGED:
-    } // CHANGED:
+
+    // If outline is a string, de-dupe title from it (array items handled later). // CHANGED:
+    if (title && outlineStr) outlineStr = stripTitleFromOutline(outlineStr, title); // CHANGED:
+    if (title) bodyMd = stripLeadingTitleFromMarkdown(bodyMd, title); // CHANGED:
 
     var html = '';
     html += '<div class="ppa-preview">';
     if (title) html += '<h2>' + escHtml(title) + '</h2>';
-    if (outline) { // CHANGED:
-      // Wrap so the Outline toggle can hide/show the whole block cleanly. // CHANGED:
+
+    // Outline block (we render placeholder; wiring happens after DOM insert). // CHANGED:
+    var outlineItems = parseOutlineItems(outlineRaw || outlineStr); // CHANGED:
+    if (outlineItems && outlineItems.length) { // CHANGED:
       html += '<div class="ppa-outline-wrap" data-ppa-outline-wrap="1">'; // CHANGED:
       html += '<h3>Outline</h3>'; // CHANGED:
-      html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>'; // CHANGED:
+      html += '<div class="ppa-outline" data-ppa-outline-items="' + escAttr(JSON.stringify(outlineItems)) + '"></div>'; // CHANGED:
       html += '</div>'; // CHANGED:
     } // CHANGED:
+
     if (bodyMd) {
       html += '<h3>Body</h3>';
       html += '<div class="ppa-body">' + markdownToHtml(bodyMd) + '</div>';
@@ -974,9 +1126,13 @@
     }
     pane.innerHTML = html;
 
+    // ✅ 1) Add heading ID assignment + outline link wiring                 // CHANGED:
+    // Must run immediately after HTML lands in the DOM.                      // CHANGED:
+    wireOutlineLinks(pane); // CHANGED:
+
     hardenPreviewLists(pane); // CHANGED: restore bullets + wrap inside preview pane only
 
-    fixLinks(pane); // CHANGED: enforce safe, clickable links in preview
+    fixLinks(pane); // CHANGED: enforce safe links (hash links stay in-pane) // CHANGED:
     applyOutlineVisibility(pane); // CHANGED: hide/show Outline based on toggle
 
     try { pane.focus(); } catch (e2) {}
