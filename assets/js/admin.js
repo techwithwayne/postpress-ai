@@ -4,6 +4,7 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2026-01-10.1: FIX: Remove stray `listStylePosition == 'outside'` line that can trigger JS parse errors in production builds/cached variants. // CHANGED:
  * 2026-01-09.1: UX: Outline now renders as an ORDERED list (<ol>), and each outline item links to its corresponding heading in the Body. Adds automatic heading-id wiring + de-dupe. // CHANGED:
  * 2026-01-03.1: FIX: De-dupe redundant title line in Outline/Body for Preview + Generate autofill. No endpoint/payload changes. // CHANGED:
  * 2026-01-07.1: UX: Add Outline toggle + safe Markdown/URL links in preview (target=_blank). No endpoint/payload changes. // CHANGED:
@@ -54,7 +55,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-09.1'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-10.1'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -607,7 +608,6 @@
   }
 
   // ---- Payload builders ----------------------------------------------------
-
   function buildPreviewPayload() {
     var subject = $('#ppa-subject');
     var brief   = $('#ppa-brief');
@@ -632,7 +632,6 @@
       _js_ver: PPA_JS_VER
     };
 
-    // Optional: pass tags/categories if present on the page
     var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
     var catsEl = $('#ppa-categories') || $('#post_category');
     if (tagsEl) {
@@ -650,7 +649,6 @@
       })();
     }
 
-    // Optional meta fields
     var focusEl = $('#yoast_wpseo_focuskw_text_input');
     var metaEl  = $('#yoast_wpseo_metadesc');
     payload.meta = {
@@ -670,7 +668,6 @@
 
   function extractExcerptFromHtml(html) {
     var h = String(html || '');
-    // first paragraph
     var m = h.match(/<p[^>]*>(.*?)<\/p>/i);
     if (!m) return '';
     return String(m[1] || '').replace(/<[^>]+>/g,'').trim();
@@ -691,18 +688,15 @@
       _js_ver: PPA_JS_VER
     };
 
-    // Optional: post id if present
     var postId = $('#post_ID');
     if (postId && postId.value) payload.post_id = String(postId.value);
 
-    // Optional: status override from UI
     var statusEl = $('#ppa-status');
     var modeVal = statusEl ? String(statusEl.value || '').trim() : '';
     if (modeVal) {
       payload.mode = modeVal;
     }
 
-    // If editor is empty, use Preview HTML and auto-fill
     if (!payload.content || !String(payload.content).trim()) {
       var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
@@ -714,7 +708,6 @@
       }
     }
 
-    // Optional meta fields
     var focusEl2 = $('#yoast_wpseo_focuskw_text_input');
     var metaEl2  = $('#yoast_wpseo_metadesc');
     payload.meta = {
@@ -742,7 +735,6 @@
   var btnPublish  = document.getElementById('ppa-publish');
   var btnGenerate = document.getElementById('ppa-generate');
 
-  // Repurpose Generate as the main preview button and hide the old Preview.
   (function adaptGenerateAsPreview(){
     if (btnPreview) {
       try { btnPreview.style.display = 'none'; } catch (e) {}
@@ -755,12 +747,10 @@
 
   ensureOutlineToggleControl(); // CHANGED: insert Outline toggle UI
 
-  // Ensure we always have a notice container above the main buttons
   function noticeContainer() {
     var el = document.getElementById('ppa-toolbar-msg');
     if (el) return el;
 
-    // Try to anchor it in the same row as the primary buttons
     var host = null;
     if (btnGenerate && btnGenerate.parentNode) {
       host = btnGenerate.parentNode;
@@ -879,10 +869,8 @@
   }
 
   function hardenPreviewLists(pane) { // CHANGED:
-    // WP admin CSS frequently resets ul/ol styles. We only fix inside the preview pane to avoid global side-effects. // CHANGED:
     if (!pane || pane.nodeType !== 1) return; // CHANGED:
-    var scope = null; // CHANGED:
-    scope = pane; // CHANGED: style lists across the entire preview pane (Outline + Body), not only the first .ppa-body
+    var scope = pane; // CHANGED:
 
     var lists = []; // CHANGED:
     try { lists = Array.prototype.slice.call(scope.querySelectorAll('ul, ol') || []); } catch (e1) { lists = []; } // CHANGED:
@@ -890,11 +878,8 @@
       var list = lists[i]; // CHANGED:
       if (!list || list.nodeType !== 1) continue; // CHANGED:
       try { // CHANGED:
-        list.style.listStylePosition == 'outside'; // CHANGED: (typo prevention: keep correct below)
-      } catch (eT) {} // CHANGED:
-      try { // CHANGED:
         list.style.listStylePosition = 'outside'; // CHANGED:
-        list.style.paddingLeft = '1.25em'; // CHANGED: ensures markers are not clipped
+        list.style.paddingLeft = '1.25em'; // CHANGED:
         list.style.marginLeft = '0.75em'; // CHANGED:
         list.style.maxWidth = '100%'; // CHANGED:
         list.style.boxSizing = 'border-box'; // CHANGED:
@@ -919,9 +904,7 @@
   } // CHANGED:
 
   // ---- Outline → Heading link wiring -------------------------------------- // CHANGED:
-
   function parseOutlineItems(outlineMaybeArrayOrString) { // CHANGED:
-    // Accept: array, comma-separated string, newline string, markdown-ish bullets. // CHANGED:
     if (!outlineMaybeArrayOrString) return []; // CHANGED:
     if (Array.isArray(outlineMaybeArrayOrString)) { // CHANGED:
       return outlineMaybeArrayOrString.map(function (x) { return String(x || '').trim(); }).filter(Boolean); // CHANGED:
@@ -930,12 +913,10 @@
     var s = String(outlineMaybeArrayOrString || '').trim(); // CHANGED:
     if (!s) return []; // CHANGED:
 
-    // If it looks comma-separated with no newlines, split commas. // CHANGED:
     if (s.indexOf('\n') === -1 && s.indexOf(',') !== -1) { // CHANGED:
       return s.split(',').map(function (x) { return String(x || '').trim(); }).filter(Boolean); // CHANGED:
     } // CHANGED:
 
-    // Otherwise split lines + strip common bullet prefixes. // CHANGED:
     var lines = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n'); // CHANGED:
     var out = []; // CHANGED:
     for (var i = 0; i < lines.length; i++) { // CHANGED:
@@ -961,7 +942,6 @@
   } // CHANGED:
 
   function assignHeadingIds(pane) { // CHANGED:
-    // Assign stable IDs to headings inside the Body so outline can link to them. // CHANGED:
     if (!pane || pane.nodeType !== 1) return { headings: [], byNorm: {} }; // CHANGED:
     var body = null; // CHANGED:
     try { body = pane.querySelector('.ppa-body'); } catch (e0) { body = null; } // CHANGED:
@@ -989,13 +969,11 @@
       } // CHANGED:
       used[id] = true; // CHANGED:
 
-      // Only override existing IDs if empty OR previously auto-generated by us. // CHANGED:
       var current = ''; // CHANGED:
       try { current = String(h.getAttribute('id') || '').trim(); } catch (e2) { current = ''; } // CHANGED:
       if (!current || current.indexOf('ppa-h-') === 0) { // CHANGED:
         try { h.setAttribute('id', id); } catch (e3) {} // CHANGED:
       } else { // CHANGED:
-        // Keep the existing id, but still ensure uniqueness map. // CHANGED:
         id = current; // CHANGED:
       } // CHANGED:
 
@@ -1028,7 +1006,6 @@
       if (id) { // CHANGED:
         html += '<li><a href="#' + escAttr(id) + '">' + escHtml(label) + '</a></li>'; // CHANGED:
       } else { // CHANGED:
-        // If we can't match, still render the item (no broken link). // CHANGED:
         html += '<li>' + escHtml(label) + '</li>'; // CHANGED:
       } // CHANGED:
     } // CHANGED:
@@ -1038,7 +1015,6 @@
   } // CHANGED:
 
   function wireOutlineLinks(pane) { // CHANGED:
-    // Uses outline items (from data attribute) and wires them to body headings. // CHANGED:
     if (!pane || pane.nodeType !== 1) return; // CHANGED:
     var outlineEl = null; // CHANGED:
     try { outlineEl = pane.querySelector('.ppa-outline'); } catch (e0) { outlineEl = null; } // CHANGED:
@@ -1073,7 +1049,6 @@
 
     title = ppaCleanTitle(title); // CHANGED:
 
-    // If outline is a string, de-dupe title from it (array items handled later). // CHANGED:
     if (title && outlineStr) outlineStr = stripTitleFromOutline(outlineStr, title); // CHANGED:
     if (title) bodyMd = stripLeadingTitleFromMarkdown(bodyMd, title); // CHANGED:
 
@@ -1081,7 +1056,6 @@
     html += '<div class="ppa-preview">';
     if (title) html += '<h2>' + escHtml(title) + '</h2>';
 
-    // Outline block (we render placeholder; wiring happens after DOM insert). // CHANGED:
     var outlineItems = parseOutlineItems(outlineRaw || outlineStr); // CHANGED:
     if (outlineItems && outlineItems.length) { // CHANGED:
       html += '<div class="ppa-outline-wrap" data-ppa-outline-wrap="1">'; // CHANGED:
@@ -1119,27 +1093,21 @@
 
     var html = '';
     if (result && typeof result === 'object' && result.html) {
-      // If backend sends HTML, we honor it (no guessing). // CHANGED:
       html = String(result.html);
     } else {
       html = buildPreviewHtml(result);
     }
     pane.innerHTML = html;
 
-    // ✅ 1) Add heading ID assignment + outline link wiring                 // CHANGED:
-    // Must run immediately after HTML lands in the DOM.                      // CHANGED:
     wireOutlineLinks(pane); // CHANGED:
-
-    hardenPreviewLists(pane); // CHANGED: restore bullets + wrap inside preview pane only
-
-    fixLinks(pane); // CHANGED: enforce safe links (hash links stay in-pane) // CHANGED:
-    applyOutlineVisibility(pane); // CHANGED: hide/show Outline based on toggle
+    hardenPreviewLists(pane); // CHANGED:
+    fixLinks(pane); // CHANGED:
+    applyOutlineVisibility(pane); // CHANGED:
 
     try { pane.focus(); } catch (e2) {}
   }
 
   // ---- Response unwrapping --------------------------------------------------
-
   function unwrapWpAjax(body) {
     if (!body || typeof body !== 'object') return { hasEnvelope: false, success: null, data: body };
     if (Object.prototype.hasOwnProperty.call(body, 'success') && Object.prototype.hasOwnProperty.call(body, 'data')) {
@@ -1158,7 +1126,6 @@
   }
 
   // ---- Generate + Store -----------------------------------------------------
-
   function applyGenerateResult(result) {
     if (!result || typeof result !== 'object') return { titleFilled: false, excerptFilled: false, slugFilled: false };
 
@@ -1175,20 +1142,17 @@
       filled.titleFilled = true;
     }
 
-    // Fill content if empty
     var contentEl = $('#ppa-content') || $('#content');
     if (contentEl && (!String(contentEl.value || '').trim()) && bodyMd) {
       contentEl.value = markdownToHtml(bodyMd); // CHANGED:
     }
 
-    // Excerpt
     var excerptEl = $('#ppa-excerpt') || $('#excerpt');
     if (excerptEl && meta && meta.meta_description && !String(excerptEl.value || '').trim()) {
       excerptEl.value = String(meta.meta_description);
       filled.excerptFilled = true;
     }
 
-    // Slug
     var slugEl = $('#ppa-slug') || $('#post_name');
     if (slugEl && (!String(slugEl.value || '').trim())) {
       var s = '';
@@ -1200,7 +1164,6 @@
       }
     }
 
-    // Yoast best-effort
     var focusEl3 = $('#yoast_wpseo_focuskw_text_input');
     var metaEl3  = $('#yoast_wpseo_metadesc');
     if (focusEl3 && meta && meta.focus_keyphrase && !String(focusEl3.value || '').trim()) {
@@ -1292,7 +1255,6 @@
       a.target = '_blank'; // CHANGED:
       a.rel = 'noopener noreferrer'; // CHANGED:
 
-      // Prefer: immediately after the Save Draft (Store) button (btnDraft). // CHANGED:
       var wrap = document.getElementById('ppa-view-draft-wrap'); // CHANGED:
       if (!wrap) { // CHANGED:
         wrap = document.createElement('span'); // CHANGED:
@@ -1305,7 +1267,6 @@
         } catch (e0) {} // CHANGED:
       } // CHANGED:
 
-      // Ensure the anchor is inside our wrapper (so we can insert once). // CHANGED:
       try { // CHANGED:
         if (a.parentNode !== wrap) { // CHANGED:
           while (wrap.firstChild) wrap.removeChild(wrap.firstChild); // CHANGED:
@@ -1322,7 +1283,6 @@
         } // CHANGED:
       } catch (e2) { inserted = false; } // CHANGED:
 
-      // Fallback: append near toolbar notice container or composer root. // CHANGED:
       if (!inserted) { // CHANGED:
         try { // CHANGED:
           var msg = noticeContainer(); // CHANGED:
@@ -1338,7 +1298,6 @@
       } // CHANGED:
     } // CHANGED:
 
-    // Always update the URL + safety attrs. // CHANGED:
     try { a.href = href; } catch (e5) {} // CHANGED:
     try { a.target = '_blank'; } catch (e6) {} // CHANGED:
     try { a.rel = 'noopener noreferrer'; } catch (e7) {} // CHANGED:
@@ -1352,7 +1311,6 @@
     try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
   }
 
-  // Wire buttons
   if (btnDraft) {
     btnDraft.addEventListener('click', function (ev) {
       stopEvent(ev);
@@ -1364,8 +1322,6 @@
         return;
       }
 
-      // Popup-safe behavior: open a blank tab immediately on click, then navigate it on success. // CHANGED:
-      // This avoids popup blockers that would block window.open() inside async callbacks.         // CHANGED:
       var draftTab = null; // CHANGED:
       try { draftTab = window.open('about:blank', '_blank'); } catch (e0) { draftTab = null; } // CHANGED:
       if (draftTab) { // CHANGED:
@@ -1383,26 +1339,21 @@
           if (!res.ok || (wp.hasEnvelope && !wp.success)) {
             renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
-            // If we opened a blank tab for this action, close it on failure. // CHANGED:
             try { if (draftTab && !draftTab.closed) draftTab.close(); } catch (e3) {} // CHANGED:
             return;
           }
 
-          // Extract edit URL from the store response (multiple shapes supported), fallback to ID. // CHANGED:
           var edit = pickEditLink(data) || pickEditLink(res.body); // CHANGED:
           var pid = pickId(data) || pickId(res.body); // CHANGED:
           if (!edit && pid) edit = buildWpEditUrlFromId(pid); // CHANGED:
 
-          // Always create/update the "View Draft" link (if we can resolve an edit URL). // CHANGED:
           if (edit) upsertViewDraftLink(edit); // CHANGED:
 
-          // Navigate the already-opened tab to the edit screen (popup-safe). // CHANGED:
           if (draftTab) { // CHANGED:
             if (edit) { // CHANGED:
               try { draftTab.location.href = String(edit); } catch (e4) { try { draftTab.location = String(edit); } catch (e5) {} } // CHANGED:
               try { draftTab.focus(); } catch (e6) {} // CHANGED:
             } else { // CHANGED:
-              // If no URL could be derived, don't leave a blank tab open. // CHANGED:
               try { if (!draftTab.closed) draftTab.close(); } catch (e7) {} // CHANGED:
             } // CHANGED:
           } // CHANGED:
@@ -1461,7 +1412,6 @@
       if (clickGuard(btnGenerate)) return;
       console.info('PPA: Generate clicked');
 
-      // Reuse preview payload so subject/brief/genre/tone/word_count all flow through.
       var probe = buildPreviewPayload();
       if (!String(probe.title || '').trim() &&
           !String(probe.text || '').trim() &&
@@ -1501,7 +1451,6 @@
     }, true);
   }
 
-  // ---- Export Surface (window.PPAAdmin) -------------------------------------
   window.PPAAdmin = window.PPAAdmin || {};
   window.PPAAdmin.apiPost = apiPost;
   window.PPAAdmin.postGenerate = function () { return apiPost('ppa_generate', buildPreviewPayload()); };
@@ -1510,7 +1459,6 @@
   window.PPAAdmin.renderPreview = renderPreview;
   window.PPAAdmin._js_ver = PPA_JS_VER;
 
-  // ---- Module Bridge (parity) ----------------------------------------------
   (function patchModuleBridge(){
     try {
       window.PPAAdminModules = window.PPAAdminModules || {};
