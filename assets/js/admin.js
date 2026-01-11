@@ -1044,6 +1044,23 @@
       outlineRaw = (Object.prototype.hasOwnProperty.call(result, 'outline') ? result.outline : null); // CHANGED:
       outlineStr = (typeof result.outline === 'string') ? String(result.outline || '') : ''; // CHANGED:
       bodyMd = String(result.body_markdown || result.body || '');
+    // CHANGED: Strip duplicated title heading from bodyMd (ATX + Setext) before conversion.
+    try {
+      var __t = String(title || '').trim();
+      if (__t) {
+        var __tn = __t.toLowerCase().replace(/\s+/g,' ').trim();
+        // ATX: # Title / ## Title / ...
+        bodyMd = String(bodyMd || '').replace(/^\s*(#{1,6})\s*(.+?)\s*#*\s*(\r?\n)+/, function(m, hashes, htxt, nl) {
+          var __hn = String(htxt || '').toLowerCase().replace(/\s+/g,' ').trim();
+          return (__hn === __tn) ? '' : m;
+        });
+        // Setext: Title\n=====
+        bodyMd = String(bodyMd || '').replace(/^\s*([^\r\n]+)\r?\n([=-]{2,})\r?\n+/, function(m, line1) {
+          var __hn = String(line1 || '').toLowerCase().replace(/\s+/g,' ').trim();
+          return (__hn === __tn) ? '' : m;
+        });
+      }
+    } catch(e) {}
       meta = result.meta || result.seo || null;
     }
 
@@ -1054,8 +1071,7 @@
 
     var html = '';
     html += '<div class="ppa-preview">';
-    if (title) html += '<h2>' + escHtml(title) + '</h2>';
-
+    // CHANGED: Do NOT inject title into body HTML. Title is post_title only.
     var outlineItems = parseOutlineItems(outlineRaw || outlineStr); // CHANGED:
     if (outlineItems && outlineItems.length) { // CHANGED:
       html += '<div class="ppa-outline-wrap" data-ppa-outline-wrap="1">'; // CHANGED:
@@ -1131,6 +1147,23 @@
 
     var title = ppaCleanTitle(result.title || '');
     var bodyMdRaw = String(result.body_markdown || result.body || ''); // CHANGED:
+    // CHANGED: Strip duplicated title heading from bodyMdRaw (ATX + Setext) before conversion.
+    try {
+      var __t = String(title || '').trim();
+      if (__t) {
+        var __tn = __t.toLowerCase().replace(/\s+/g,' ').trim();
+        // ATX: # Title / ## Title / ...
+        bodyMdRaw = String(bodyMdRaw || '').replace(/^\s*(#{1,6})\s*(.+?)\s*#*\s*(\r?\n)+/, function(m, hashes, htxt, nl) {
+          var __hn = String(htxt || '').toLowerCase().replace(/\s+/g,' ').trim();
+          return (__hn === __tn) ? '' : m;
+        });
+        // Setext: Title\n=====
+        bodyMdRaw = String(bodyMdRaw || '').replace(/^\s*([^\r\n]+)\r?\n([=-]{2,})\r?\n+/, function(m, line1) {
+          var __hn = String(line1 || '').toLowerCase().replace(/\s+/g,' ').trim();
+          return (__hn === __tn) ? '' : m;
+        });
+      }
+    } catch(e) {}
     var bodyMd = title ? stripLeadingTitleFromMarkdown(bodyMdRaw, title) : bodyMdRaw; // CHANGED:
     var meta = result.meta || result.seo || {};
 
