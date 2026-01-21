@@ -21,3 +21,5 @@ node_modules/
 uploads/
 vendor/
 wp-content/uploads/
+
+php_errorlog
