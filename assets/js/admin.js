@@ -5,43 +5,25 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2026-01-22: FIX: Remove duplicate title from Preview output by stripping leading title heading from body_markdown
- *            BEFORE rendering. Title remains only in the WP title field. Preview does NOT inject title into body HTML. // CHANGED:
+ * 2026-01-22: HARDEN: Bulletproof notices (always visible) — inject a top-of-screen notice host + alert() fallback. // CHANGED:
+ * 2026-01-22: HARDEN: Delegate click handlers at document CAPTURE level so Generate/Store buttons always work even if DOM loads late/re-renders. // CHANGED:
+ * 2026-01-22: HARDEN: Always include Audience + Optional Brief + core fields in ALL payloads (Generate + Store) + client-side audience guard. // CHANGED:
+ * 2026-01-22: FIX: Remove duplicate title from Preview output by stripping leading title heading from body_markdown BEFORE rendering. // CHANGED:
+ * 2026-01-22: FIX: "Show Outline" checkbox now works (localStorage pref + real-time toggle + Save Draft respects it). // CHANGED:
+ * 2026-01-22: FIX: Save Draft (Store) opens the WP draft editor in a NEW TAB (popup-safe) and never leaves a blank tab behind. // CHANGED:
+ * 2026-01-22: FIX: Remove a ReferenceError in Publish handler (pubTab was undefined) which could break all subsequent JS. // CHANGED:
+ * 2026-01-22: FIX: Outline rendering is now resilient if Django returns outline as an array (normalized contract). // CHANGED:
  *
- * 2026-01-22: FIX: "Show Outline" checkbox now works:
- *            - Reads stored preference on page load (localStorage) // CHANGED:
- *            - Toggles outline section in real-time in preview // CHANGED:
- *            - Persists across refresh, and Save Draft respects the preference // CHANGED:
- *
- * 2026-01-22: FIX: Save Draft (Store) now opens the WP draft editor in a NEW TAB (popup-safe).     // CHANGED:
- *            - Synchronously opens about:blank on real click                                         // CHANGED:
- *            - After async store success, navigates that same tab to edit_link (or fallback).        // CHANGED:
- *            - If store fails, closes the blank tab.                                                 // CHANGED:
- *            - Composer tab stays on the composer screen (no same-tab redirect).                     // CHANGED:
- *            - Uses document-level CAPTURE listener and stops propagation to beat competing handlers.// CHANGED:
- *
- * 2026-01-22: FIX: Blank tab stays blank when the handle is lost or URL is missing.                 // CHANGED:
- *            - Create a unique window name at click-time and store it                                // CHANGED:
- *            - Navigate via handle when possible, else via window.open(url, windowName)             // CHANGED:
- *            - Add explicit console logs showing edit_link / post_id / final URL                     // CHANGED:
- *
- * 2026-01-21: FIX: Add missing ensureAutoHelperNotes() and wire it so the "Auto sends 'auto'..." helper text
- *            becomes ONE single note spanning Genre + Tone + Word Count. Hide duplicates safely. // CHANGED:
- *            FIX: Composer root detection is now robust (#ppa-composer OR [data-ppa-composer] OR .ppa-composer)
- *            so admin.js doesn't idle when the ID differs. // CHANGED:
- *
- * 2025-12-25.2: FIX ppa_store 400: send JSON-body transport for ppa_store (same as ppa_generate) so PHP proxy reads valid JSON from php://input and forwards object-root to Django. This resolves Django “Root must be an object” and unblocks Save Draft redirects. // CHANGED:
- * 2025-12-25.1: FIX Save Draft (Store): ensure local WP draft is created by sending status + target_sites in store payload; redirect to edit_link (or fallback edit URL) after successful store. Also fix status dropdown incorrectly overwriting payload.mode; improve edit_link/id extraction from nested response shapes. // CHANGED:
- * 2025-12-22.1: Preview outline cleanup… // CHANGED:
- * 2025-12-27.1: FIX nonce lookup order: prefer window.PPA.nonce first for admin AJAX (ppa_usage_snapshot, etc.). No other behavior changes. // CHANGED:
+ * Locked rules respected:
+ * - Composer CSS is “gospel” and is NOT modified here.
  */
 
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-22.5'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-22.8'; // CHANGED:
 
-  // Abort if composer root is missing (defensive)
+  // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
   var root =
     document.getElementById('ppa-composer') || // CHANGED:
@@ -53,8 +35,8 @@
     return;
   }
 
-  // Ensure toolbar message acts as a live region (A11y)
-  (function ensureLiveRegion(){
+  // Ensure toolbar message acts as a live region (A11y).
+  (function ensureLiveRegion() {
     var msg = document.getElementById('ppa-toolbar-msg');
     if (!msg) return;
     try {
@@ -80,7 +62,7 @@
     return __ppaPreviewPane;
   }
 
-  (function ensurePreviewPaneFocusable(){
+  (function ensurePreviewPaneFocusable() {
     var pane = getPreviewPane();
     if (pane && !pane.hasAttribute('tabindex')) pane.setAttribute('tabindex', '-1');
   })();
@@ -99,7 +81,7 @@
   }
 
   function getNonce() {
-    // NEW ORDER (LOCKED): window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
+    // LOCKED ORDER: window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
     if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce); // CHANGED:
     if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce); // CHANGED:
     var el = $('#ppa-nonce');
@@ -153,7 +135,8 @@
 
     var headers = {
       'X-Requested-With': 'XMLHttpRequest',
-      'X-PPA-View': (window.ppaAdmin && window.ppaAdmin.view) ? String(window.ppaAdmin.view) : 'composer'
+      'X-PPA-View': (window.ppaAdmin && window.ppaAdmin.view) ? String(window.ppaAdmin.view) : 'composer',
+      'X-PPA-JS': PPA_JS_VER // CHANGED:
     };
 
     var nonce = getNonce();
@@ -197,11 +180,11 @@
     });
   }
 
-  function escHtml(s){
+  function escHtml(s) {
     return String(s || '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
-  function escAttr(s){
+  function escAttr(s) {
     return String(s || '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -284,8 +267,113 @@
   }
 
   // -------------------------------------------------------------------------
+  // Bulletproof notices (always visible)
+  // -------------------------------------------------------------------------
+
+  function ensureTopNoticeHost() { // CHANGED:
+    var host = document.getElementById('ppa-top-notice-host'); // CHANGED:
+    if (host) return host; // CHANGED:
+
+    // Prefer WP admin .wrap; fallback to #wpbody-content; last resort body.
+    var wrap = document.querySelector('.wrap') || document.getElementById('wpbody-content') || document.body; // CHANGED:
+    if (!wrap) return null; // CHANGED:
+
+    host = document.createElement('div'); // CHANGED:
+    host.id = 'ppa-top-notice-host'; // CHANGED:
+    host.style.margin = '12px 0 0 0'; // CHANGED:
+
+    try {
+      wrap.insertBefore(host, wrap.firstChild); // CHANGED:
+    } catch (e0) {
+      try { document.body.insertBefore(host, document.body.firstChild); } catch (e1) {}
+    }
+    return host; // CHANGED:
+  }
+
+  function noticeContainer() {
+    // Prefer existing toolbar message if present; otherwise use the top notice host. // CHANGED:
+    var el = document.getElementById('ppa-toolbar-msg');
+    if (el) return el;
+
+    var topHost = ensureTopNoticeHost(); // CHANGED:
+    if (!topHost) return null; // CHANGED:
+
+    // Create a default notice node inside the host.
+    el = document.getElementById('ppa-top-notice'); // CHANGED:
+    if (el) return el; // CHANGED:
+
+    el = document.createElement('div'); // CHANGED:
+    el.id = 'ppa-top-notice'; // CHANGED:
+    el.className = 'ppa-notice'; // CHANGED:
+    try {
+      el.setAttribute('role', 'status'); // CHANGED:
+      el.setAttribute('aria-live', 'polite'); // CHANGED:
+      el.setAttribute('aria-atomic', 'true'); // CHANGED:
+    } catch (e2) {}
+    topHost.appendChild(el); // CHANGED:
+    return el; // CHANGED:
+  }
+
+  function renderNotice(type, message) {
+    var el = noticeContainer();
+    var msg = String(message == null ? '' : message);
+
+    if (!el) {
+      // Absolute fallback so you never miss critical validation issues. // CHANGED:
+      if (type === 'error' || type === 'warn') { try { window.alert(msg); } catch (e) {} } // CHANGED:
+      return;
+    }
+
+    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
+    el.textContent = msg;
+
+    // If hidden by CSS/layout, fallback to alert for warn/error. // CHANGED:
+    try {
+      if ((type === 'error' || type === 'warn') && el.offsetParent === null) { // CHANGED:
+        window.alert(msg); // CHANGED:
+      }
+    } catch (e0) {}
+  }
+
+  function renderNoticeTimed(type, message, ms) {
+    renderNotice(type, message);
+    var dur = parseInt(ms, 10);
+    if (!dur || dur < 250) dur = 2500;
+    window.setTimeout(function () { clearNotice(); }, dur);
+  }
+
+  function renderNoticeHtml(type, html) {
+    var el = noticeContainer();
+    if (!el) return;
+    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
+    el.innerHTML = String(html == null ? '' : html);
+  }
+
+  function renderNoticeTimedHtml(type, html, ms) {
+    renderNoticeHtml(type, html);
+    var dur = parseInt(ms, 10);
+    if (!dur || dur < 250) dur = 2500;
+    window.setTimeout(function () { clearNotice(); }, dur);
+  }
+
+  function clearNotice() {
+    var el = noticeContainer();
+    if (!el) return;
+    el.className = 'ppa-notice';
+    el.textContent = '';
+  }
+
+  function stopEvent(ev) {
+    if (!ev) return;
+    try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e1) {}
+    try { if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (e2) {}
+    try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
+  }
+
+  // -------------------------------------------------------------------------
   // Issue 1 (CHANGED): Strip duplicate title heading from body_markdown
   // -------------------------------------------------------------------------
+
   function ppaNormalizeComparableTitle(s) { // CHANGED:
     return String(s || '')
       .trim()
@@ -396,11 +484,11 @@
     // In case the checkbox is injected late, retry briefly.
     window.setTimeout(function () { // CHANGED:
       try { ppaBindShowOutlineCheckbox(); } catch (e1) {}
-    }, 50);
+    }, 50); // CHANGED:
     window.setTimeout(function () { // CHANGED:
       try { ppaBindShowOutlineCheckbox(); } catch (e2) {}
-    }, 250);
-  })();
+    }, 250); // CHANGED:
+  })(); // CHANGED:
 
   function ppaStripOutlineFromHtml(html) { // CHANGED:
     var s = String(html || '');
@@ -429,8 +517,6 @@
   // Goal: If the UI renders duplicate helper text under Genre and Tone like:
   //   Auto sends "auto" so PostPress AI chooses a best-fit genre...
   // We want ONE helper block spanning under Genre + Tone + Word Count.
-  // This is defensive: it tries multiple selector patterns and only acts
-  // when the three selects exist.
   // -------------------------------------------------------------------------
   function ensureAutoHelperNotes() { // CHANGED:
     try {
@@ -445,7 +531,6 @@
 
         var container = null; // CHANGED:
         try {
-          // Prefer a local field wrapper if your markup has one.
           container = (el.closest && el.closest('.ppa-field, .ppa-control, .ppa-form-row, .ppa-row, .form-field')) || el.parentNode; // CHANGED:
         } catch (e0) { container = el.parentNode; } // CHANGED:
 
@@ -473,7 +558,6 @@
             match = node; // CHANGED:
             break; // CHANGED:
           }
-          // Slightly more permissive fallback.
           if (t.indexOf('auto sends') !== -1 && t.indexOf('auto') !== -1 && t.indexOf('postpress ai') !== -1) { // CHANGED:
             match = node; // CHANGED:
             break; // CHANGED:
@@ -534,43 +618,77 @@
     } catch (e5) {}
   }
 
-  (function bootAutoHelperNotes(){ // CHANGED:
-    try { ensureAutoHelperNotes(); } catch (e0) {} // CHANGED:
-    window.setTimeout(function(){ // CHANGED:
-      try { ensureAutoHelperNotes(); } catch (e1) {} // CHANGED:
+  (function bootAutoHelperNotes() { // CHANGED:
+    try { ensureAutoHelperNotes(); } catch (e0) {}
+    window.setTimeout(function () { // CHANGED:
+      try { ensureAutoHelperNotes(); } catch (e1) {}
     }, 50); // CHANGED:
   })(); // CHANGED:
 
-  (function observeAutoHelperNotes(){ // CHANGED:
+  (function observeAutoHelperNotes() { // CHANGED:
     try {
-      if (!window.MutationObserver) return; // CHANGED:
+      if (!window.MutationObserver) return;
       var obs = new MutationObserver(function () { // CHANGED:
-        try { ensureAutoHelperNotes(); } catch (e2) {} // CHANGED:
-      }); // CHANGED:
-      obs.observe(root, { childList: true, subtree: true }); // CHANGED:
+        try { ensureAutoHelperNotes(); } catch (e2) {}
+      });
+      obs.observe(root, { childList: true, subtree: true });
     } catch (e3) {}
   })(); // CHANGED:
 
+  // -------------------------------------------------------------------------
+  // CHANGED: Centralized composer-field reader so Generate + Store always send the same core fields.
+  // Bulletproof goal: keep backend enforcement happy (audience required) and ensure brief is never "lost".
+  // -------------------------------------------------------------------------
+  function buildComposerMetaPayload() { // CHANGED:
+    var subjectEl  = $('#ppa-subject'); // CHANGED:
+    var briefEl    = $('#ppa-brief');   // CHANGED:
+    var genreEl    = $('#ppa-genre');   // CHANGED:
+    var toneEl     = $('#ppa-tone');    // CHANGED:
+    var wcEl       = $('#ppa-word-count'); // CHANGED:
+    var audienceEl = $('#ppa-audience'); // CHANGED:
+
+    var subject  = subjectEl  ? String(subjectEl.value  || '').trim() : ''; // CHANGED:
+    var brief    = briefEl    ? String(briefEl.value    || '').trim() : ''; // CHANGED:
+    var genre    = genreEl    ? String(genreEl.value    || '').trim() : ''; // CHANGED:
+    var tone     = toneEl     ? String(toneEl.value     || '').trim() : ''; // CHANGED:
+    var wc       = wcEl       ? String(wcEl.value       || '').trim() : ''; // CHANGED:
+    var audience = audienceEl ? String(audienceEl.value || '').trim() : ''; // CHANGED:
+
+    return { // CHANGED:
+      subject: subject, // CHANGED:
+      genre: genre, // CHANGED:
+      tone: tone, // CHANGED:
+      word_count: wc, // CHANGED:
+      audience: audience, // CHANGED:
+      brief: brief, // CHANGED:
+      keywords: readCsvValues($('#ppa-keywords')) // CHANGED:
+    }; // CHANGED:
+  } // CHANGED:
+
+  // If Django returns outline as array (normalized contract), render it nicely. // CHANGED:
+  function outlineToMarkdown(outlineVal) { // CHANGED:
+    if (!outlineVal) return '';
+    if (Array.isArray(outlineVal)) {
+      return outlineVal.map(function (s) { return '- ' + String(s || '').trim(); }).filter(Boolean).join('\n'); // CHANGED:
+    }
+    return String(outlineVal || '').trim();
+  }
+
   function buildPreviewPayload() {
-    var subject = $('#ppa-subject');
-    var brief   = $('#ppa-brief');
-    var genre   = $('#ppa-genre');
-    var tone    = $('#ppa-tone');
-    var wc      = $('#ppa-word-count');
-    var audience = $('#ppa-audience');
+    var meta = buildComposerMetaPayload(); // CHANGED:
 
     var payload = {
-      subject: subject ? String(subject.value || '').trim() : '',
-      title:   subject ? String(subject.value || '').trim() : '',
-      brief:   brief   ? String(brief.value   || '').trim() : '',
-      content: brief   ? String(brief.value   || '').trim() : '',
-      text:    brief   ? String(brief.value   || '').trim() : '',
-      html:    '',
-      genre:   genre ? String(genre.value || '').trim() : '',
-      tone:    tone  ? String(tone.value  || '').trim() : '',
-      word_count: wc ? String(wc.value || '').trim() : '',
-      audience: audience ? String(audience.value || '').trim() : '',
-      keywords: readCsvValues($('#ppa-keywords')),
+      subject: meta.subject,
+      title: meta.subject,
+      brief: meta.brief,
+      content: meta.brief,
+      text: meta.brief,
+      html: '',
+      genre: meta.genre,
+      tone: meta.tone,
+      word_count: meta.word_count,
+      audience: meta.audience,
+      keywords: meta.keywords,
       _js_ver: PPA_JS_VER
     };
 
@@ -635,6 +753,19 @@
       _js_ver: PPA_JS_VER
     };
 
+    // CHANGED: Always include the core composer fields on Store requests too.
+    // Keeps Generate/Store contracts aligned and ensures 'audience'/'brief' never go missing.
+    try { // CHANGED:
+      var meta = buildComposerMetaPayload(); // CHANGED:
+      payload.subject = meta.subject || ''; // CHANGED:
+      payload.genre = meta.genre || ''; // CHANGED:
+      payload.tone = meta.tone || ''; // CHANGED:
+      payload.word_count = meta.word_count || ''; // CHANGED:
+      payload.audience = meta.audience || ''; // CHANGED:
+      payload.brief = meta.brief || ''; // CHANGED:
+      payload.keywords = meta.keywords || []; // CHANGED:
+    } catch (eMeta) {} // CHANGED:
+
     var postId = $('#post_ID');
     if (postId && postId.value) payload.post_id = String(postId.value);
 
@@ -685,7 +816,7 @@
   var btnPublish  = document.getElementById('ppa-publish');
   var btnGenerate = document.getElementById('ppa-generate');
 
-  (function adaptGenerateAsPreview(){
+  (function adaptGenerateAsPreview() {
     if (btnPreview) {
       try { btnPreview.style.display = 'none'; } catch (e) {}
     }
@@ -694,68 +825,13 @@
     }
   })();
 
-  function noticeContainer() {
-    var el = document.getElementById('ppa-toolbar-msg');
-    if (el) return el;
-
-    var host = null;
-    if (btnGenerate && btnGenerate.parentNode) host = btnGenerate.parentNode;
-    else if (btnPreview && btnPreview.parentNode) host = btnPreview.parentNode;
-    else if (btnDraft && btnDraft.parentNode) host = btnDraft.parentNode;
-    else if (btnPublish && btnPublish.parentNode) host = btnPublish.parentNode;
-    if (!host) return null;
-
-    el = document.createElement('div');
-    el.id = 'ppa-toolbar-msg';
-    el.className = 'ppa-notice';
-    try {
-      el.setAttribute('role', 'status');
-      el.setAttribute('aria-live', 'polite');
-      el.setAttribute('aria-atomic', 'true');
-    } catch (e2) {}
-    host.insertBefore(el, host.firstChild);
-    return el;
-  }
-
-  function renderNotice(type, message) {
-    var el = noticeContainer();
-    if (!el) {
-      if (type === 'error' || type === 'warn') { try { window.alert(String(message || '')); } catch (e) {} }
-      return;
-    }
-    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
-    el.textContent = String(message == null ? '' : message);
-  }
-
-  function renderNoticeTimed(type, message, ms) {
-    renderNotice(type, message);
-    var dur = parseInt(ms, 10);
-    if (!dur || dur < 250) dur = 2500;
-    window.setTimeout(function () { clearNotice(); }, dur);
-  }
-
-  function renderNoticeHtml(type, html) {
-    var el = noticeContainer();
-    if (!el) return;
-    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
-    el.innerHTML = String(html == null ? '' : html);
-  }
-
-  function renderNoticeTimedHtml(type, html, ms) {
-    renderNoticeHtml(type, html);
-    var dur = parseInt(ms, 10);
-    if (!dur || dur < 250) dur = 2500;
-    window.setTimeout(function () { clearNotice(); }, dur);
-  }
-
-  function clearNotice() {
-    var el = noticeContainer();
-    if (!el) return;
-    el.className = 'ppa-notice';
-    el.textContent = '';
-  }
-
   function setButtonsDisabled(disabled) {
+    // Refresh refs in case the DOM re-rendered. // CHANGED:
+    btnPreview  = btnPreview  || document.getElementById('ppa-preview'); // CHANGED:
+    btnDraft    = btnDraft    || document.getElementById('ppa-draft'); // CHANGED:
+    btnPublish  = btnPublish  || document.getElementById('ppa-publish'); // CHANGED:
+    btnGenerate = btnGenerate || document.getElementById('ppa-generate'); // CHANGED:
+
     var dis = !!disabled;
     if (btnPreview)  btnPreview.disabled = dis;
     if (btnDraft)    btnDraft.disabled = dis;
@@ -847,7 +923,7 @@
   // OUTLINE (ordered list + anchor links)
   // ---------------------------------------------------------------------------
 
-  function ppaSlugifyHeading(text) { // CHANGED:
+  function ppaSlugifyHeading(text) {
     text = (text == null) ? '' : String(text);
     var s = text.trim().toLowerCase();
     s = s.replace(/[“”"']/g, '');
@@ -858,7 +934,7 @@
     return s || 'section';
   }
 
-  function ppaEnsureUniqueId(el, used) { // CHANGED:
+  function ppaEnsureUniqueId(el, used) {
     if (!el || el.nodeType !== 1) return '';
     used = used || {};
     var base = el.id ? String(el.id) : ppaSlugifyHeading(el.textContent || '');
@@ -874,7 +950,7 @@
     return id;
   }
 
-  function ppaCollectHeadings(pane) { // CHANGED:
+  function ppaCollectHeadings(pane) {
     if (!pane || pane.nodeType !== 1) return [];
     var body = null;
     try { body = pane.querySelector('.ppa-body'); } catch (e) { body = null; }
@@ -903,7 +979,7 @@
     return out;
   }
 
-  function ppaParseOutlineText(outlineText) { // CHANGED:
+  function ppaParseOutlineText(outlineText) {
     outlineText = (outlineText == null) ? '' : String(outlineText);
     var txt = outlineText.trim();
     if (!txt) return [];
@@ -921,7 +997,7 @@
     return [txt];
   }
 
-  function ppaHydrateOutline(pane, result) { // CHANGED:
+  function ppaHydrateOutline(pane, result) {
     if (!pane || pane.nodeType !== 1) return;
 
     var outlineBox = null;
@@ -939,7 +1015,7 @@
         items.push({ text: h.text, id: id });
       }
     } else {
-      var outlineText = (result && result.outline) ? result.outline : '';
+      var outlineText = (result && result.outline) ? outlineToMarkdown(result.outline) : ''; // CHANGED:
       var parts = ppaParseOutlineText(outlineText);
       for (var j = 0; j < parts.length; j++) {
         items.push({ text: parts[j], id: '' });
@@ -960,8 +1036,8 @@
       }
     }
 
-    var ol = document.createElement('ol'); // CHANGED:
-    ol.className = 'ppa-outline-list'; // CHANGED:
+    var ol = document.createElement('ol');
+    ol.className = 'ppa-outline-list';
 
     for (var k = 0; k < items.length; k++) {
       var it = items[k];
@@ -983,7 +1059,7 @@
     outlineBox.innerHTML = '';
     outlineBox.appendChild(ol);
 
-    outlineBox.onclick = function(ev) { // CHANGED:
+    outlineBox.onclick = function(ev) {
       try {
         var t = ev.target;
         if (!t) return;
@@ -1005,11 +1081,11 @@
     var outline = '';
     var bodyMd = '';
     var meta = null;
-    var title = ''; // CHANGED: still used for de-dup, but NOT rendered in preview.
+    var title = '';
 
     if (result && typeof result === 'object') {
-      title = String(result.title || '').trim(); // CHANGED:
-      outline = String(result.outline || '');
+      title = String(result.title || '').trim();
+      outline = outlineToMarkdown(result.outline); // CHANGED:
       bodyMd = String(result.body_markdown || result.body || '');
       meta = result.meta || result.seo || null;
     }
@@ -1025,10 +1101,10 @@
 
     // Outline section (wrapped so we can toggle cleanly)
     if (outline) {
-      html += '<div class="ppa-outline-section">'; // CHANGED:
+      html += '<div class="ppa-outline-section">';
       html += '<h3>Outline</h3>';
       html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>';
-      html += '</div>'; // CHANGED:
+      html += '</div>';
     }
 
     if (bodyMd) {
@@ -1070,10 +1146,10 @@
     hardenPreviewLists(pane);
 
     // CHANGED: Apply outline visibility preference immediately after rendering.
-    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV) {} // CHANGED:
+    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV) {}
 
-    try { ppaHydrateOutline(pane, result); } catch (eO) {} // CHANGED:
-    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV2) {} // CHANGED: re-apply after hydration
+    try { ppaHydrateOutline(pane, result); } catch (eO) {}
+    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV2) {}
     try { pane.focus(); } catch (e2) {}
   }
 
@@ -1102,7 +1178,7 @@
     var meta = result.meta || result.seo || {};
 
     // CHANGED: Strip duplicate title heading from body markdown before converting to HTML.
-    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title); // CHANGED:
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title);
 
     var filled = { titleFilled: false, excerptFilled: false, slugFilled: false };
 
@@ -1208,89 +1284,84 @@
     return '/wp-admin/post.php?post=' + String(pid) + '&action=edit';
   }
 
-  function stopEvent(ev) {
-    if (!ev) return;
-    try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e1) {}
-    try { if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (e2) {}
-    try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
-  }
-
   // -------------------------------------------------------------------------
-  // CHANGED: Save Draft NEW TAB flow (popup-safe + window-name fallback)
+  // Save Draft NEW TAB flow (popup-safe + window-name fallback)
   // -------------------------------------------------------------------------
 
-  function absolutizeUrl(url) { // CHANGED:
-    var u = String(url || '').trim(); // CHANGED:
-    if (!u) return ''; // CHANGED:
-    if (u.indexOf('http://') === 0 || u.indexOf('https://') === 0) return u; // CHANGED:
-    if (u.charAt(0) === '/') { // CHANGED:
-      try { return String(window.location.origin || '') + u; } catch (e0) { return u; } // CHANGED:
+  function absolutizeUrl(url) {
+    var u = String(url || '').trim();
+    if (!u) return '';
+    if (u.indexOf('http://') === 0 || u.indexOf('https://') === 0) return u;
+    if (u.charAt(0) === '/') {
+      try { return String(window.location.origin || '') + u; } catch (e0) { return u; }
     }
-    return u; // CHANGED:
+    return u;
   }
 
-  function openDraftTabSync() { // CHANGED:
+  function openDraftTabSync() {
     // MUST be synchronous in the click handler to avoid popup blockers.
-    // We also store a unique name so we can target the tab later even if handle is flaky. // CHANGED:
-    var w = null; // CHANGED:
-    var name = 'ppa_draft_' + String(Date.now ? Date.now() : (new Date()).getTime()); // CHANGED:
+    var w = null;
+    var name = 'ppa_draft_' + String(Date.now ? Date.now() : (new Date()).getTime());
+    try { w = window.open('about:blank', name); } catch (e) { w = null; }
+    try { if (w) w.opener = null; } catch (e2) {}
+    try { window.__PPA_DRAFT_TAB = w; } catch (e3) {}
+    try { window.__PPA_DRAFT_TAB_NAME = name; } catch (e4) {}
+    return { win: w, name: name };
+  }
+
+  function navigateDraftTarget(draftWin, draftName, url) {
+    var u = absolutizeUrl(url);
+    if (!u) return false;
+
+    if (draftWin) {
+      try { draftWin.location.replace(String(u)); return true; } catch (e0) {}
+      try { draftWin.location.href = String(u); return true; } catch (e1) {}
+    }
+    if (draftName) {
+      try { window.open(String(u), String(draftName)); return true; } catch (e2) {}
+    }
+    return false;
+  }
+
+  function closeDraftTab(draftWin) {
+    if (!draftWin) return;
+    try { draftWin.close(); } catch (e0) {}
+  }
+
+  function requireAudienceOrWarn() { // CHANGED:
     try {
-      w = window.open('about:blank', name); // CHANGED:
-    } catch (e) { w = null; }
-
-    // Security: remove opener, but KEEP the window handle. // CHANGED:
-    try { if (w) w.opener = null; } catch (e2) {} // CHANGED:
-
-    // Persist for diagnostics / fallback targeting. // CHANGED:
-    try { window.__PPA_DRAFT_TAB = w; } catch (e3) {} // CHANGED:
-    try { window.__PPA_DRAFT_TAB_NAME = name; } catch (e4) {} // CHANGED:
-
-    return { win: w, name: name }; // CHANGED:
-  }
-
-  function navigateDraftTarget(draftWin, draftName, url) { // CHANGED:
-    var u = absolutizeUrl(url); // CHANGED:
-    if (!u) return false; // CHANGED:
-
-    // 1) Prefer direct handle navigation. // CHANGED:
-    if (draftWin) { // CHANGED:
-      try { draftWin.location.replace(String(u)); return true; } catch (e0) {} // CHANGED:
-      try { draftWin.location.href = String(u); return true; } catch (e1) {} // CHANGED:
+      var meta = buildComposerMetaPayload();
+      if (!String(meta.audience || '').trim()) {
+        renderNotice('warn', 'Target audience is required.');
+        return false;
+      }
+    } catch (e0) {
+      // If something goes sideways, fail safely and allow the backend guard to respond.
+      return true;
     }
-
-    // 2) Fallback: target the already-open named window (does not need a handle). // CHANGED:
-    if (draftName) { // CHANGED:
-      try {
-        window.open(String(u), String(draftName)); // CHANGED:
-        return true; // CHANGED:
-      } catch (e2) {}
-    }
-
-    return false; // CHANGED:
+    return true;
   }
 
-  function closeDraftTab(draftWin) { // CHANGED:
-    if (!draftWin) return; // CHANGED:
-    try { draftWin.close(); } catch (e0) {} // CHANGED:
-  }
+  function handleDraftClick(ev) {
+    btnDraft = document.getElementById('ppa-draft') || btnDraft;
+    if (!btnDraft) return;
 
-  function handleDraftClick(ev) { // CHANGED:
-    // Refresh reference in case DOM re-rendered.
-    btnDraft = btnDraft || document.getElementById('ppa-draft'); // CHANGED:
-    if (!btnDraft) return; // CHANGED:
+    stopEvent(ev);
+    if (clickGuard(btnDraft)) return;
+    if (btnDraft.disabled) return;
 
-    stopEvent(ev); // CHANGED:
-    if (clickGuard(btnDraft)) return; // CHANGED:
-    if (btnDraft.disabled) return; // CHANGED:
-
-    // Popup-safe: open tab immediately (sync).
-    var opened = openDraftTabSync(); // CHANGED:
-    var draftTab = opened.win; // CHANGED:
-    var draftName = opened.name; // CHANGED:
+    var opened = openDraftTabSync();
+    var draftTab = opened.win;
+    var draftName = opened.name;
 
     if (!hasTitleOrSubject()) {
-      if (draftTab) closeDraftTab(draftTab); // CHANGED:
+      if (draftTab) closeDraftTab(draftTab);
       renderNotice('warn', 'Add a subject or title before saving.');
+      return;
+    }
+
+    if (!requireAudienceOrWarn()) {
+      if (draftTab) closeDraftTab(draftTab);
       return;
     }
 
@@ -1302,7 +1373,7 @@
         var msg = pickMessage(res.body) || 'Draft request sent.';
 
         if (!res.ok || (wp.hasEnvelope && !wp.success)) {
-          if (draftTab) closeDraftTab(draftTab); // CHANGED:
+          if (draftTab) closeDraftTab(draftTab);
           renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
           try { console.info('PPA: draft failed', res); } catch (e0) {}
           return;
@@ -1312,24 +1383,21 @@
         var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
         var view = pickViewLink(res.body) || (data && data.permalink ? data.permalink : '');
         var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
-        var url = absolutizeUrl(edit || fallbackEdit || view); // CHANGED:
+        var url = absolutizeUrl(edit || fallbackEdit || view);
 
-        // Explicit diagnostics so you can see WHY it stays blank. // CHANGED:
         try {
-          console.info('PPA: draft store ok →', { // CHANGED:
-            edit_link: edit, // CHANGED:
-            post_id: pid, // CHANGED:
-            view_link: view, // CHANGED:
-            fallback_edit: fallbackEdit, // CHANGED:
-            final_url: url, // CHANGED:
-            popup_handle: !!draftTab, // CHANGED:
-            popup_name: draftName // CHANGED:
+          console.info('PPA: draft store ok →', {
+            edit_link: edit,
+            post_id: pid,
+            view_link: view,
+            fallback_edit: fallbackEdit,
+            final_url: url,
+            popup_handle: !!draftTab,
+            popup_name: draftName
           });
         } catch (eD) {}
 
-        // If popup was blocked (no handle), we do NOT try to open a new one asynchronously.
-        // Instead we show a manual link. // CHANGED:
-        if (!draftTab) { // CHANGED:
+        if (!draftTab) {
           if (url) {
             renderNoticeTimedHtml(
               'success',
@@ -1342,128 +1410,145 @@
           return;
         }
 
-        // We have a popup handle. Navigate it using handle first, then name fallback. // CHANGED:
         if (url) {
-          var didNav = navigateDraftTarget(draftTab, draftName, url); // CHANGED:
+          var didNav = navigateDraftTarget(draftTab, draftName, url);
           if (didNav) {
             renderNoticeTimed('success', 'Draft saved. Opened in a new tab.', 2500);
             return;
           }
         }
 
-        // If we reach here, we couldn't compute a URL or navigation failed.
-        // Close the blank tab so you don't get stuck with a dead window. // CHANGED:
-        closeDraftTab(draftTab); // CHANGED:
-        renderNoticeTimed('success', 'Draft saved, but no edit link/post ID was returned.', 9000); // CHANGED:
+        closeDraftTab(draftTab);
+        renderNoticeTimed('success', 'Draft saved, but no edit link/post ID was returned.', 9000);
       });
     }, 'store');
   }
 
-  // Document-level capture binding to beat competing handlers.
-  (function bindDraftCapture() { // CHANGED:
+  function handlePublishClick(ev) {
+    btnPublish = document.getElementById('ppa-publish') || btnPublish;
+    if (!btnPublish) return;
+
+    stopEvent(ev);
+    if (clickGuard(btnPublish)) return;
+    console.info('PPA: Publish clicked');
+
+    if (!hasTitleOrSubject()) {
+      renderNotice('warn', 'Add a subject or title before publishing.');
+      return;
+    }
+
+    if (!requireAudienceOrWarn()) return; // CHANGED: + removes pubTab ReferenceError.
+
+    withBusy(function () {
+      var payload = buildStorePayload('publish');
+      return apiPost('ppa_store', payload).then(function (res) {
+        var wp = unwrapWpAjax(res.body);
+        var data = wp.hasEnvelope ? wp.data : res.body;
+        var serr = (data && data.error) ? data.error : null;
+        var msg = (serr && serr.message) || pickMessage(res.body) || 'Publish request sent.';
+        var pid = pickId(res.body);
+        var edit = pickEditLink(res.body);
+        var view = pickViewLink(res.body);
+
+        if (!res.ok || (wp.hasEnvelope && !wp.success)) {
+          renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
+          try { console.info('PPA: publish failed', res); } catch (e0) {}
+          return;
+        }
+        if (view || edit) {
+          var parts = [];
+          if (view) parts.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View</a>');
+          if (edit) parts.push('<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit</a>');
+          var html = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + ' — ' + parts.join(' &middot; ');
+          renderNoticeTimedHtml('success', html, 8000);
+        } else {
+          renderNoticeTimed('success', 'Published successfully.', 5000);
+        }
+        try { console.info('PPA: publish ok', data); } catch (e1) {}
+      });
+    }, 'store');
+  }
+
+  function handleGenerateClick(ev) {
+    btnGenerate = document.getElementById('ppa-generate') || btnGenerate;
+    if (!btnGenerate) return;
+
+    stopEvent(ev);
+    if (clickGuard(btnGenerate)) return;
+    console.info('PPA: Generate clicked');
+
+    var probe = buildPreviewPayload();
+    if (!String(probe.title || '').trim() &&
+        !String(probe.text || '').trim() &&
+        !String(probe.content || '').trim()) {
+      renderNotice('warn', 'Add a subject or a brief before generating.');
+      return;
+    }
+
+    // CHANGED: Client-side guard (backend still enforces) — prevent avoidable 400s.
+    if (!String(probe.audience || '').trim()) {
+      renderNotice('warn', 'Target audience is required.');
+      return;
+    }
+
+    withBusy(function () {
+      return apiPost('ppa_generate', probe).then(function (res) {
+        var wp = unwrapWpAjax(res.body);
+        var overallOk = res.ok;
+        if (wp.hasEnvelope) overallOk = overallOk && (wp.success === true);
+
+        var data = wp.hasEnvelope ? wp.data : res.body;
+        var django = pickDjangoResultShape(data);
+
+        try { window.PPA_LAST_GENERATE = { ok: overallOk, status: res.status, body: res.body, data: data, djangoResult: django }; } catch (e) {}
+
+        if (!overallOk) {
+          renderNotice('error', 'Generate failed (' + res.status + '): ' + (pickMessage(res.body) || 'Unknown error'));
+          try { console.info('PPA: generate failed', res); } catch (e2) {}
+          return;
+        }
+
+        var provider = (data && data.provider) ? data.provider : (django && django.provider ? django.provider : '');
+        renderPreview(django, provider);
+
+        var filled = applyGenerateResult(django);
+        try { console.info('PPA: applyGenerateResult →', filled); } catch (e3) {}
+
+        renderNotice('success', 'AI draft generated. Review, tweak, then Save Draft or Publish.');
+      });
+    }, 'generate');
+  }
+
+  // -------------------------------------------------------------------------
+  // Delegated CAPTURE click binding (bulletproof)  // CHANGED:
+  // - Handles DOM re-renders and late-inserted buttons.
+  // - Stops propagation to beat competing handlers.
+  // -------------------------------------------------------------------------
+  (function bindDelegatedClicks() { // CHANGED:
     try {
-      document.addEventListener('click', function (ev) { // CHANGED:
+      document.addEventListener('click', function (ev) {
         var t = ev && ev.target ? ev.target : null;
         if (!t) return;
-        var btn = null;
-        try { btn = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e0) { btn = null; }
-        if (!btn) return;
-        handleDraftClick(ev); // CHANGED:
+
+        var gen = null;
+        var dra = null;
+        var pub = null;
+
+        try { gen = (t.id === 'ppa-generate') ? t : (t.closest ? t.closest('#ppa-generate') : null); } catch (e0) { gen = null; }
+        if (gen) { handleGenerateClick(ev); return; } // CHANGED:
+
+        try { dra = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e1) { dra = null; }
+        if (dra) { handleDraftClick(ev); return; } // CHANGED:
+
+        try { pub = (t.id === 'ppa-publish') ? t : (t.closest ? t.closest('#ppa-publish') : null); } catch (e2) { pub = null; }
+        if (pub) { handlePublishClick(ev); return; } // CHANGED:
       }, true); // capture=true // CHANGED:
-    } catch (e1) {}
+    } catch (e3) {}
   })();
 
-  // ---------------------------------------------------------------------------
-  // Existing button handlers (Publish / Generate) remain as-is
-  // ---------------------------------------------------------------------------
-
-  if (btnPublish) {
-    btnPublish.addEventListener('click', function (ev) {
-      stopEvent(ev);
-      if (clickGuard(btnPublish)) return;
-      console.info('PPA: Publish clicked');
-
-      if (!hasTitleOrSubject()) {
-        renderNotice('warn', 'Add a subject or title before publishing.');
-        return;
-      }
-
-      withBusy(function () {
-        var payload = buildStorePayload('publish');
-        return apiPost('ppa_store', payload).then(function (res) {
-          var wp = unwrapWpAjax(res.body);
-          var data = wp.hasEnvelope ? wp.data : res.body;
-          var serr = (data && data.error) ? data.error : null;
-          var msg = (serr && serr.message) || pickMessage(res.body) || 'Publish request sent.';
-          var pid = pickId(res.body);
-          var edit = pickEditLink(res.body);
-          var view = pickViewLink(res.body);
-
-          if (!res.ok || (wp.hasEnvelope && !wp.success)) {
-            renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
-            console.info('PPA: publish failed', res);
-            return;
-          }
-          if (view || edit) {
-            var parts = [];
-            if (view) parts.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View</a>');
-            if (edit) parts.push('<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit</a>');
-            var html = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + ' — ' + parts.join(' &middot; ');
-            renderNoticeTimedHtml('success', html, 8000);
-          } else {
-            renderNoticeTimed('success', 'Published successfully.', 5000);
-          }
-          console.info('PPA: publish ok', data);
-        });
-      }, 'store');
-    }, true);
-  }
-
-  if (btnGenerate) {
-    btnGenerate.addEventListener('click', function (ev) {
-      stopEvent(ev);
-      if (clickGuard(btnGenerate)) return;
-      console.info('PPA: Generate clicked');
-
-      var probe = buildPreviewPayload();
-      if (!String(probe.title || '').trim() &&
-          !String(probe.text || '').trim() &&
-          !String(probe.content || '').trim()) {
-        renderNotice('warn', 'Add a subject or a brief before generating.');
-        return;
-      }
-
-      withBusy(function () {
-        var payload = probe;
-
-        return apiPost('ppa_generate', payload).then(function (res) {
-          var wp = unwrapWpAjax(res.body);
-          var overallOk = res.ok;
-          if (wp.hasEnvelope) overallOk = overallOk && (wp.success === true);
-
-          var data = wp.hasEnvelope ? wp.data : res.body;
-          var django = pickDjangoResultShape(data);
-
-          try { window.PPA_LAST_GENERATE = { ok: overallOk, status: res.status, body: res.body, data: data, djangoResult: django }; } catch (e) {}
-
-          if (!overallOk) {
-            renderNotice('error', 'Generate failed (' + res.status + '): ' + (pickMessage(res.body) || 'Unknown error'));
-            console.info('PPA: generate failed', res);
-            return;
-          }
-
-          var provider = (data && data.provider) ? data.provider : (django && django.provider ? django.provider : '');
-          renderPreview(django, provider);
-
-          var filled = applyGenerateResult(django);
-          try { console.info('PPA: applyGenerateResult →', filled); } catch (e2) {}
-
-          renderNotice('success', 'AI draft generated. Review, tweak, then Save Draft or Publish.');
-        });
-      }, 'generate');
-    }, true);
-  }
-
+  // -------------------------------------------------------------------------
+  // Public bridge (used elsewhere)
+  // -------------------------------------------------------------------------
   window.PPAAdmin = window.PPAAdmin || {};
   window.PPAAdmin.apiPost = apiPost;
   window.PPAAdmin.postGenerate = function () { return apiPost('ppa_generate', buildPreviewPayload()); };
@@ -1472,7 +1557,7 @@
   window.PPAAdmin.renderPreview = renderPreview;
   window.PPAAdmin._js_ver = PPA_JS_VER;
 
-  (function patchModuleBridge(){
+  (function patchModuleBridge() {
     try {
       window.PPAAdminModules = window.PPAAdminModules || {};
       window.PPAAdminModules.api = window.PPAAdminModules.api || {};
@@ -1483,5 +1568,329 @@
   })();
 
   console.info('PPA: admin.js initialized →', PPA_JS_VER);
+})();
 
+/* =========================================================================
+ * PPA OUTPUT LANGUAGE MODULE (Composer Preview) — v2026-01-22
+ * - Adds Output Language dropdown behavior (no new article generation)
+ * - Caches translations to avoid spam
+ * - Restores Original instantly
+ *
+ * NOTE:
+ * - This module is append-only to avoid breaking existing preview/store flows.
+ * - It expects #ppa-output-language and #ppa-preview-pane to exist in DOM.
+ * - It calls admin-ajax action: ppa_translate_preview (WP PHP proxy added next).
+ * ========================================================================= */
+(function () {
+  "use strict";
+
+  var PPA_OUTPUT_LANGUAGE_MODULE_v2026_01_22 = true; // marker
+
+  // ---------- helpers ----------
+  function $(sel, root) { try { return (root || document).querySelector(sel); } catch (e) { return null; } }
+  function byId(id) { try { return document.getElementById(id); } catch (e) { return null; } }
+
+  function getAjaxUrl(action) {
+    // WordPress sets `ajaxurl` in admin; fall back to standard path.
+    var base = (typeof window.ajaxurl !== "undefined" && window.ajaxurl) ? window.ajaxurl : "/wp-admin/admin-ajax.php";
+    if (base.indexOf("?") === -1) return base + "?action=" + encodeURIComponent(action);
+    return base + "&action=" + encodeURIComponent(action);
+  }
+
+  function safeJsonParse(txt) {
+    try { return JSON.parse(txt); } catch (e) { return null; }
+  }
+
+  // ---------- language list ----------
+  // Based on W3Techs "content languages used for websites" (top common site languages). :contentReference[oaicite:1]{index=1}
+  // Keep list tight + practical. We'll expand later if needed.
+  var LANGS = [
+    { v: "original", label: "Original" },
+    { v: "en", label: "English" },
+    { v: "es", label: "Spanish" },
+    { v: "de", label: "German" },
+    { v: "ja", label: "Japanese" },
+    { v: "fr", label: "French" },
+    { v: "pt", label: "Portuguese" },
+    { v: "ru", label: "Russian" },
+    { v: "it", label: "Italian" },
+    { v: "nl", label: "Dutch" },
+    { v: "pl", label: "Polish" },
+    { v: "tr", label: "Turkish" },
+    { v: "zh-Hans", label: "Chinese (Simplified)" },
+    { v: "zh-Hant", label: "Chinese (Traditional)" },
+    { v: "fa", label: "Persian" },
+    { v: "vi", label: "Vietnamese" },
+    { v: "cs", label: "Czech" },
+    { v: "id", label: "Indonesian" },
+    { v: "ko", label: "Korean" },
+    { v: "uk", label: "Ukrainian" },
+    { v: "ar", label: "Arabic" }
+  ];
+
+  // ---------- state + cache ----------
+  var LS_KEY = "ppa_output_language";
+  var MODE = "strict"; // future: "natural"
+  var translationCache = new Map(); // key => { html, json, ts }
+
+  var state = {
+    hasPreview: false,
+    draftHash: null,
+    originalHtml: null,
+    originalJson: null // optional; if available, we send structured fields
+  };
+
+  function getDraftHash() {
+    // Try multiple places without assuming any existing implementation.
+    var pane = byId("ppa-preview-pane");
+    var v =
+      (pane && pane.getAttribute("data-draft-hash")) ||
+      (document.body && document.body.getAttribute("data-ppa-draft-hash")) ||
+      (window.PPA && (window.PPA.draft_hash || window.PPA.draftHash)) ||
+      (window.PPA_PREVIEW && window.PPA_PREVIEW.draft_hash) ||
+      null;
+    return (v && String(v).trim()) ? String(v).trim() : null;
+  }
+
+  function previewLooksGenerated(pane) {
+    if (!pane) return false;
+    var txt = (pane.textContent || "").trim();
+    // Default placeholder from composer.php:
+    if (txt.indexOf("(Preview will appear here once generated.)") !== -1) return false;
+    // If there's real HTML content, we treat as generated.
+    var html = (pane.innerHTML || "").trim();
+    if (html.length < 20) return false;
+    return true;
+  }
+
+  function setUiState(selectEl, helpEl, enabled) {
+    if (!selectEl) return;
+    selectEl.disabled = !enabled;
+    if (helpEl) helpEl.style.display = enabled ? "none" : "block";
+  }
+
+  function ensureOptions(selectEl) {
+    if (!selectEl) return;
+    // If it already has more than 1 option, do nothing (avoid duplicates).
+    if (selectEl.options && selectEl.options.length > 1) return;
+
+    // Clear and repopulate to guarantee ordering
+    selectEl.innerHTML = "";
+    for (var i = 0; i < LANGS.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = LANGS[i].v;
+      opt.textContent = LANGS[i].label;
+      selectEl.appendChild(opt);
+    }
+  }
+
+  function getSavedLang() {
+    try {
+      var v = localStorage.getItem(LS_KEY);
+      return (v && String(v).trim()) ? String(v).trim() : "original";
+    } catch (e) {
+      return "original";
+    }
+  }
+
+  function saveLang(v) {
+    try { localStorage.setItem(LS_KEY, v); } catch (e) {}
+  }
+
+  function cacheKey(draftHash, lang, mode) {
+    return String(draftHash || "nohash") + "|" + String(lang || "") + "|" + String(mode || "");
+  }
+
+  function setLoading(pane, msg) {
+    if (!pane) return;
+    pane.setAttribute("data-ppa-lang-loading", "1");
+    pane.innerHTML = '<p><em>' + (msg || "Translating…") + "</em></p>";
+  }
+
+  function clearLoading(pane) {
+    if (!pane) return;
+    pane.removeAttribute("data-ppa-lang-loading");
+  }
+
+  async function postTranslate(payload) {
+    var url = getAjaxUrl("ppa_translate_preview");
+    var res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    var text = await res.text();
+    var json = safeJsonParse(text);
+    if (!json) {
+      // some WP handlers may wrap JSON in output; try to salvage
+      // (last resort: locate first { ... } block)
+      var idx = text.indexOf("{");
+      if (idx !== -1) json = safeJsonParse(text.slice(idx));
+    }
+    if (!json) return { ok: false, error: "invalid_json", raw: text };
+    return json;
+  }
+
+  function extractHtml(resp) {
+    // tolerant shapes
+    if (!resp) return null;
+    if (typeof resp.html === "string") return resp.html;
+    if (resp.data && typeof resp.data.html === "string") return resp.data.html;
+    if (resp.result && typeof resp.result.html === "string") return resp.result.html;
+    if (typeof resp.preview === "string") return resp.preview;
+    if (resp.data && typeof resp.data.preview === "string") return resp.data.preview;
+    return null;
+  }
+
+  function setPaneHtml(pane, html) {
+    if (!pane) return;
+    pane.innerHTML = html || '<p><em>No content.</em></p>';
+    clearLoading(pane);
+  }
+
+  function captureOriginalIfNeeded(pane) {
+    if (!pane) return;
+    if (!state.originalHtml) state.originalHtml = pane.innerHTML;
+    // If any structured JSON exists in globals, capture it (optional).
+    state.draftHash = state.draftHash || getDraftHash();
+    if (!state.originalJson) {
+      // These names are intentionally broad: we DO NOT assume they exist.
+      state.originalJson =
+        (window.PPA_LAST_PREVIEW_JSON || window.PPA_PREVIEW_JSON || (window.PPA && window.PPA.last_preview_json)) ||
+        null;
+    }
+  }
+
+  async function onLangChange(lang, selectEl, pane) {
+    if (!pane) return;
+
+    // Guard: if preview doesn't exist, force original + keep disabled behavior.
+    if (!state.hasPreview) {
+      if (selectEl) selectEl.value = "original";
+      saveLang("original");
+      return;
+    }
+
+    if (lang === "original") {
+      if (state.originalHtml) setPaneHtml(pane, state.originalHtml);
+      return;
+    }
+
+    var dh = state.draftHash || getDraftHash() || "nohash";
+    var key = cacheKey(dh, lang, MODE);
+
+    if (translationCache.has(key)) {
+      var hit = translationCache.get(key);
+      if (hit && hit.html) {
+        setPaneHtml(pane, hit.html);
+        return;
+      }
+    }
+
+    // First request for this lang: call WP ajax proxy (next step adds handler).
+    setLoading(pane, "Translating…");
+
+    var payload = {
+      lang: lang,
+      mode: MODE,
+      draft_hash: dh,
+      // Prefer structured payload if we have it; else send original HTML as fallback.
+      original_json: state.originalJson || null,
+      original_html: state.originalHtml || null
+    };
+
+    var resp = await postTranslate(payload);
+
+    if (!resp || resp.ok === false) {
+      var msg = (resp && (resp.error || resp.message)) ? String(resp.error || resp.message) : "translate_failed";
+      setPaneHtml(pane, '<p><em>Translation error: ' + msg + "</em></p>");
+      return;
+    }
+
+    var html = extractHtml(resp);
+    if (!html) {
+      // If no HTML returned yet, don’t break the preview — show a minimal message.
+      setPaneHtml(pane, '<p><em>Translation returned no HTML (server will be updated next).</em></p>');
+      return;
+    }
+
+    translationCache.set(key, { html: html, ts: Date.now() });
+    setPaneHtml(pane, html);
+  }
+
+  function init() {
+    var selectEl = byId("ppa-output-language");
+    var helpEl = byId("ppa-output-language-help");
+    var pane = byId("ppa-preview-pane");
+
+    if (!selectEl || !pane) return;
+
+    ensureOptions(selectEl);
+
+    // Start disabled until we see a generated preview.
+    setUiState(selectEl, helpEl, false);
+
+    // Restore last chosen language (but we only apply after preview exists)
+    var saved = getSavedLang();
+    if (saved) selectEl.value = saved;
+
+    // Watch preview pane to detect when preview is generated.
+    var observer = new MutationObserver(function () {
+      var has = previewLooksGenerated(pane);
+      if (has && !state.hasPreview) {
+        state.hasPreview = true;
+        captureOriginalIfNeeded(pane);
+        setUiState(selectEl, helpEl, true);
+
+        // If user previously selected a language, apply it now.
+        var want = selectEl.value || "original";
+        if (want && want !== "original") {
+          onLangChange(want, selectEl, pane).catch(function (e) {
+            setPaneHtml(pane, '<p><em>Translation error (client): ' + (e && e.message ? e.message : "unknown") + "</em></p>");
+          });
+        }
+      }
+      if (!has && state.hasPreview) {
+        // If preview pane is cleared/reset, lock language UI again.
+        state.hasPreview = false;
+        setUiState(selectEl, helpEl, false);
+      }
+    });
+
+    observer.observe(pane, { childList: true, subtree: true });
+
+    // Handle manual changes
+    selectEl.addEventListener("change", function () {
+      var lang = selectEl.value || "original";
+      saveLang(lang);
+      // Always capture original before first translation attempt
+      if (previewLooksGenerated(pane)) {
+        state.hasPreview = true;
+        captureOriginalIfNeeded(pane);
+        setUiState(selectEl, helpEl, true);
+      }
+      onLangChange(lang, selectEl, pane).catch(function (e) {
+        setPaneHtml(pane, '<p><em>Translation error (client): ' + (e && e.message ? e.message : "unknown") + "</em></p>");
+      });
+    });
+
+    // If preview already exists on load (rare, but possible), unlock immediately.
+    if (previewLooksGenerated(pane)) {
+      state.hasPreview = true;
+      captureOriginalIfNeeded(pane);
+      setUiState(selectEl, helpEl, true);
+
+      // If saved language is non-original, apply it.
+      if (selectEl.value && selectEl.value !== "original") {
+        onLangChange(selectEl.value, selectEl, pane).catch(function () {});
+      }
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { passive: true });
+  } else {
+    init();
+  }
 })();
