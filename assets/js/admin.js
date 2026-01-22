@@ -11,6 +11,11 @@
  *            - Composer tab stays on the composer screen (no same-tab redirect).                     // CHANGED:
  *            - Uses document-level CAPTURE listener and stops propagation to beat competing handlers.// CHANGED:
  *
+ * 2026-01-22: FIX: Blank tab stays blank when the handle is lost or URL is missing.                 // CHANGED:
+ *            - Create a unique window name at click-time and store it                                // CHANGED:
+ *            - Navigate via handle when possible, else via window.open(url, windowName)             // CHANGED:
+ *            - Add explicit console logs showing edit_link / post_id / final URL                     // CHANGED:
+ *
  * 2026-01-21: FIX: Add missing ensureAutoHelperNotes() and wire it so the "Auto sends 'auto'..." helper text
  *            becomes ONE single note spanning Genre + Tone + Word Count. Hide duplicates safely. // CHANGED:
  *            FIX: Composer root detection is now robust (#ppa-composer OR [data-ppa-composer] OR .ppa-composer)
@@ -25,7 +30,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-22.2'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-22.4'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -362,9 +367,6 @@
         var p = document.createElement('p'); // CHANGED:
         p.className = 'description ppa-auto-helper-note'; // CHANGED:
         p.textContent = noteText; // CHANGED:
-
-        // Prefer to append after the three-field row if we can detect it.
-        // Otherwise, append to the common wrapper.
         wrap.appendChild(p); // CHANGED:
         existing = p; // CHANGED:
       } else { // CHANGED:
@@ -379,12 +381,9 @@
           h.style.display = 'none'; // CHANGED:
         } catch (e4) {}
       }); // CHANGED:
-    } catch (e5) {
-      // Silent on purpose — this is UI sugar and must never break Composer.
-    }
+    } catch (e5) {}
   }
 
-  // CHANGED: Run once on init (after a tiny delay in case the Composer markup is injected).
   (function bootAutoHelperNotes(){ // CHANGED:
     try { ensureAutoHelperNotes(); } catch (e0) {} // CHANGED:
     window.setTimeout(function(){ // CHANGED:
@@ -392,7 +391,6 @@
     }, 50); // CHANGED:
   })(); // CHANGED:
 
-  // CHANGED: If Composer UI re-renders pieces dynamically, re-apply (light, safe observer).
   (function observeAutoHelperNotes(){ // CHANGED:
     try {
       if (!window.MutationObserver) return; // CHANGED:
@@ -697,7 +695,6 @@
 
   function ppaSlugifyHeading(text) { // CHANGED:
     text = (text == null) ? '' : String(text);
-    // Collapse whitespace, remove quotes, keep letters/numbers/spaces/hyphens.
     var s = text.trim().toLowerCase();
     s = s.replace(/[“”"']/g, '');
     s = s.replace(/[^a-z0-9\s\-]/g, '');
@@ -725,7 +722,6 @@
 
   function ppaCollectHeadings(pane) { // CHANGED:
     if (!pane || pane.nodeType !== 1) return [];
-    // Prefer .ppa-body if present, otherwise scan the full pane.
     var body = null;
     try { body = pane.querySelector('.ppa-body'); } catch (e) { body = null; }
     var scope = body || pane;
@@ -733,14 +729,12 @@
     var hs = [];
     try { hs = Array.prototype.slice.call(scope.querySelectorAll('h2, h3, h4') || []); } catch (e2) { hs = []; }
 
-    // Filter out structural headings we don't want in the outline.
     var skip = { 'outline': 1, 'body': 1, 'meta': 1, 'seo': 1, 'seo meta': 1 };
     var out = [];
     for (var i = 0; i < hs.length; i++) {
       var h = hs[i];
       if (!h || h.nodeType !== 1) continue;
 
-      // Skip headings that live inside an outline container (if any).
       var inOutline = false;
       try { inOutline = !!h.closest('.ppa-outline'); } catch (e3) { inOutline = false; }
       if (inOutline) continue;
@@ -760,16 +754,13 @@
     var txt = outlineText.trim();
     if (!txt) return [];
 
-    // If it's already numbered, split on line breaks.
     var lines = txt.split(/\r?\n/).map(function(x){ return String(x).trim(); }).filter(Boolean);
     if (lines.length > 1) {
       return lines.map(function(line){
-        // Strip leading bullets / numbering.
         return line.replace(/^\s*(?:\d+\.|\-|\*|\u2022)\s*/, '').trim();
       }).filter(Boolean);
     }
 
-    // Single-line outline: split on commas, but keep phrases intact.
     var parts = txt.split(/\s*,\s*/).map(function(x){ return String(x).trim(); }).filter(Boolean);
     if (parts.length > 1) return parts;
 
@@ -779,14 +770,12 @@
   function ppaHydrateOutline(pane, result) { // CHANGED:
     if (!pane || pane.nodeType !== 1) return;
 
-    // Find (or create) outline container.
     var outlineBox = null;
     try { outlineBox = pane.querySelector('.ppa-outline'); } catch (e1) { outlineBox = null; }
 
     var headings = ppaCollectHeadings(pane);
     var usedIds = {};
 
-    // Prefer headings-derived outline because it guarantees link targets.
     var items = [];
     if (headings.length) {
       for (var i = 0; i < headings.length; i++) {
@@ -796,7 +785,6 @@
         items.push({ text: h.text, id: id });
       }
     } else {
-      // Fallback: parse result.outline text. (Links only if matching headings exist later.)
       var outlineText = (result && result.outline) ? result.outline : '';
       var parts = ppaParseOutlineText(outlineText);
       for (var j = 0; j < parts.length; j++) {
@@ -804,13 +792,9 @@
       }
     }
 
-    if (!items.length) {
-      // Nothing to render; keep whatever is there.
-      return;
-    }
+    if (!items.length) return;
 
     if (!outlineBox) {
-      // If the HTML didn't include an outline container, create one under the title.
       outlineBox = document.createElement('div');
       outlineBox.className = 'ppa-outline';
       var h1 = null;
@@ -822,7 +806,6 @@
       }
     }
 
-    // Build an ORDERED list with anchor links.
     var ol = document.createElement('ol'); // CHANGED:
     ol.className = 'ppa-outline-list'; // CHANGED:
 
@@ -843,11 +826,9 @@
       ol.appendChild(li);
     }
 
-    // Replace outline container content.
     outlineBox.innerHTML = '';
     outlineBox.appendChild(ol);
 
-    // Delegate clicks so anchors scroll INSIDE the preview pane.
     outlineBox.onclick = function(ev) { // CHANGED:
       try {
         var t = ev.target;
@@ -1063,34 +1044,62 @@
   }
 
   // -------------------------------------------------------------------------
-  // CHANGED: Save Draft NEW TAB flow (popup-safe)
-  // - Uses document capture so we can stop competing handlers before they run.
-  // - Opens about:blank synchronously on the real click.
-  // - Navigates that same tab after successful store response.
-  // - Closes the tab if the store fails.
+  // CHANGED: Save Draft NEW TAB flow (popup-safe + window-name fallback)
   // -------------------------------------------------------------------------
+
+  function absolutizeUrl(url) { // CHANGED:
+    var u = String(url || '').trim(); // CHANGED:
+    if (!u) return ''; // CHANGED:
+    if (u.indexOf('http://') === 0 || u.indexOf('https://') === 0) return u; // CHANGED:
+    if (u.charAt(0) === '/') { // CHANGED:
+      try { return String(window.location.origin || '') + u; } catch (e0) { return u; } // CHANGED:
+    }
+    return u; // CHANGED:
+  }
 
   function openDraftTabSync() { // CHANGED:
     // MUST be synchronous in the click handler to avoid popup blockers.
-    var w = null;
+    // We also store a unique name so we can target the tab later even if handle is flaky. // CHANGED:
+    var w = null; // CHANGED:
+    var name = 'ppa_draft_' + String(Date.now ? Date.now() : (new Date()).getTime()); // CHANGED:
     try {
-      w = window.open('about:blank', '_blank', 'noopener'); // CHANGED:
+      w = window.open('about:blank', name); // CHANGED:
     } catch (e) { w = null; }
-    return w;
+
+    // Security: remove opener, but KEEP the window handle. // CHANGED:
+    try { if (w) w.opener = null; } catch (e2) {} // CHANGED:
+
+    // Persist for diagnostics / fallback targeting. // CHANGED:
+    try { window.__PPA_DRAFT_TAB = w; } catch (e3) {} // CHANGED:
+    try { window.__PPA_DRAFT_TAB_NAME = name; } catch (e4) {} // CHANGED:
+
+    return { win: w, name: name }; // CHANGED:
   }
 
-  function navigateOrCloseDraftTab(draftTab, url, shouldClose) { // CHANGED:
-    if (!draftTab) return;
-    try {
-      if (shouldClose) {
-        draftTab.close();
-        return;
-      }
-      if (url) {
-        try { draftTab.location.href = String(url); return; } catch (e1) {}
-        try { draftTab.location = String(url); return; } catch (e2) {}
-      }
-    } catch (e3) {}
+  function navigateDraftTarget(draftWin, draftName, url) { // CHANGED:
+    var u = absolutizeUrl(url); // CHANGED:
+    if (!u) return false; // CHANGED:
+
+    // 1) Prefer direct handle navigation. // CHANGED:
+    if (draftWin) { // CHANGED:
+      try { draftWin.location.replace(String(u)); return true; } catch (e0) {} // CHANGED:
+      try { draftWin.location.href = String(u); return true; } catch (e1) {} // CHANGED:
+    }
+
+    // 2) Fallback: target the already-open named window (does not need a handle). // CHANGED:
+    if (draftName) { // CHANGED:
+      try {
+        window.open(String(u), String(draftName)); // CHANGED:
+        return true; // CHANGED:
+      } catch (e2) {}
+    }
+
+    return false; // CHANGED:
+  }
+
+  function closeDraftTab(draftWin) { // CHANGED:
+    if (!draftWin) return; // CHANGED:
+    try { draftWin.close(); } catch (e0) {} // CHANGED:
   }
 
   function handleDraftClick(ev) { // CHANGED:
@@ -1100,15 +1109,15 @@
 
     stopEvent(ev); // CHANGED:
     if (clickGuard(btnDraft)) return; // CHANGED:
-
     if (btnDraft.disabled) return; // CHANGED:
 
     // Popup-safe: open tab immediately (sync).
-    var draftTab = openDraftTabSync(); // CHANGED:
+    var opened = openDraftTabSync(); // CHANGED:
+    var draftTab = opened.win; // CHANGED:
+    var draftName = opened.name; // CHANGED:
 
-    // If the popup was blocked, we still save the draft, but we won't redirect the composer tab.
     if (!hasTitleOrSubject()) {
-      if (draftTab) navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
+      if (draftTab) closeDraftTab(draftTab); // CHANGED:
       renderNotice('warn', 'Add a subject or title before saving.');
       return;
     }
@@ -1121,46 +1130,59 @@
         var msg = pickMessage(res.body) || 'Draft request sent.';
 
         if (!res.ok || (wp.hasEnvelope && !wp.success)) {
-          // Close the blank tab on failure.
-          if (draftTab) navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
+          if (draftTab) closeDraftTab(draftTab); // CHANGED:
           renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
           try { console.info('PPA: draft failed', res); } catch (e0) {}
           return;
         }
 
-        // Prefer edit link; fallback to derived edit URL; last fallback permalink.
         var edit = pickEditLink(res.body) || (data && data.edit_link ? data.edit_link : '');
         var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
-        var view = pickViewLink(res.body) || (data && data.permalink ? data.permalink : ''); // CHANGED:
+        var view = pickViewLink(res.body) || (data && data.permalink ? data.permalink : '');
         var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
-        var url = edit || fallbackEdit || view;
+        var url = absolutizeUrl(edit || fallbackEdit || view); // CHANGED:
 
-        // If we have a popup tab, navigate it. If not, show a clickable link (no forced redirect).
-        if (draftTab && url) {
-          // Replace about:blank with draft editor in that SAME tab.
-          navigateOrCloseDraftTab(draftTab, url, false); // CHANGED:
-          renderNoticeTimed('success', 'Draft saved. Opened in a new tab.', 2500); // CHANGED:
-          return;
-        }
+        // Explicit diagnostics so you can see WHY it stays blank. // CHANGED:
+        try {
+          console.info('PPA: draft store ok →', { // CHANGED:
+            edit_link: edit, // CHANGED:
+            post_id: pid, // CHANGED:
+            view_link: view, // CHANGED:
+            fallback_edit: fallbackEdit, // CHANGED:
+            final_url: url, // CHANGED:
+            popup_handle: !!draftTab, // CHANGED:
+            popup_name: draftName // CHANGED:
+          });
+        } catch (eD) {}
 
-        if (!draftTab) {
-          // Popup blocked: provide a manual link (still in new tab) without hijacking composer.
+        // If popup was blocked (no handle), we do NOT try to open a new one asynchronously.
+        // Instead we show a manual link. // CHANGED:
+        if (!draftTab) { // CHANGED:
           if (url) {
             renderNoticeTimedHtml(
               'success',
               'Draft saved. Pop-up was blocked. <a href="' + escAttr(url) + '" target="_blank" rel="noopener">Open Draft</a>',
-              9000
-            ); // CHANGED:
+              12000
+            );
           } else {
-            renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 7000);
+            renderNoticeTimed('success', 'Draft saved, but no edit link/post ID was returned.', 9000);
           }
           return;
         }
 
-        // draftTab exists but url missing: keep tab open? Better: close it (no destination).
-        navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
-        renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 7000); // CHANGED:
-        try { console.info('PPA: draft ok but missing edit link/id', res); } catch (e1) {}
+        // We have a popup handle. Navigate it using handle first, then name fallback. // CHANGED:
+        if (url) {
+          var didNav = navigateDraftTarget(draftTab, draftName, url); // CHANGED:
+          if (didNav) {
+            renderNoticeTimed('success', 'Draft saved. Opened in a new tab.', 2500);
+            return;
+          }
+        }
+
+        // If we reach here, we couldn't compute a URL or navigation failed.
+        // Close the blank tab so you don't get stuck with a dead window. // CHANGED:
+        closeDraftTab(draftTab); // CHANGED:
+        renderNoticeTimed('success', 'Draft saved, but no edit link/post ID was returned.', 9000); // CHANGED:
       });
     }, 'store');
   }
@@ -1171,11 +1193,9 @@
       document.addEventListener('click', function (ev) { // CHANGED:
         var t = ev && ev.target ? ev.target : null;
         if (!t) return;
-        // Support clicks on inner spans/icons inside the button.
         var btn = null;
         try { btn = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e0) { btn = null; }
         if (!btn) return;
-        // Hard stop so no other handlers hijack navigation.
         handleDraftClick(ev); // CHANGED:
       }, true); // capture=true // CHANGED:
     } catch (e1) {}
