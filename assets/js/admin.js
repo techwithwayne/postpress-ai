@@ -4,8 +4,12 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2026-01-21.2: FIX: Wire "Show Outline" checkbox (#ppa-show-outline) so it hides/shows the Outline
- *              section in the Preview pane, and persists preference via localStorage. // CHANGED:
+ * 2026-01-22: FIX: Save Draft (Store) now opens the WP draft editor in a NEW TAB (popup-safe).     // CHANGED:
+ *            - Synchronously opens about:blank on real click                                         // CHANGED:
+ *            - After async store success, navigates that same tab to edit_link (or fallback).        // CHANGED:
+ *            - If store fails, closes the blank tab.                                                 // CHANGED:
+ *            - Composer tab stays on the composer screen (no same-tab redirect).                     // CHANGED:
+ *            - Uses document-level CAPTURE listener and stops propagation to beat competing handlers.// CHANGED:
  *
  * 2026-01-21: FIX: Add missing ensureAutoHelperNotes() and wire it so the "Auto sends 'auto'..." helper text
  *            becomes ONE single note spanning Genre + Tone + Word Count. Hide duplicates safely. // CHANGED:
@@ -21,7 +25,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-21.2'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-22.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -264,110 +268,6 @@
     }
     return htmlParts.join('');
   }
-
-  // -------------------------------------------------------------------------
-  // CHANGED: Show Outline toggle wiring
-  // - Checkbox: #ppa-show-outline (in composer.php)
-  // - Behavior: hide/show the "Outline" section inside #ppa-preview-pane
-  // - Persistence: localStorage key "ppa_show_outline"
-  // -------------------------------------------------------------------------
-  var OUTLINE_PREF_KEY = 'ppa_show_outline'; // CHANGED:
-  var outlineToggleEl = null; // CHANGED:
-
-  function getOutlineToggleEl() { // CHANGED:
-    if (outlineToggleEl && outlineToggleEl.nodeType === 1) return outlineToggleEl; // CHANGED:
-    var el = null; // CHANGED:
-    try { el = root.querySelector('#ppa-show-outline'); } catch (e0) { el = null; } // CHANGED:
-    if (!el) el = document.getElementById('ppa-show-outline'); // CHANGED:
-    outlineToggleEl = el || null; // CHANGED:
-    return outlineToggleEl; // CHANGED:
-  } // CHANGED:
-
-  function readOutlinePref() { // CHANGED:
-    try {
-      var v = window.localStorage ? window.localStorage.getItem(OUTLINE_PREF_KEY) : null; // CHANGED:
-      return (String(v || '') === '1'); // CHANGED:
-    } catch (e) {
-      return false; // CHANGED:
-    }
-  } // CHANGED:
-
-  function writeOutlinePref(isOn) { // CHANGED:
-    try {
-      if (!window.localStorage) return; // CHANGED:
-      window.localStorage.setItem(OUTLINE_PREF_KEY, isOn ? '1' : '0'); // CHANGED:
-    } catch (e) {}
-  } // CHANGED:
-
-  function setNodeVisible(node, visible) { // CHANGED:
-    if (!node || node.nodeType !== 1) return; // CHANGED:
-    try { node.style.display = visible ? '' : 'none'; } catch (e1) {} // CHANGED:
-    try { node.setAttribute('aria-hidden', visible ? 'false' : 'true'); } catch (e2) {} // CHANGED:
-  } // CHANGED:
-
-  function applyOutlineVisibility() { // CHANGED:
-    var pane = getPreviewPane(); // CHANGED:
-    if (!pane || pane.nodeType !== 1) return; // CHANGED:
-
-    var toggle = getOutlineToggleEl(); // CHANGED:
-    var show = toggle ? !!toggle.checked : false; // CHANGED:
-
-    // 1) Our legacy admin.js renderer: <div class="ppa-outline">...</div>
-    var blocks = []; // CHANGED:
-    try { blocks = Array.prototype.slice.call(pane.querySelectorAll('.ppa-outline') || []); } catch (e0) { blocks = []; } // CHANGED:
-    for (var i = 0; i < blocks.length; i++) { // CHANGED:
-      var b = blocks[i]; // CHANGED:
-      setNodeVisible(b, show); // CHANGED:
-      // Hide/show the header immediately preceding the outline block (if it is "Outline")
-      try { // CHANGED:
-        var prev = b.previousElementSibling; // CHANGED:
-        if (prev && prev.nodeType === 1 && String(prev.tagName || '').toUpperCase() === 'H3') { // CHANGED:
-          var t = String(prev.textContent || '').trim().toLowerCase(); // CHANGED:
-          if (t === 'outline') setNodeVisible(prev, show); // CHANGED:
-        } // CHANGED:
-      } catch (e1) {} // CHANGED:
-    } // CHANGED:
-
-    // 2) Module/other renderer: <h3>Outline</h3><ol>...</ol> (or <ul>/<div>)
-    var h3s = []; // CHANGED:
-    try { h3s = Array.prototype.slice.call(pane.querySelectorAll('h3') || []); } catch (e2) { h3s = []; } // CHANGED:
-    for (var j = 0; j < h3s.length; j++) { // CHANGED:
-      var h = h3s[j]; // CHANGED:
-      if (!h || h.nodeType !== 1) continue; // CHANGED:
-      var ht = String(h.textContent || '').trim().toLowerCase(); // CHANGED:
-      if (ht !== 'outline') continue; // CHANGED:
-
-      setNodeVisible(h, show); // CHANGED:
-
-      // Hide/show the immediate next block if it looks like the outline content
-      try { // CHANGED:
-        var nxt = h.nextElementSibling; // CHANGED:
-        if (nxt && nxt.nodeType === 1) { // CHANGED:
-          var tag = String(nxt.tagName || '').toUpperCase(); // CHANGED:
-          if (tag === 'OL' || tag === 'UL' || tag === 'DIV') { // CHANGED:
-            setNodeVisible(nxt, show); // CHANGED:
-          } // CHANGED:
-        } // CHANGED:
-      } catch (e3) {} // CHANGED:
-    } // CHANGED:
-  } // CHANGED:
-
-  (function bootOutlineToggle(){ // CHANGED:
-    var toggle = getOutlineToggleEl(); // CHANGED:
-    if (!toggle) return; // CHANGED:
-
-    // Set initial state from localStorage (default OFF)
-    try { toggle.checked = readOutlinePref(); } catch (e0) {} // CHANGED:
-
-    // Apply once on boot (in case preview is already rendered)
-    try { applyOutlineVisibility(); } catch (e1) {} // CHANGED:
-
-    // Wire change handler
-    toggle.addEventListener('change', function () { // CHANGED:
-      try { writeOutlinePref(!!toggle.checked); } catch (e2) {} // CHANGED:
-      try { applyOutlineVisibility(); } catch (e3) {} // CHANGED:
-    }, true); // CHANGED:
-  })(); // CHANGED:
 
   // -------------------------------------------------------------------------
   // CHANGED: ensureAutoHelperNotes()
@@ -791,6 +691,181 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // OUTLINE (ordered list + anchor links)
+  // ---------------------------------------------------------------------------
+
+  function ppaSlugifyHeading(text) { // CHANGED:
+    text = (text == null) ? '' : String(text);
+    // Collapse whitespace, remove quotes, keep letters/numbers/spaces/hyphens.
+    var s = text.trim().toLowerCase();
+    s = s.replace(/[“”"']/g, '');
+    s = s.replace(/[^a-z0-9\s\-]/g, '');
+    s = s.replace(/\s+/g, '-');
+    s = s.replace(/\-+/g, '-');
+    s = s.replace(/^\-+|\-+$/g, '');
+    return s || 'section';
+  }
+
+  function ppaEnsureUniqueId(el, used) { // CHANGED:
+    if (!el || el.nodeType !== 1) return '';
+    used = used || {};
+    var base = el.id ? String(el.id) : ppaSlugifyHeading(el.textContent || '');
+    if (!base) base = 'section';
+    var id = base;
+    var n = 2;
+    while (used[id] || document.getElementById(id)) {
+      id = base + '-' + n;
+      n++;
+    }
+    try { el.id = id; } catch (e) {}
+    used[id] = true;
+    return id;
+  }
+
+  function ppaCollectHeadings(pane) { // CHANGED:
+    if (!pane || pane.nodeType !== 1) return [];
+    // Prefer .ppa-body if present, otherwise scan the full pane.
+    var body = null;
+    try { body = pane.querySelector('.ppa-body'); } catch (e) { body = null; }
+    var scope = body || pane;
+
+    var hs = [];
+    try { hs = Array.prototype.slice.call(scope.querySelectorAll('h2, h3, h4') || []); } catch (e2) { hs = []; }
+
+    // Filter out structural headings we don't want in the outline.
+    var skip = { 'outline': 1, 'body': 1, 'meta': 1, 'seo': 1, 'seo meta': 1 };
+    var out = [];
+    for (var i = 0; i < hs.length; i++) {
+      var h = hs[i];
+      if (!h || h.nodeType !== 1) continue;
+
+      // Skip headings that live inside an outline container (if any).
+      var inOutline = false;
+      try { inOutline = !!h.closest('.ppa-outline'); } catch (e3) { inOutline = false; }
+      if (inOutline) continue;
+
+      var t = String(h.textContent || '').trim();
+      if (!t) continue;
+      var tKey = t.toLowerCase();
+      if (skip[tKey]) continue;
+
+      out.push({ el: h, text: t });
+    }
+    return out;
+  }
+
+  function ppaParseOutlineText(outlineText) { // CHANGED:
+    outlineText = (outlineText == null) ? '' : String(outlineText);
+    var txt = outlineText.trim();
+    if (!txt) return [];
+
+    // If it's already numbered, split on line breaks.
+    var lines = txt.split(/\r?\n/).map(function(x){ return String(x).trim(); }).filter(Boolean);
+    if (lines.length > 1) {
+      return lines.map(function(line){
+        // Strip leading bullets / numbering.
+        return line.replace(/^\s*(?:\d+\.|\-|\*|\u2022)\s*/, '').trim();
+      }).filter(Boolean);
+    }
+
+    // Single-line outline: split on commas, but keep phrases intact.
+    var parts = txt.split(/\s*,\s*/).map(function(x){ return String(x).trim(); }).filter(Boolean);
+    if (parts.length > 1) return parts;
+
+    return [txt];
+  }
+
+  function ppaHydrateOutline(pane, result) { // CHANGED:
+    if (!pane || pane.nodeType !== 1) return;
+
+    // Find (or create) outline container.
+    var outlineBox = null;
+    try { outlineBox = pane.querySelector('.ppa-outline'); } catch (e1) { outlineBox = null; }
+
+    var headings = ppaCollectHeadings(pane);
+    var usedIds = {};
+
+    // Prefer headings-derived outline because it guarantees link targets.
+    var items = [];
+    if (headings.length) {
+      for (var i = 0; i < headings.length; i++) {
+        var h = headings[i];
+        var id = ppaEnsureUniqueId(h.el, usedIds);
+        if (!id) continue;
+        items.push({ text: h.text, id: id });
+      }
+    } else {
+      // Fallback: parse result.outline text. (Links only if matching headings exist later.)
+      var outlineText = (result && result.outline) ? result.outline : '';
+      var parts = ppaParseOutlineText(outlineText);
+      for (var j = 0; j < parts.length; j++) {
+        items.push({ text: parts[j], id: '' });
+      }
+    }
+
+    if (!items.length) {
+      // Nothing to render; keep whatever is there.
+      return;
+    }
+
+    if (!outlineBox) {
+      // If the HTML didn't include an outline container, create one under the title.
+      outlineBox = document.createElement('div');
+      outlineBox.className = 'ppa-outline';
+      var h1 = null;
+      try { h1 = pane.querySelector('h1'); } catch (e2) { h1 = null; }
+      if (h1 && h1.parentNode) {
+        h1.parentNode.insertBefore(outlineBox, h1.nextSibling);
+      } else {
+        pane.insertBefore(outlineBox, pane.firstChild);
+      }
+    }
+
+    // Build an ORDERED list with anchor links.
+    var ol = document.createElement('ol'); // CHANGED:
+    ol.className = 'ppa-outline-list'; // CHANGED:
+
+    for (var k = 0; k < items.length; k++) {
+      var it = items[k];
+      var li = document.createElement('li');
+      li.className = 'ppa-outline-item';
+
+      if (it.id) {
+        var a = document.createElement('a');
+        a.href = '#' + it.id;
+        a.textContent = it.text;
+        a.setAttribute('data-ppa-target', it.id);
+        li.appendChild(a);
+      } else {
+        li.textContent = it.text;
+      }
+      ol.appendChild(li);
+    }
+
+    // Replace outline container content.
+    outlineBox.innerHTML = '';
+    outlineBox.appendChild(ol);
+
+    // Delegate clicks so anchors scroll INSIDE the preview pane.
+    outlineBox.onclick = function(ev) { // CHANGED:
+      try {
+        var t = ev.target;
+        if (!t) return;
+        if (t.tagName && String(t.tagName).toUpperCase() === 'A') {
+          var targetId = t.getAttribute('data-ppa-target') || '';
+          if (!targetId) return;
+          ev.preventDefault();
+          var targetEl = null;
+          try { targetEl = pane.querySelector('#' + CSS.escape(targetId)); } catch (e4) { targetEl = document.getElementById(targetId); }
+          if (targetEl && targetEl.scrollIntoView) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+      } catch (e5) {}
+    };
+  }
+
   function buildPreviewHtml(result) {
     var title = '';
     var outline = '';
@@ -848,9 +923,7 @@
 
     hardenPreviewLists(pane);
 
-    // CHANGED: After any preview render, re-apply Outline visibility preference.
-    try { applyOutlineVisibility(); } catch (e3) {} // CHANGED:
-
+    try { ppaHydrateOutline(pane, result); } catch (eO) {} // CHANGED:
     try { pane.focus(); } catch (e2) {}
   }
 
@@ -989,51 +1062,128 @@
     try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
   }
 
-  // Wire buttons
-  if (btnDraft) {
-    btnDraft.addEventListener('click', function (ev) {
-      stopEvent(ev);
-      if (clickGuard(btnDraft)) return;
-      console.info('PPA: Draft clicked');
+  // -------------------------------------------------------------------------
+  // CHANGED: Save Draft NEW TAB flow (popup-safe)
+  // - Uses document capture so we can stop competing handlers before they run.
+  // - Opens about:blank synchronously on the real click.
+  // - Navigates that same tab after successful store response.
+  // - Closes the tab if the store fails.
+  // -------------------------------------------------------------------------
 
-      if (!hasTitleOrSubject()) {
-        renderNotice('warn', 'Add a subject or title before saving.');
+  function openDraftTabSync() { // CHANGED:
+    // MUST be synchronous in the click handler to avoid popup blockers.
+    var w = null;
+    try {
+      w = window.open('about:blank', '_blank', 'noopener'); // CHANGED:
+    } catch (e) { w = null; }
+    return w;
+  }
+
+  function navigateOrCloseDraftTab(draftTab, url, shouldClose) { // CHANGED:
+    if (!draftTab) return;
+    try {
+      if (shouldClose) {
+        draftTab.close();
         return;
       }
-
-      withBusy(function () {
-        var payload = buildStorePayload('draft');
-        return apiPost('ppa_store', payload).then(function (res) {
-          var wp = unwrapWpAjax(res.body);
-          var data = wp.hasEnvelope ? wp.data : res.body;
-          var msg = pickMessage(res.body) || 'Draft request sent.';
-
-          if (!res.ok || (wp.hasEnvelope && !wp.success)) {
-            renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
-            console.info('PPA: draft failed', res);
-            return;
-          }
-
-          var edit = pickEditLink(res.body) || (data && data.edit_link ? data.edit_link : '');
-          var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
-          var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
-
-          renderNoticeTimed('success', 'Draft saved. Opening it now…', 2500);
-          console.info('PPA: draft ok', data);
-
-          window.setTimeout(function () {
-            var url = edit || fallbackEdit;
-            if (url) {
-              try { window.location.href = String(url); } catch (e1) {}
-            } else {
-              renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 5000);
-              console.info('PPA: draft ok but missing edit link/id', res);
-            }
-          }, 450);
-        });
-      }, 'store');
-    }, true);
+      if (url) {
+        try { draftTab.location.href = String(url); return; } catch (e1) {}
+        try { draftTab.location = String(url); return; } catch (e2) {}
+      }
+    } catch (e3) {}
   }
+
+  function handleDraftClick(ev) { // CHANGED:
+    // Refresh reference in case DOM re-rendered.
+    btnDraft = btnDraft || document.getElementById('ppa-draft'); // CHANGED:
+    if (!btnDraft) return; // CHANGED:
+
+    stopEvent(ev); // CHANGED:
+    if (clickGuard(btnDraft)) return; // CHANGED:
+
+    if (btnDraft.disabled) return; // CHANGED:
+
+    // Popup-safe: open tab immediately (sync).
+    var draftTab = openDraftTabSync(); // CHANGED:
+
+    // If the popup was blocked, we still save the draft, but we won't redirect the composer tab.
+    if (!hasTitleOrSubject()) {
+      if (draftTab) navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
+      renderNotice('warn', 'Add a subject or title before saving.');
+      return;
+    }
+
+    withBusy(function () {
+      var payload = buildStorePayload('draft');
+      return apiPost('ppa_store', payload).then(function (res) {
+        var wp = unwrapWpAjax(res.body);
+        var data = wp.hasEnvelope ? wp.data : res.body;
+        var msg = pickMessage(res.body) || 'Draft request sent.';
+
+        if (!res.ok || (wp.hasEnvelope && !wp.success)) {
+          // Close the blank tab on failure.
+          if (draftTab) navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
+          renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
+          try { console.info('PPA: draft failed', res); } catch (e0) {}
+          return;
+        }
+
+        // Prefer edit link; fallback to derived edit URL; last fallback permalink.
+        var edit = pickEditLink(res.body) || (data && data.edit_link ? data.edit_link : '');
+        var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
+        var view = pickViewLink(res.body) || (data && data.permalink ? data.permalink : ''); // CHANGED:
+        var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
+        var url = edit || fallbackEdit || view;
+
+        // If we have a popup tab, navigate it. If not, show a clickable link (no forced redirect).
+        if (draftTab && url) {
+          // Replace about:blank with draft editor in that SAME tab.
+          navigateOrCloseDraftTab(draftTab, url, false); // CHANGED:
+          renderNoticeTimed('success', 'Draft saved. Opened in a new tab.', 2500); // CHANGED:
+          return;
+        }
+
+        if (!draftTab) {
+          // Popup blocked: provide a manual link (still in new tab) without hijacking composer.
+          if (url) {
+            renderNoticeTimedHtml(
+              'success',
+              'Draft saved. Pop-up was blocked. <a href="' + escAttr(url) + '" target="_blank" rel="noopener">Open Draft</a>',
+              9000
+            ); // CHANGED:
+          } else {
+            renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 7000);
+          }
+          return;
+        }
+
+        // draftTab exists but url missing: keep tab open? Better: close it (no destination).
+        navigateOrCloseDraftTab(draftTab, '', true); // CHANGED:
+        renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 7000); // CHANGED:
+        try { console.info('PPA: draft ok but missing edit link/id', res); } catch (e1) {}
+      });
+    }, 'store');
+  }
+
+  // Document-level capture binding to beat competing handlers.
+  (function bindDraftCapture() { // CHANGED:
+    try {
+      document.addEventListener('click', function (ev) { // CHANGED:
+        var t = ev && ev.target ? ev.target : null;
+        if (!t) return;
+        // Support clicks on inner spans/icons inside the button.
+        var btn = null;
+        try { btn = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e0) { btn = null; }
+        if (!btn) return;
+        // Hard stop so no other handlers hijack navigation.
+        handleDraftClick(ev); // CHANGED:
+      }, true); // capture=true // CHANGED:
+    } catch (e1) {}
+  })();
+
+  // ---------------------------------------------------------------------------
+  // Existing button handlers (Publish / Generate) remain as-is
+  // ---------------------------------------------------------------------------
 
   if (btnPublish) {
     btnPublish.addEventListener('click', function (ev) {
