@@ -231,26 +231,35 @@ $ppa_tone_options = array( // CHANGED:
 
 	<div class="ppa-preview-panel" aria-label="<?php echo esc_attr__( 'Preview panel', 'postpress-ai' ); ?>">
                 <div class="ppa-preview-header">
-                        <h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
+        <h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
 
-                        <label class="ppa-outline-toggle" for="ppa-show-outline">
-                                <input type="checkbox" id="ppa-show-outline" />
-                                <span><?php echo esc_html__( 'Show Outline', 'postpress-ai' ); ?></span>
-                        </label>
-
-                        <!-- Output Language (NEW) -->
-                        <label class="ppa-output-language" for="ppa-output-language">
-                                <span class="screen-reader-text"><?php echo esc_html__( 'Output language', 'postpress-ai' ); ?></span>
-                                <select id="ppa-output-language" name="ppa_output_language" disabled>
-                                        <option value="original" selected><?php echo esc_html__( 'Original', 'postpress-ai' ); ?></option>
-                                        <!-- Options populated by assets/js/admin.js in Step 2 -->
-                                </select>
-                        </label>
-
-                        <span id="ppa-output-language-help" class="ppa-output-language-help">
-                                <?php echo esc_html__( 'Generate Preview first.', 'postpress-ai' ); ?>
+        <!-- Header tools (NEW layout): language inline, LEFT of outline -->
+        <div class="ppa-preview-tools" style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <!-- Output Language (NEW) -->
+                <label class="ppa-output-language" for="ppa-output-language" style="display:inline-flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;opacity:.9;">
+                                <?php echo esc_html__( 'Language', 'postpress-ai' ); ?>
                         </span>
-                </div>
+
+                        <select id="ppa-output-language" name="ppa_output_language" disabled
+                                style="width:170px;max-width:170px;">
+                                <option value="original" selected><?php echo esc_html__( 'Original', 'postpress-ai' ); ?></option>
+                                <!-- Options populated by assets/js/admin.js in Step 2 -->
+                        </select>
+                </label>
+
+                <label class="ppa-outline-toggle" for="ppa-show-outline" style="display:inline-flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="ppa-show-outline" />
+                        <span><?php echo esc_html__( 'Show Outline', 'postpress-ai' ); ?></span>
+                </label>
+        </div>
+
+        <!-- Helper text stays, but does NOT steal header width -->
+        <span id="ppa-output-language-help" class="ppa-output-language-help"
+              style="display:block;width:100%;margin-top:6px;opacity:.8;font-size:12px;">
+                <?php echo esc_html__( 'Generate Preview first.', 'postpress-ai' ); ?>
+        </span>
+</div>
 
                 <div id="ppa-preview-pane" aria-live="polite">
                         <em><?php echo esc_html__( '(Preview will appear here once generated.)', 'postpress-ai' ); ?></em>
