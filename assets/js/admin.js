@@ -4,6 +4,14 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2026-01-21.2: FIX: Wire "Show Outline" checkbox (#ppa-show-outline) so it hides/shows the Outline
+ *              section in the Preview pane, and persists preference via localStorage. // CHANGED:
+ *
+ * 2026-01-21: FIX: Add missing ensureAutoHelperNotes() and wire it so the "Auto sends 'auto'..." helper text
+ *            becomes ONE single note spanning Genre + Tone + Word Count. Hide duplicates safely. // CHANGED:
+ *            FIX: Composer root detection is now robust (#ppa-composer OR [data-ppa-composer] OR .ppa-composer)
+ *            so admin.js doesn't idle when the ID differs. // CHANGED:
+ *
  * 2025-12-25.2: FIX ppa_store 400: send JSON-body transport for ppa_store (same as ppa_generate) so PHP proxy reads valid JSON from php://input and forwards object-root to Django. This resolves Django “Root must be an object” and unblocks Save Draft redirects. // CHANGED:
  * 2025-12-25.1: FIX Save Draft (Store): ensure local WP draft is created by sending status + target_sites in store payload; redirect to edit_link (or fallback edit URL) after successful store. Also fix status dropdown incorrectly overwriting payload.mode; improve edit_link/id extraction from nested response shapes. // CHANGED:
  * 2025-12-22.1: Preview outline cleanup… // CHANGED:
@@ -13,10 +21,15 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-12-25.2'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-21.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
-  var root = document.getElementById('ppa-composer');
+  // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
+  var root =
+    document.getElementById('ppa-composer') || // CHANGED:
+    document.querySelector('[data-ppa-composer]') || // CHANGED:
+    document.querySelector('.ppa-composer'); // CHANGED:
+
   if (!root) {
     console.info('PPA: composer root not found, admin.js is idle');
     return;
@@ -251,6 +264,244 @@
     }
     return htmlParts.join('');
   }
+
+  // -------------------------------------------------------------------------
+  // CHANGED: Show Outline toggle wiring
+  // - Checkbox: #ppa-show-outline (in composer.php)
+  // - Behavior: hide/show the "Outline" section inside #ppa-preview-pane
+  // - Persistence: localStorage key "ppa_show_outline"
+  // -------------------------------------------------------------------------
+  var OUTLINE_PREF_KEY = 'ppa_show_outline'; // CHANGED:
+  var outlineToggleEl = null; // CHANGED:
+
+  function getOutlineToggleEl() { // CHANGED:
+    if (outlineToggleEl && outlineToggleEl.nodeType === 1) return outlineToggleEl; // CHANGED:
+    var el = null; // CHANGED:
+    try { el = root.querySelector('#ppa-show-outline'); } catch (e0) { el = null; } // CHANGED:
+    if (!el) el = document.getElementById('ppa-show-outline'); // CHANGED:
+    outlineToggleEl = el || null; // CHANGED:
+    return outlineToggleEl; // CHANGED:
+  } // CHANGED:
+
+  function readOutlinePref() { // CHANGED:
+    try {
+      var v = window.localStorage ? window.localStorage.getItem(OUTLINE_PREF_KEY) : null; // CHANGED:
+      return (String(v || '') === '1'); // CHANGED:
+    } catch (e) {
+      return false; // CHANGED:
+    }
+  } // CHANGED:
+
+  function writeOutlinePref(isOn) { // CHANGED:
+    try {
+      if (!window.localStorage) return; // CHANGED:
+      window.localStorage.setItem(OUTLINE_PREF_KEY, isOn ? '1' : '0'); // CHANGED:
+    } catch (e) {}
+  } // CHANGED:
+
+  function setNodeVisible(node, visible) { // CHANGED:
+    if (!node || node.nodeType !== 1) return; // CHANGED:
+    try { node.style.display = visible ? '' : 'none'; } catch (e1) {} // CHANGED:
+    try { node.setAttribute('aria-hidden', visible ? 'false' : 'true'); } catch (e2) {} // CHANGED:
+  } // CHANGED:
+
+  function applyOutlineVisibility() { // CHANGED:
+    var pane = getPreviewPane(); // CHANGED:
+    if (!pane || pane.nodeType !== 1) return; // CHANGED:
+
+    var toggle = getOutlineToggleEl(); // CHANGED:
+    var show = toggle ? !!toggle.checked : false; // CHANGED:
+
+    // 1) Our legacy admin.js renderer: <div class="ppa-outline">...</div>
+    var blocks = []; // CHANGED:
+    try { blocks = Array.prototype.slice.call(pane.querySelectorAll('.ppa-outline') || []); } catch (e0) { blocks = []; } // CHANGED:
+    for (var i = 0; i < blocks.length; i++) { // CHANGED:
+      var b = blocks[i]; // CHANGED:
+      setNodeVisible(b, show); // CHANGED:
+      // Hide/show the header immediately preceding the outline block (if it is "Outline")
+      try { // CHANGED:
+        var prev = b.previousElementSibling; // CHANGED:
+        if (prev && prev.nodeType === 1 && String(prev.tagName || '').toUpperCase() === 'H3') { // CHANGED:
+          var t = String(prev.textContent || '').trim().toLowerCase(); // CHANGED:
+          if (t === 'outline') setNodeVisible(prev, show); // CHANGED:
+        } // CHANGED:
+      } catch (e1) {} // CHANGED:
+    } // CHANGED:
+
+    // 2) Module/other renderer: <h3>Outline</h3><ol>...</ol> (or <ul>/<div>)
+    var h3s = []; // CHANGED:
+    try { h3s = Array.prototype.slice.call(pane.querySelectorAll('h3') || []); } catch (e2) { h3s = []; } // CHANGED:
+    for (var j = 0; j < h3s.length; j++) { // CHANGED:
+      var h = h3s[j]; // CHANGED:
+      if (!h || h.nodeType !== 1) continue; // CHANGED:
+      var ht = String(h.textContent || '').trim().toLowerCase(); // CHANGED:
+      if (ht !== 'outline') continue; // CHANGED:
+
+      setNodeVisible(h, show); // CHANGED:
+
+      // Hide/show the immediate next block if it looks like the outline content
+      try { // CHANGED:
+        var nxt = h.nextElementSibling; // CHANGED:
+        if (nxt && nxt.nodeType === 1) { // CHANGED:
+          var tag = String(nxt.tagName || '').toUpperCase(); // CHANGED:
+          if (tag === 'OL' || tag === 'UL' || tag === 'DIV') { // CHANGED:
+            setNodeVisible(nxt, show); // CHANGED:
+          } // CHANGED:
+        } // CHANGED:
+      } catch (e3) {} // CHANGED:
+    } // CHANGED:
+  } // CHANGED:
+
+  (function bootOutlineToggle(){ // CHANGED:
+    var toggle = getOutlineToggleEl(); // CHANGED:
+    if (!toggle) return; // CHANGED:
+
+    // Set initial state from localStorage (default OFF)
+    try { toggle.checked = readOutlinePref(); } catch (e0) {} // CHANGED:
+
+    // Apply once on boot (in case preview is already rendered)
+    try { applyOutlineVisibility(); } catch (e1) {} // CHANGED:
+
+    // Wire change handler
+    toggle.addEventListener('change', function () { // CHANGED:
+      try { writeOutlinePref(!!toggle.checked); } catch (e2) {} // CHANGED:
+      try { applyOutlineVisibility(); } catch (e3) {} // CHANGED:
+    }, true); // CHANGED:
+  })(); // CHANGED:
+
+  // -------------------------------------------------------------------------
+  // CHANGED: ensureAutoHelperNotes()
+  // Goal: If the UI renders duplicate helper text under Genre and Tone like:
+  //   Auto sends "auto" so PostPress AI chooses a best-fit genre...
+  // We want ONE helper block spanning under Genre + Tone + Word Count.
+  // This is defensive: it tries multiple selector patterns and only acts
+  // when the three selects exist.
+  // -------------------------------------------------------------------------
+  function ensureAutoHelperNotes() { // CHANGED:
+    try {
+      var genre = $('#ppa-genre', root) || $('#ppa-genre'); // CHANGED:
+      var tone  = $('#ppa-tone', root) || $('#ppa-tone'); // CHANGED:
+      var wc    = $('#ppa-word-count', root) || $('#ppa-word-count'); // CHANGED:
+      if (!genre || !tone || !wc) return; // CHANGED:
+
+      // Find helper elements near a given control that match the "Auto sends" note.
+      function findAutoHelperNear(el) { // CHANGED:
+        if (!el) return null; // CHANGED:
+
+        var container = null; // CHANGED:
+        try {
+          // Prefer a local field wrapper if your markup has one.
+          container = (el.closest && el.closest('.ppa-field, .ppa-control, .ppa-form-row, .ppa-row, .form-field')) || el.parentNode; // CHANGED:
+        } catch (e0) { container = el.parentNode; } // CHANGED:
+
+        var candidates = []; // CHANGED:
+        if (container && container.querySelectorAll) { // CHANGED:
+          candidates = candidates.concat($all('.description, .ppa-help, .ppa-inline-help, .help, small, p, div', container)); // CHANGED:
+        } // CHANGED:
+
+        // Also consider immediate sibling blocks (common WP pattern).
+        try {
+          if (el.parentNode && el.parentNode.querySelectorAll) {
+            candidates = candidates.concat($all('.description, .ppa-help, .ppa-inline-help, small, p, div', el.parentNode)); // CHANGED:
+          }
+        } catch (e1) {}
+
+        // Filter to "Auto sends" notes (case-insensitive, tolerant).
+        var match = null; // CHANGED:
+        for (var i = 0; i < candidates.length; i++) { // CHANGED:
+          var node = candidates[i]; // CHANGED:
+          if (!node || node.nodeType !== 1) continue; // CHANGED:
+          var txt = String(node.textContent || '').trim(); // CHANGED:
+          if (!txt) continue; // CHANGED:
+          var t = txt.toLowerCase(); // CHANGED:
+          if (t.indexOf('auto sends') !== -1 && t.indexOf('"auto"') !== -1) { // CHANGED:
+            match = node; // CHANGED:
+            break; // CHANGED:
+          }
+          // Slightly more permissive fallback.
+          if (t.indexOf('auto sends') !== -1 && t.indexOf('auto') !== -1 && t.indexOf('postpress ai') !== -1) { // CHANGED:
+            match = node; // CHANGED:
+            break; // CHANGED:
+          }
+        } // CHANGED:
+
+        return match; // CHANGED:
+      } // CHANGED:
+
+      var h1 = findAutoHelperNear(genre); // CHANGED:
+      var h2 = findAutoHelperNear(tone); // CHANGED:
+      var h3 = findAutoHelperNear(wc); // CHANGED:
+
+      // Choose the first found helper as the "source text".
+      var source = h1 || h2 || h3; // CHANGED:
+      if (!source) return; // CHANGED:
+
+      var noteText = String(source.textContent || '').trim(); // CHANGED:
+      if (!noteText) return; // CHANGED:
+
+      // Find a wrapper that contains all three controls, so we can place a single note beneath them.
+      function findCommonWrapper(a, b, c) { // CHANGED:
+        var node = a; // CHANGED:
+        while (node && node !== root) { // CHANGED:
+          try {
+            if (node.contains && node.contains(b) && node.contains(c)) return node; // CHANGED:
+          } catch (e2) {}
+          node = node.parentNode; // CHANGED:
+        }
+        return root; // CHANGED:
+      } // CHANGED:
+
+      var wrap = findCommonWrapper(genre, tone, wc); // CHANGED:
+      if (!wrap) wrap = root; // CHANGED:
+
+      // If we already created the single note, just keep it updated.
+      var existing = null; // CHANGED:
+      try { existing = wrap.querySelector('.ppa-auto-helper-note'); } catch (e3) { existing = null; } // CHANGED:
+
+      if (!existing) { // CHANGED:
+        var p = document.createElement('p'); // CHANGED:
+        p.className = 'description ppa-auto-helper-note'; // CHANGED:
+        p.textContent = noteText; // CHANGED:
+
+        // Prefer to append after the three-field row if we can detect it.
+        // Otherwise, append to the common wrapper.
+        wrap.appendChild(p); // CHANGED:
+        existing = p; // CHANGED:
+      } else { // CHANGED:
+        existing.textContent = noteText; // CHANGED:
+      } // CHANGED:
+
+      // Hide duplicates near each field (but do not remove from DOM).
+      [h1, h2, h3].forEach(function (h) { // CHANGED:
+        if (!h || h === existing) return; // CHANGED:
+        try {
+          h.classList.add('ppa-hidden-auto-helper'); // CHANGED:
+          h.style.display = 'none'; // CHANGED:
+        } catch (e4) {}
+      }); // CHANGED:
+    } catch (e5) {
+      // Silent on purpose — this is UI sugar and must never break Composer.
+    }
+  }
+
+  // CHANGED: Run once on init (after a tiny delay in case the Composer markup is injected).
+  (function bootAutoHelperNotes(){ // CHANGED:
+    try { ensureAutoHelperNotes(); } catch (e0) {} // CHANGED:
+    window.setTimeout(function(){ // CHANGED:
+      try { ensureAutoHelperNotes(); } catch (e1) {} // CHANGED:
+    }, 50); // CHANGED:
+  })(); // CHANGED:
+
+  // CHANGED: If Composer UI re-renders pieces dynamically, re-apply (light, safe observer).
+  (function observeAutoHelperNotes(){ // CHANGED:
+    try {
+      if (!window.MutationObserver) return; // CHANGED:
+      var obs = new MutationObserver(function () { // CHANGED:
+        try { ensureAutoHelperNotes(); } catch (e2) {} // CHANGED:
+      }); // CHANGED:
+      obs.observe(root, { childList: true, subtree: true }); // CHANGED:
+    } catch (e3) {}
+  })(); // CHANGED:
 
   function buildPreviewPayload() {
     var subject = $('#ppa-subject');
@@ -597,6 +848,9 @@
 
     hardenPreviewLists(pane);
 
+    // CHANGED: After any preview render, re-apply Outline visibility preference.
+    try { applyOutlineVisibility(); } catch (e3) {} // CHANGED:
+
     try { pane.focus(); } catch (e2) {}
   }
 
@@ -733,15 +987,6 @@
     try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e1) {}
     try { if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (e2) {}
     try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
-  }
-
-  function clickGuard(btn) {
-    if (!btn) return false;
-    var ts = Number(btn.getAttribute('data-ppa-ts') || 0);
-    var now = (Date.now ? Date.now() : (new Date()).getTime());
-    if (now - ts < 350) return true;
-    btn.setAttribute('data-ppa-ts', String(now));
-    return false;
   }
 
   // Wire buttons

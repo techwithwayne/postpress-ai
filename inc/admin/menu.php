@@ -3,6 +3,11 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
+ * 2026-01-21: FIX: Settings page now renders by calling PPA_Admin_Settings::render_page() after include.        // CHANGED:
+ * 2026-01-21: ADD: Account submenu added + renderer (include account.php, call ppa_render_account(), fallback). // CHANGED:
+ * 2026-01-21: HARDEN: Composer renderer now supports both "file echoes UI" and "file defines a render function". // CHANGED:
+ * 2026-01-21: CLEAN: Remove success/noise logs; log only on failures.                                          // CHANGED:
+ *
  * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
  * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
  *             WP already auto-creates the first submenu for the parent slug via add_menu_page().              // CHANGED:
@@ -11,28 +16,6 @@
  * 2025-12-28: FIX: Register the 'ppa_settings' settings group early on admin_init so options.php accepts option_page=ppa_settings
  *             even when settings.php is only included by the menu callback (prevents "allowed options list" error).            // CHANGED:
  *             (No Django/endpoints/CORS/auth changes. No layout/CSS changes. menu.php only.)                                  // CHANGED:
- *
- * 2025-12-27: FIX: Add Settings submenu (admin-only) under PostPress AI and route to settings.php include. // CHANGED:
- * 2025-12-27: FIX: Gate Testbed submenu behind PPA_ENABLE_TESTBED === true (hidden by default).            // CHANGED:
- * 2025-12-27: FIX: Normalize Testbed slug to "postpress-ai-testbed" to match screen detection/enqueue.     // CHANGED:
- * 2025-12-27: KEEP: Single menu registrar lives here; settings.php no longer registers its own submenu.     // CHANGED:
- *
- * 2025-11-11: Use PPA_PLUGIN_DIR for template resolution (more reliable than nested plugin_dir_path math).   // CHANGED:
- *             Keep capability 'edit_posts' and consistent permission messages.                               // CHANGED:
- *             Clarify/annotate legacy Tools→Testbed removal.                                                 // CHANGED:
- * 2025-11-10: Fallback Testbed markup now uses IDs expected by ppa-testbed.js                // (prev)
- *             (ppa-testbed-input|preview|store|output|status). Prefer ppa-testbed.php        // (prev)
- *             over testbed.php when including templates. No inline assets added.             // (prev)
- * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;
- *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.
- * 2025-11-08: Add submenus under the top-level:
- *             - Rename default submenu to "PostPress Composer" (same slug as parent).
- *             - Add "Testbed" submenu (slug: ppa-testbed) under PostPress AI.
- *             - Remove legacy Tools→Testbed to avoid duplicates.
- * 2025-11-04: New file. Restores the top-level "PostPress AI" admin menu and composer renderer.
- *             - Registers menu with capability 'edit_posts' (Admin/Editor/Author).
- *             - Defines ppa_render_composer() (no inline JS/CSS; includes composer.php).
- *             - Defensive guards + breadcrumbs via error_log('PPA: ...').
  *
  * Notes:
  * - Keep this file presentation-free. No echo except inside the explicit render callbacks.
@@ -129,12 +112,13 @@ if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {             
  * Also adds:
  *  - Submenu "PostPress Composer" (renames the default submenu label).
  *  - Submenu "Settings" (admin-only).
+ *  - Submenu "Account" (admin-only).                                                                // CHANGED:
  *  - Submenu "Testbed" (hidden unless PPA_ENABLE_TESTBED === true).
  */
 if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 	function ppa_register_admin_menu() {
 		$capability_composer = 'edit_posts';
-		$capability_admin    = 'manage_options'; // Settings + Testbed are admin-only.                // CHANGED:
+		$capability_admin    = 'manage_options'; // Settings + Account + Testbed are admin-only.     // CHANGED:
 		$menu_slug           = 'postpress-ai';
 
 		// Custom SVG icon for PostPress AI                                                         // CHANGED:
@@ -167,41 +151,54 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );
 		}
 
-		// Settings submenu (admin-only)                                                        // CHANGED:
-		add_submenu_page(                                                                         // CHANGED:
-			$menu_slug,                                                                           // CHANGED:
-			__( 'PostPress AI Settings', 'postpress-ai' ),                                        // CHANGED:
-			__( 'Settings', 'postpress-ai' ),                                                     // CHANGED:
-			$capability_admin,                                                                    // CHANGED:
-			'postpress-ai-settings',                                                              // CHANGED:
-			'ppa_render_settings'                                                                 // CHANGED:
-		);                                                                                        // CHANGED:
+		// Settings submenu (admin-only)                                                             // CHANGED:
+		add_submenu_page(
+			$menu_slug,
+			__( 'PostPress AI Settings', 'postpress-ai' ),
+			__( 'Settings', 'postpress-ai' ),
+			$capability_admin,
+			'postpress-ai-settings',
+			'ppa_render_settings'
+		);
 
-		// Testbed submenu (admin-only AND gated)                                                 // CHANGED:
-		$testbed_enabled = ( defined( 'PPA_ENABLE_TESTBED' ) && true === PPA_ENABLE_TESTBED );    // CHANGED:
-		if ( $testbed_enabled ) {                                                                // CHANGED:
-			add_submenu_page(                                                                     // CHANGED:
-				$menu_slug,                                                                       // CHANGED:
-				__( 'PPA Testbed', 'postpress-ai' ),                                               // CHANGED:
-				__( 'Testbed', 'postpress-ai' ),                                                   // CHANGED:
-				$capability_admin,                                                                // CHANGED:
-				'postpress-ai-testbed',                                                           // CHANGED: normalized slug
-				'ppa_render_testbed'                                                              // CHANGED:
-			);                                                                                    // CHANGED:
-		}                                                                                        // CHANGED:
+		// Account submenu (admin-only)                                                               // CHANGED:
+		add_submenu_page(
+			$menu_slug,
+			__( 'PostPress AI Account', 'postpress-ai' ),
+			__( 'Account', 'postpress-ai' ),
+			$capability_admin,
+			'postpress-ai-account',
+			'ppa_render_account'
+		);
 
-		// Remove any legacy Tools→Testbed to avoid duplicates (harmless if not present).         // CHANGED:
-		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                       // CHANGED:
-		remove_submenu_page( 'tools.php', 'postpress-ai-testbed' );                              // CHANGED:
+		// Testbed submenu (admin-only AND gated)                                                     // CHANGED:
+		$testbed_enabled = ( defined( 'PPA_ENABLE_TESTBED' ) && true === PPA_ENABLE_TESTBED );       // CHANGED:
+		if ( $testbed_enabled ) {
+			add_submenu_page(
+				$menu_slug,
+				__( 'PPA Testbed', 'postpress-ai' ),
+				__( 'Testbed', 'postpress-ai' ),
+				$capability_admin,
+				'postpress-ai-testbed',
+				'ppa_render_testbed'
+			);
+		}
 
-		error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ')' );
+		// Remove any legacy Tools→Testbed to avoid duplicates (harmless if not present).             // CHANGED:
+		remove_submenu_page( 'tools.php', 'ppa-testbed' );
+		remove_submenu_page( 'tools.php', 'postpress-ai-testbed' );
 	}
 	add_action( 'admin_menu', 'ppa_register_admin_menu', 9 );
 }
 
 /**
  * Composer renderer (main UI).
- * Includes inc/admin/composer.php if present; otherwise prints a small, safe message.
+ * Includes inc/admin/composer.php if present.
+ *
+ * HARDEN:
+ * - Some composer.php versions echo the UI directly.
+ * - Other versions only define a function/class and expect a caller.
+ * This function now supports both patterns safely.                                                   // CHANGED:
  */
 if ( ! function_exists( 'ppa_render_composer' ) ) {
 	function ppa_render_composer() {
@@ -209,47 +206,137 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
 		}
 
-		// Prefer constant defined by root loader; avoids nested plugin_dir_path drift.            // CHANGED:
-		$composer = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/composer.php';                 // CHANGED:
+		$root = defined( 'PPA_PLUGIN_DIR' ) ? trailingslashit( PPA_PLUGIN_DIR ) : trailingslashit( dirname( __FILE__, 3 ) ); // CHANGED:
+		$composer = $root . 'inc/admin/composer.php';                                                                       // CHANGED:
 
 		if ( file_exists( $composer ) ) {
-			error_log( 'PPA: including composer.php' );
-			require $composer;
-			return;
+			ob_start();                                                                                                      // CHANGED:
+			require $composer;                                                                                               // CHANGED:
+			$out = ob_get_clean();                                                                                           // CHANGED:
+
+			// If the file echoed UI, print it and we’re done.
+			if ( is_string( $out ) && '' !== trim( $out ) ) {                                                                // CHANGED:
+				echo $out;                                                                                                   // CHANGED:
+				return;                                                                                                      // CHANGED:
+			}                                                                                                                // CHANGED:
+
+			// If the file defines a renderer, call it.
+			$candidates = array(                                                                                              // CHANGED:
+				'ppa_render_composer_ui',                                                                                    // CHANGED:
+				'ppa_composer_render',                                                                                       // CHANGED:
+				'postpress_ai_render_composer',                                                                              // CHANGED:
+			);                                                                                                               // CHANGED:
+			foreach ( $candidates as $fn ) {                                                                                  // CHANGED:
+				if ( function_exists( $fn ) ) {                                                                              // CHANGED:
+					call_user_func( $fn );                                                                                   // CHANGED:
+					return;                                                                                                  // CHANGED:
+				}                                                                                                            // CHANGED:
+			}                                                                                                                // CHANGED:
+
+			// If nothing rendered, fall through to a safe message.
+			error_log( 'PPA: composer.php included but produced no output and no known render function exists.' );            // CHANGED:
+		} else {
+			error_log( 'PPA: composer.php missing at ' . $composer );                                                         // CHANGED:
 		}
 
-		// Fallback UI (minimal, no inline assets beyond this safe notice).
-		error_log( 'PPA: composer.php missing at ' . $composer );
 		echo '<div class="wrap"><h1>PostPress Composer</h1><p>'
-			. esc_html__( 'Composer UI not found. Ensure inc/admin/composer.php exists.', 'postpress-ai' )
+			. esc_html__( 'Composer UI did not render. Ensure inc/admin/composer.php either echoes UI or defines ppa_render_composer_ui().', 'postpress-ai' )
 			. '</p></div>';
 	}
 }
 
 /**
  * Settings renderer (submenu).
- * Includes inc/admin/settings.php; the settings file owns the UI rendering.
+ *
+ * IMPORTANT:
+ * - settings.php does NOT render on include (by design, to avoid "headers already sent").
+ * - It defines PPA_Admin_Settings and calls ::init().
+ * - We MUST call ::render_page() here or the Settings screen will be blank.                              // CHANGED:
  */
-if ( ! function_exists( 'ppa_render_settings' ) ) {                                             // CHANGED:
-	function ppa_render_settings() {                                                            // CHANGED:
-		if ( ! current_user_can( 'manage_options' ) ) {                                          // CHANGED:
-			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) ); // CHANGED:
-		}                                                                                        // CHANGED:
+if ( ! function_exists( 'ppa_render_settings' ) ) {
+	function ppa_render_settings() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
+		}
 
-		$settings = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/settings.php';                 // CHANGED:
+		$root = defined( 'PPA_PLUGIN_DIR' ) ? trailingslashit( PPA_PLUGIN_DIR ) : trailingslashit( dirname( __FILE__, 3 ) ); // CHANGED:
+		$settings = $root . 'inc/admin/settings.php';                                                                         // CHANGED:
 
-		if ( file_exists( $settings ) ) {                                                        // CHANGED:
-			error_log( 'PPA: including settings.php' );                                           // CHANGED:
-			require $settings;                                                                    // CHANGED:
-			return;                                                                               // CHANGED:
-		}                                                                                        // CHANGED:
+		if ( file_exists( $settings ) ) {
+			ob_start();                                                                                                        // CHANGED:
+			require $settings;                                                                                                 // CHANGED:
+			$out = ob_get_clean();                                                                                             // CHANGED:
 
-		error_log( 'PPA: settings.php missing at ' . $settings );                                 // CHANGED:
-		echo '<div class="wrap"><h1>PostPress AI Settings</h1><p>'                                 // CHANGED:
-			. esc_html__( 'Settings UI not found. Ensure inc/admin/settings.php exists.', 'postpress-ai' ) // CHANGED:
-			. '</p></div>';                                                                       // CHANGED:
-	}                                                                                            // CHANGED:
-}                                                                                                // CHANGED:
+			// If settings.php echoed UI (it shouldn't), honor it and exit.
+			if ( is_string( $out ) && '' !== trim( $out ) ) {                                                                  // CHANGED:
+				echo $out;                                                                                                     // CHANGED:
+				return;                                                                                                        // CHANGED:
+			}                                                                                                                  // CHANGED:
+
+			// Correct behavior: call the renderer.
+			if ( class_exists( 'PPA_Admin_Settings' ) && method_exists( 'PPA_Admin_Settings', 'render_page' ) ) {              // CHANGED:
+				PPA_Admin_Settings::render_page();                                                                             // CHANGED:
+				return;                                                                                                        // CHANGED:
+			}                                                                                                                  // CHANGED:
+
+			error_log( 'PPA: settings.php loaded but PPA_Admin_Settings::render_page() not available.' );                      // CHANGED:
+		} else {
+			error_log( 'PPA: settings.php missing at ' . $settings );                                                          // CHANGED:
+		}
+
+		echo '<div class="wrap"><h1>PostPress AI Settings</h1><p>'
+			. esc_html__( 'Settings UI not available. Ensure inc/admin/settings.php defines PPA_Admin_Settings::render_page().', 'postpress-ai' )
+			. '</p></div>';
+	}
+}
+
+/**
+ * Account renderer (submenu).
+ * Supports:
+ * - account.php echoing UI
+ * - account.php defining ppa_render_account()
+ * - fallback placeholder
+ */
+if ( ! function_exists( 'ppa_render_account' ) ) {                                                     // CHANGED:
+	function ppa_render_account() {                                                                      // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {                                                   // CHANGED:
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );    // CHANGED:
+		}                                                                                                 // CHANGED:
+
+		$root = defined( 'PPA_PLUGIN_DIR' ) ? trailingslashit( PPA_PLUGIN_DIR ) : trailingslashit( dirname( __FILE__, 3 ) ); // CHANGED:
+		$account = $root . 'inc/admin/account.php';                                                       // CHANGED:
+
+		if ( file_exists( $account ) ) {                                                                  // CHANGED:
+			ob_start();                                                                                   // CHANGED:
+			require $account;                                                                             // CHANGED:
+			$out = ob_get_clean();                                                                        // CHANGED:
+
+			if ( is_string( $out ) && '' !== trim( $out ) ) {                                             // CHANGED:
+				echo $out;                                                                                // CHANGED:
+				return;                                                                                   // CHANGED:
+			}                                                                                             // CHANGED:
+
+			if ( function_exists( 'ppa_render_account_page' ) ) {                                         // CHANGED:
+				ppa_render_account_page();                                                                // CHANGED:
+				return;                                                                                   // CHANGED:
+			}                                                                                             // CHANGED:
+
+			if ( function_exists( 'ppa_render_account' ) && __FUNCTION__ !== 'ppa_render_account' ) {     // CHANGED (safety, should never happen)
+				ppa_render_account();                                                                     // CHANGED:
+				return;                                                                                   // CHANGED:
+			}                                                                                             // CHANGED:
+
+			// If file exists but didn’t render, log once (failure only).
+			error_log( 'PPA: account.php included but produced no output and no renderer found.' );        // CHANGED:
+		} else {
+			error_log( 'PPA: account.php missing at ' . $account );                                       // CHANGED:
+		}
+
+		echo '<div class="wrap"><h1>PostPress AI Account</h1><p>'
+			. esc_html__( 'Account page is connected. Next step: wire usage, sites, and upgrade links.', 'postpress-ai' )
+			. '</p></div>';
+	}                                                                                                     // CHANGED:
+}                                                                                                         // CHANGED:
 
 /**
  * Testbed renderer (submenu).
@@ -257,13 +344,12 @@ if ( ! function_exists( 'ppa_render_settings' ) ) {                             
  */
 if ( ! function_exists( 'ppa_render_testbed' ) ) {
 	function ppa_render_testbed() {
-		if ( ! current_user_can( 'manage_options' ) ) {                                          // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
 		}
 
-		$base = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/';                                 // CHANGED:
+		$base = ( defined( 'PPA_PLUGIN_DIR' ) ? trailingslashit( PPA_PLUGIN_DIR ) : trailingslashit( dirname( __FILE__, 3 ) ) ) . 'inc/admin/'; // CHANGED:
 
-		// Prefer the new template name first, then legacy.
 		$candidates = array(
 			$base . 'ppa-testbed.php',
 			$base . 'testbed.php',
@@ -271,14 +357,13 @@ if ( ! function_exists( 'ppa_render_testbed' ) ) {
 
 		foreach ( $candidates as $file ) {
 			if ( file_exists( $file ) ) {
-				error_log( 'PPA: including ' . basename( $file ) );
 				require $file;
 				return;
 			}
 		}
 
 		// Fallback UI — no inline JS/CSS; centralized enqueue provides styles/scripts.
-		error_log( 'PPA: testbed UI not found in inc/admin/ — using fallback markup' );
+		error_log( 'PPA: testbed UI not found in inc/admin/ — using fallback markup' ); // failure only
 		?>
 		<div class="wrap ppa-testbed-wrap">
 			<h1><?php echo esc_html__( 'Testbed', 'postpress-ai' ); ?></h1>
@@ -286,7 +371,6 @@ if ( ! function_exists( 'ppa_render_testbed' ) ) {
 				<?php echo esc_html__( 'This is the PostPress AI Testbed. Use it to send preview/draft requests to the backend.', 'postpress-ai' ); ?>
 			</p>
 
-			<!-- Status area consumed by JS -->
 			<div id="ppa-testbed-status" class="ppa-notice" role="status" aria-live="polite"></div>
 
 			<div class="ppa-form-group">
