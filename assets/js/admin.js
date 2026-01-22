@@ -1,9 +1,18 @@
+// /home/customer/www/customer1.yourwpsimple.com/public_html/wp-content/plugins/postpress-ai/assets/js/admin.js
 /* global window, document, jQuery */
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
+ * 2026-01-22: FIX: Remove duplicate title from Preview output by stripping leading title heading from body_markdown
+ *            BEFORE rendering. Title remains only in the WP title field. Preview does NOT inject title into body HTML. // CHANGED:
+ *
+ * 2026-01-22: FIX: "Show Outline" checkbox now works:
+ *            - Reads stored preference on page load (localStorage) // CHANGED:
+ *            - Toggles outline section in real-time in preview // CHANGED:
+ *            - Persists across refresh, and Save Draft respects the preference // CHANGED:
+ *
  * 2026-01-22: FIX: Save Draft (Store) now opens the WP draft editor in a NEW TAB (popup-safe).     // CHANGED:
  *            - Synchronously opens about:blank on real click                                         // CHANGED:
  *            - After async store success, navigates that same tab to edit_link (or fallback).        // CHANGED:
@@ -30,7 +39,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-22.4'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-22.5'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -275,6 +284,147 @@
   }
 
   // -------------------------------------------------------------------------
+  // Issue 1 (CHANGED): Strip duplicate title heading from body_markdown
+  // -------------------------------------------------------------------------
+  function ppaNormalizeComparableTitle(s) { // CHANGED:
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\u2019']/g, '')        // normalize apostrophes // CHANGED:
+      .replace(/[^a-z0-9\s-]/g, '')     // drop punctuation // CHANGED:
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function ppaStripLeadingTitleHeading(bodyMarkdown, title) { // CHANGED:
+    var md = String(bodyMarkdown || '');
+    if (!md.trim()) return md;
+
+    var t = ppaNormalizeComparableTitle(title);
+    if (!t) return md;
+
+    // Match an initial markdown heading line (#..######) possibly after blank lines.
+    var re = /^(\s*\n)*#{1,6}\s+(.+?)\s*(\n+|$)/; // CHANGED:
+    var m = md.match(re);
+    if (!m) return md;
+
+    var headingText = ppaNormalizeComparableTitle(m[2] || '');
+    if (headingText && headingText === t) {
+      // Remove the heading + any blank lines immediately after it.
+      var stripped = md.slice(m[0].length).replace(/^(\s*\n)+/, ''); // CHANGED:
+      return stripped;
+    }
+    return md;
+  }
+
+  // -------------------------------------------------------------------------
+  // Issue 2 (CHANGED): Show Outline checkbox + persistent localStorage
+  // -------------------------------------------------------------------------
+  var PPA_LS_SHOW_OUTLINE = 'ppa_show_outline'; // CHANGED:
+
+  function ppaGetShowOutlinePref() { // CHANGED:
+    try {
+      var v = window.localStorage ? window.localStorage.getItem(PPA_LS_SHOW_OUTLINE) : null; // CHANGED:
+      // Default ON
+      if (v === null || v === undefined || v === '') return true; // CHANGED:
+      return (v === '1' || v === 'true'); // CHANGED:
+    } catch (e) {
+      return true; // CHANGED:
+    }
+  }
+
+  function ppaSetShowOutlinePref(isOn) { // CHANGED:
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem(PPA_LS_SHOW_OUTLINE, isOn ? '1' : '0'); // CHANGED:
+    } catch (e) {}
+  }
+
+  function ppaFindShowOutlineCheckbox() { // CHANGED:
+    // Defensive: support multiple possible IDs/names.
+    return (
+      document.getElementById('ppa-show-outline') || // CHANGED:
+      document.getElementById('ppa_show_outline') || // CHANGED:
+      $('input[name="ppa_show_outline"]', root) || // CHANGED:
+      $('input[name="ppa_show_outline"]') || // CHANGED:
+      $('input[data-ppa="show-outline"]', root) || // CHANGED:
+      $('input[data-ppa="show-outline"]') || // CHANGED:
+      $('input#show-outline', root) || // CHANGED:
+      $('input#show-outline') // CHANGED:
+    );
+  }
+
+  function ppaApplyOutlineVisibilityToPreview(pane) { // CHANGED:
+    if (!pane || pane.nodeType !== 1) return;
+
+    var show = ppaGetShowOutlinePref(); // CHANGED:
+
+    // Prefer the wrapper we render (ppa-outline-section), otherwise fallback to .ppa-outline
+    var wrap = null; // CHANGED:
+    try { wrap = pane.querySelector('.ppa-outline-section'); } catch (e0) { wrap = null; } // CHANGED:
+    if (wrap) {
+      try { wrap.style.display = show ? '' : 'none'; } catch (e1) {} // CHANGED:
+      return; // CHANGED:
+    }
+
+    var outline = null; // CHANGED:
+    try { outline = pane.querySelector('.ppa-outline'); } catch (e2) { outline = null; } // CHANGED:
+    if (outline) {
+      try { outline.style.display = show ? '' : 'none'; } catch (e3) {} // CHANGED:
+    }
+  }
+
+  function ppaBindShowOutlineCheckbox() { // CHANGED:
+    var cb = ppaFindShowOutlineCheckbox();
+    if (!cb) return;
+
+    // Set on load from saved preference
+    try { cb.checked = ppaGetShowOutlinePref(); } catch (e0) {}
+
+    // Apply visibility immediately if preview already exists
+    try { ppaApplyOutlineVisibilityToPreview(getPreviewPane()); } catch (e1) {}
+
+    cb.addEventListener('change', function () { // CHANGED:
+      var isOn = !!cb.checked; // CHANGED:
+      ppaSetShowOutlinePref(isOn); // CHANGED:
+      ppaApplyOutlineVisibilityToPreview(getPreviewPane()); // CHANGED:
+    });
+  }
+
+  (function bootShowOutline() { // CHANGED:
+    try { ppaBindShowOutlineCheckbox(); } catch (e0) {}
+    // In case the checkbox is injected late, retry briefly.
+    window.setTimeout(function () { // CHANGED:
+      try { ppaBindShowOutlineCheckbox(); } catch (e1) {}
+    }, 50);
+    window.setTimeout(function () { // CHANGED:
+      try { ppaBindShowOutlineCheckbox(); } catch (e2) {}
+    }, 250);
+  })();
+
+  function ppaStripOutlineFromHtml(html) { // CHANGED:
+    var s = String(html || '');
+    if (!s.trim()) return s;
+    try {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = s;
+      var sec = tmp.querySelector('.ppa-outline-section');
+      if (sec && sec.parentNode) sec.parentNode.removeChild(sec);
+
+      // Fallback: remove any remaining .ppa-outline blocks if wrapper wasn't present.
+      var leftovers = tmp.querySelectorAll('.ppa-outline');
+      for (var i = 0; i < leftovers.length; i++) {
+        var n = leftovers[i];
+        if (n && n.parentNode) n.parentNode.removeChild(n);
+      }
+      return tmp.innerHTML;
+    } catch (e) {
+      // Regex fallback (best-effort)
+      return s.replace(/<div[^>]*class="[^"]*ppa-outline-section[^"]*"[^>]*>[\s\S]*?<\/div>/i, ''); // CHANGED:
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // CHANGED: ensureAutoHelperNotes()
   // Goal: If the UI renders duplicate helper text under Genre and Tone like:
   //   Auto sends "auto" so PostPress AI chooses a best-fit genre...
@@ -499,6 +649,10 @@
       var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
       if (html) {
+        // CHANGED: If Show Outline is OFF, do NOT store the outline section.
+        if (!ppaGetShowOutlinePref()) { // CHANGED:
+          html = ppaStripOutlineFromHtml(html); // CHANGED:
+        }
         payload.content = html;
         if (!payload.title)   payload.title   = extractTitleFromHtml(html);
         if (!payload.excerpt) payload.excerpt = extractExcerptFromHtml(html);
@@ -848,29 +1002,40 @@
   }
 
   function buildPreviewHtml(result) {
-    var title = '';
     var outline = '';
     var bodyMd = '';
     var meta = null;
+    var title = ''; // CHANGED: still used for de-dup, but NOT rendered in preview.
 
     if (result && typeof result === 'object') {
-      title = String(result.title || '').trim();
+      title = String(result.title || '').trim(); // CHANGED:
       outline = String(result.outline || '');
       bodyMd = String(result.body_markdown || result.body || '');
       meta = result.meta || result.seo || null;
     }
 
+    // CHANGED: Strip a leading "# Title" style heading from body_markdown so title doesn't show twice.
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title); // CHANGED:
+
     var html = '';
     html += '<div class="ppa-preview">';
-    if (title) html += '<h2>' + escHtml(title) + '</h2>';
+
+    // CHANGED: Do NOT inject title into preview pane HTML.
+    // Title should live only in the WP title field.
+
+    // Outline section (wrapped so we can toggle cleanly)
     if (outline) {
+      html += '<div class="ppa-outline-section">'; // CHANGED:
       html += '<h3>Outline</h3>';
       html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>';
+      html += '</div>'; // CHANGED:
     }
+
     if (bodyMd) {
       html += '<h3>Body</h3>';
       html += '<div class="ppa-body">' + markdownToHtml(bodyMd) + '</div>';
     }
+
     if (meta && typeof meta === 'object') {
       html += '<h3>Meta</h3>';
       html += '<ul class="ppa-meta">';
@@ -904,7 +1069,11 @@
 
     hardenPreviewLists(pane);
 
+    // CHANGED: Apply outline visibility preference immediately after rendering.
+    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV) {} // CHANGED:
+
     try { ppaHydrateOutline(pane, result); } catch (eO) {} // CHANGED:
+    try { ppaApplyOutlineVisibilityToPreview(pane); } catch (eV2) {} // CHANGED: re-apply after hydration
     try { pane.focus(); } catch (e2) {}
   }
 
@@ -931,6 +1100,9 @@
     var title = ppaCleanTitle(result.title || '');
     var bodyMd = String(result.body_markdown || result.body || '');
     var meta = result.meta || result.seo || {};
+
+    // CHANGED: Strip duplicate title heading from body markdown before converting to HTML.
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title); // CHANGED:
 
     var filled = { titleFilled: false, excerptFilled: false, slugFilled: false };
 
