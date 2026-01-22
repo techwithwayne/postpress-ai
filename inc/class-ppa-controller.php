@@ -7,6 +7,10 @@
  * /wp-content/plugins/postpress-ai/inc/class-ppa-controller.php
  *
  * CHANGE LOG
+ * 2026-01-22 • FIX: ajax_store() now creates/updates a LOCAL WordPress post (draft/publish) from Django result,  // CHANGED:
+ *            and returns post_id + edit_link + permalink so the Composer can open the saved draft.              // CHANGED:
+ *            No contract/CORS/auth changes. Minimal, useful behavior only.                                     // CHANGED:
+ *
  * 2026-01-21 • FIX: Auth headers now include BOTH X-PPA-Key and Authorization: Bearer <key>.        // CHANGED:
  *            • FIX: Always send site identifier header X-PPA-Site to support site-bound activation. // CHANGED:
  *            • FIX: For Django HTTP >= 400, return wp_send_json_error (not success).                // CHANGED:
@@ -277,6 +281,152 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 		}
 
 		// -------------------------------
+		// LOCAL WP POST HELPERS (Store)
+		// -------------------------------
+
+		private static function normalize_post_status( $status ) {                                                         // CHANGED:
+			$s = strtolower( trim( (string) $status ) );                                                                    // CHANGED:
+			if ( '' === $s ) { return 'draft'; }                                                                            // CHANGED:
+			$allowed = array( 'draft', 'publish', 'pending', 'private' );                                                    // CHANGED:
+			if ( in_array( $s, $allowed, true ) ) { return $s; }                                                            // CHANGED:
+			// Some callers use "published" or "public" etc; normalize conservatively.                                      // CHANGED:
+			if ( 'published' === $s ) { return 'publish'; }                                                                 // CHANGED:
+			return 'draft';                                                                                                 // CHANGED:
+		}                                                                                                                   // CHANGED:
+
+		private static function safe_post_content( $content_html ) {                                                        // CHANGED:
+			// Keep it safe but preserve formatting. This strips scripts/unsafe tags.                                        // CHANGED:
+			$c = (string) $content_html;                                                                                    // CHANGED:
+			if ( '' === trim( $c ) ) { return ''; }                                                                         // CHANGED:
+			if ( function_exists( 'wp_kses_post' ) ) {                                                                      // CHANGED:
+				return wp_kses_post( $c );                                                                                  // CHANGED:
+			}                                                                                                               // CHANGED:
+			return $c;                                                                                                      // CHANGED:
+		}                                                                                                                   // CHANGED:
+
+		private static function resolve_int_post_id( $maybe ) {                                                             // CHANGED:
+			$pid = (int) $maybe;                                                                                            // CHANGED:
+			return ( $pid > 0 ) ? $pid : 0;                                                                                 // CHANGED:
+		}                                                                                                                   // CHANGED:
+
+		private static function assign_terms_if_present( $post_id, $payload_json ) {                                        // CHANGED:
+			// Optional: if payload included tags/categories, set them. Safe no-op if missing.                               // CHANGED:
+			if ( ! $post_id || ! is_array( $payload_json ) ) { return; }                                                    // CHANGED:
+			try {                                                                                                           // CHANGED:
+				// Tags: supports array of strings or CSV-like.                                                              // CHANGED:
+				if ( isset( $payload_json['tags'] ) && is_array( $payload_json['tags'] ) ) {                                // CHANGED:
+					$tags = array();                                                                                        // CHANGED:
+					foreach ( $payload_json['tags'] as $t ) {                                                               // CHANGED:
+						$t = trim( (string) $t );                                                                           // CHANGED:
+						if ( '' !== $t ) { $tags[] = $t; }                                                                  // CHANGED:
+					}                                                                                                       // CHANGED:
+					if ( ! empty( $tags ) ) {                                                                               // CHANGED:
+						wp_set_post_terms( $post_id, $tags, 'post_tag', false );                                             // CHANGED:
+					}                                                                                                       // CHANGED:
+				}                                                                                                           // CHANGED:
+				// Categories: supports array of ints/strings.                                                               // CHANGED:
+				if ( isset( $payload_json['categories'] ) && is_array( $payload_json['categories'] ) ) {                    // CHANGED:
+					$cats = array();                                                                                        // CHANGED:
+					foreach ( $payload_json['categories'] as $c ) {                                                         // CHANGED:
+						$cid = (int) $c;                                                                                    // CHANGED:
+						if ( $cid > 0 ) { $cats[] = $cid; }                                                                 // CHANGED:
+					}                                                                                                       // CHANGED:
+					if ( ! empty( $cats ) ) {                                                                               // CHANGED:
+						wp_set_post_categories( $post_id, $cats, false );                                                    // CHANGED:
+					}                                                                                                       // CHANGED:
+				}                                                                                                           // CHANGED:
+			} catch ( Exception $e ) {                                                                                      // CHANGED:
+				// Silent by design (must not block saving).                                                                 // CHANGED:
+			}                                                                                                               // CHANGED:
+		}                                                                                                                   // CHANGED:
+
+		private static function upsert_wp_post_from_django( $payload_json, $django_json ) {                                  // CHANGED:
+			// Expects Django JSON like: { ok:true, provider:"django", result:{ title, content, excerpt, slug, status... } } // CHANGED:
+			// Returns: array( 'post_id' => int, 'edit_link' => string, 'permalink' => string )                              // CHANGED:
+
+			if ( ! is_array( $django_json ) ) {                                                                             // CHANGED:
+				return new WP_Error( 'ppa_invalid_django_json', 'Invalid Django response JSON.' );                           // CHANGED:
+			}                                                                                                               // CHANGED:
+
+			$result = array();                                                                                              // CHANGED:
+			if ( isset( $django_json['result'] ) && is_array( $django_json['result'] ) ) {                                  // CHANGED:
+				$result = $django_json['result'];                                                                           // CHANGED:
+			} else {
+				// Some backends may return the result at the top level; allow that.                                         // CHANGED:
+				$result = $django_json;                                                                                     // CHANGED:
+			}
+
+			$title   = isset( $result['title'] ) ? (string) $result['title'] : '';                                          // CHANGED:
+			$content = isset( $result['content'] ) ? (string) $result['content'] : '';                                      // CHANGED:
+			$excerpt = isset( $result['excerpt'] ) ? (string) $result['excerpt'] : '';                                      // CHANGED:
+			$slug    = isset( $result['slug'] ) ? (string) $result['slug'] : '';                                            // CHANGED:
+			$status  = isset( $result['status'] ) ? (string) $result['status'] : ( isset( $payload_json['status'] ) ? (string) $payload_json['status'] : 'draft' ); // CHANGED:
+			$status  = self::normalize_post_status( $status );                                                              // CHANGED:
+
+			// Allow payload post_id to update an existing post (edit screen).                                               // CHANGED:
+			$post_id = 0;                                                                                                   // CHANGED:
+			if ( isset( $payload_json['post_id'] ) ) {                                                                       // CHANGED:
+				$post_id = self::resolve_int_post_id( $payload_json['post_id'] );                                            // CHANGED:
+			}
+
+			// Build the post array.                                                                                         // CHANGED:
+			$postarr = array(
+				'post_type'    => 'post',                                                                                   // CHANGED:
+				'post_status'  => $status,                                                                                  // CHANGED:
+				'post_title'   => wp_strip_all_tags( $title ),                                                              // CHANGED:
+				'post_content' => self::safe_post_content( $content ),                                                      // CHANGED:
+				'post_excerpt' => (string) $excerpt,                                                                        // CHANGED:
+			);
+
+			// Author: current user, if available.                                                                           // CHANGED:
+			$uid = get_current_user_id();                                                                                   // CHANGED:
+			if ( $uid > 0 ) { $postarr['post_author'] = $uid; }                                                             // CHANGED:
+
+			// Slug: only set if provided; sanitize.                                                                         // CHANGED:
+			$slug = trim( (string) $slug );                                                                                 // CHANGED:
+			if ( '' !== $slug ) {                                                                                            // CHANGED:
+				$postarr['post_name'] = sanitize_title( $slug );                                                            // CHANGED:
+			}
+
+			// Upsert.                                                                                                       // CHANGED:
+			if ( $post_id > 0 && get_post( $post_id ) ) {                                                                    // CHANGED:
+				$postarr['ID'] = $post_id;                                                                                  // CHANGED:
+				$maybe_id = wp_update_post( $postarr, true );                                                               // CHANGED:
+			} else {
+				$maybe_id = wp_insert_post( $postarr, true );                                                               // CHANGED:
+			}
+
+			if ( is_wp_error( $maybe_id ) ) {                                                                               // CHANGED:
+				return $maybe_id;                                                                                           // CHANGED:
+			}
+
+			$post_id = (int) $maybe_id;                                                                                     // CHANGED:
+
+			// Optional tax assignment (tags/categories) from payload (if present).                                          // CHANGED:
+			self::assign_terms_if_present( $post_id, ( is_array( $payload_json ) ? $payload_json : array() ) );            // CHANGED:
+
+			// Links.                                                                                                        // CHANGED:
+			$edit_link = '';                                                                                                // CHANGED:
+			if ( function_exists( 'get_edit_post_link' ) ) {                                                                // CHANGED:
+				$edit_link = (string) get_edit_post_link( $post_id, 'raw' );                                                // CHANGED:
+			}                                                                                                               // CHANGED:
+			if ( '' === $edit_link ) {                                                                                      // CHANGED:
+				$edit_link = admin_url( 'post.php?post=' . $post_id . '&action=edit' );                                     // CHANGED:
+			}                                                                                                               // CHANGED:
+
+			$permalink = '';                                                                                                // CHANGED:
+			if ( function_exists( 'get_permalink' ) ) {                                                                     // CHANGED:
+				$permalink = (string) get_permalink( $post_id );                                                           // CHANGED:
+			}                                                                                                               // CHANGED:
+
+			return array(
+				'post_id'   => $post_id,                                                                                    // CHANGED:
+				'edit_link' => $edit_link,                                                                                  // CHANGED:
+				'permalink' => $permalink,                                                                                  // CHANGED:
+			);
+		}                                                                                                                   // CHANGED:
+
+		// -------------------------------
 		// Endpoints
 		// -------------------------------
 
@@ -351,6 +501,32 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			if ( $code >= 400 ) {                                                                                         // CHANGED:
 				wp_send_json_error( $json, $code );                                                                      // CHANGED:
 			}
+
+			/**
+			 * CHANGED: At this point Django succeeded, but we MUST create/update the local WP post
+			 * so the Composer can open the saved draft editor.
+			 *
+			 * We do NOT change contracts: we simply add post_id/edit_link/permalink to the returned JSON.
+			 */
+			$upsert = self::upsert_wp_post_from_django( $payload['json'], $json );                                          // CHANGED:
+			if ( is_wp_error( $upsert ) ) {                                                                                // CHANGED:
+				wp_send_json_error(                                                                                         // CHANGED:
+					self::error_payload( 'wp_post_save_failed', 500, array( 'detail' => $upsert->get_error_message() ) ),   // CHANGED:
+					500                                                                                                     // CHANGED:
+				);                                                                                                          // CHANGED:
+			}                                                                                                               // CHANGED:
+
+			// Guarantee top-level link fields are present where the admin UI expects them.                                 // CHANGED:
+			$json['post_id']   = $upsert['post_id'];                                                                       // CHANGED:
+			$json['edit_link'] = $upsert['edit_link'];                                                                     // CHANGED:
+			$json['permalink'] = $upsert['permalink'];                                                                     // CHANGED:
+
+			// Also mirror into result for compatibility, but keep it non-breaking.                                         // CHANGED:
+			if ( isset( $json['result'] ) && is_array( $json['result'] ) ) {                                                // CHANGED:
+				$json['result']['post_id']   = $upsert['post_id'];                                                         // CHANGED:
+				$json['result']['edit_link'] = $upsert['edit_link'];                                                       // CHANGED:
+				$json['result']['permalink'] = $upsert['permalink'];                                                       // CHANGED:
+			}                                                                                                               // CHANGED:
 
 			wp_send_json_success( $json, $code );
 		}

@@ -1,0 +1,389 @@
+/* /home/u3007-tenkoaygp3je/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/css/admin-composer.css */
+
+/*
+ * PostPress AI — Admin Composer CSS (Modular)
+ *
+ * Scope:
+ *   body.toplevel_page_postpress-ai …
+ *   (Confirmed via body class containing: "toplevel_page_postpress-ai")
+ *
+ * Purpose:
+ *   Composer screen ONLY:
+ *   - Dark Composer UI styling
+ *   - Proper two-panel layout (form + preview)
+ *   - Form controls + buttons
+ *   - Preview typography
+ *   - View Draft pill CTA styling (when it exists)
+ *
+ * ========= CHANGE LOG =========
+ * 2026-01-07 — ADD: Outline toggle control styling (Show Outline) to match admin.js UI.               # CHANGED:
+ * 2026-01-01 — FIX: Style the REAL Composer markup (.ppa-form-panel/.ppa-preview-panel/.ppa-inline/.ppa-btn). # CHANGED:
+ * 2026-01-01 — FIX: Headings + buttons now match the actual DOM (no more .wrap > h1 / .button mismatch).      # CHANGED:
+ * 2026-01-01 — KEEP: Composer-only scoping (no global bleed).                                                  # CHANGED:
+ */
+
+body.toplevel_page_postpress-ai{
+  --ppa-bg:#121212;
+  --ppa-panel:#1c1c1c;
+  --ppa-border:rgba(255,255,255,.10);
+  --ppa-text:#f5f5f5;
+  --ppa-muted:#cfcfcf;
+  --ppa-accent:#ff6c00;
+
+  --ppa-field:#2b2b2b;
+  --ppa-field-border:#333;
+}
+
+/* Give WP admin content a little breathing room */
+body.toplevel_page_postpress-ai #wpbody-content{
+  padding-bottom: 24px;
+}
+
+/* Composer root (this is the grid container) */
+body.toplevel_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap{
+  max-width: 1180px;
+  margin-top: 18px;
+
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+
+  background: var(--ppa-bg);
+  color: var(--ppa-text);
+
+  padding: 24px;
+  border-radius: 14px;
+  box-sizing: border-box;
+
+  box-shadow: 0 10px 28px rgba(0,0,0,.30);
+}
+
+/* Panels */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-preview-panel{
+  background: var(--ppa-panel);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  padding: 22px;
+  box-sizing: border-box;
+}
+
+/* Titles */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel h1,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-preview-panel h1{
+  color: var(--ppa-accent);
+  margin: 0 0 10px;
+  font-weight: 900;
+}
+
+/* Signed-in hint + helper copy */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-hint{
+  margin: 0 0 14px;
+  color: var(--ppa-muted);
+  font-size: 13px;
+}
+
+/* Live notice region: don’t take up space when empty */
+body.toplevel_page_postpress-ai #ppa-toolbar-msg.ppa-notice{
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.06);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.35;
+  min-height: 0;
+}
+body.toplevel_page_postpress-ai #ppa-toolbar-msg.ppa-notice:empty{
+  display: none;
+}
+
+/* Form groups */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-group{
+  margin-top: 14px;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer label{
+  display: block;
+  margin: 0 0 6px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+/* Inline row: Genre / Tone / Word Count */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-inline{
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+/* Inputs */
+body.toplevel_page_postpress-ai #ppa-composer input[type="text"],
+body.toplevel_page_postpress-ai #ppa-composer input[type="number"],
+body.toplevel_page_postpress-ai #ppa-composer textarea,
+body.toplevel_page_postpress-ai #ppa-composer select{
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+
+  margin: 0;
+  padding: 10px 12px;
+
+  border-radius: 10px;
+  border: 1px solid var(--ppa-field-border);
+
+  background: var(--ppa-field);
+  color: #ffffff;
+
+  font-size: 14px;
+}
+
+/* Textareas */
+body.toplevel_page_postpress-ai #ppa-composer textarea{
+  min-height: 140px;
+  line-height: 1.35;
+  resize: vertical;
+}
+
+/* Focus */
+body.toplevel_page_postpress-ai #ppa-composer input:focus,
+body.toplevel_page_postpress-ai #ppa-composer select:focus,
+body.toplevel_page_postpress-ai #ppa-composer textarea:focus{
+  outline: none;
+  border-color: var(--ppa-accent);
+  box-shadow: 0 0 0 1px var(--ppa-accent);
+}
+
+/* Dropdown chevron + selected padding standard */
+body.toplevel_page_postpress-ai #ppa-composer select{
+  color: #f5f5f5;
+  background-color: var(--ppa-field);
+  border: 1px solid #444;
+
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff6c00' height='12' viewBox='0 0 24 24' width='12' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+
+  padding: 0em 0.75rem;  /* requested standard */
+  padding-right: 34px;
+  height: 46px;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer select option{
+  color: #fff;
+  background-color: #1c1c1c;
+}
+
+/* Advanced box */
+body.toplevel_page_postpress-ai #ppa-composer details.ppa-advanced{
+  margin-top: 14px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 12px;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer details.ppa-advanced > summary{
+  cursor: pointer;
+  color: #eaeaea;
+  font-weight: 900;
+  margin: 0 0 10px;
+}
+
+/* Actions */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-actions{
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Plugin buttons (your real buttons are .ppa-btn) */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 10px 16px;
+  border-radius: 12px;
+
+  border: 1px solid rgba(255,255,255,.12);
+  background: #2b2b2b;
+  color: #ffffff;
+
+  font-weight: 900;
+  cursor: pointer;
+
+  transition: background .15s ease, transform .05s ease;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-btn:hover{
+  background: #3a3a3a;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-btn:active{
+  transform: translateY(1px);
+}
+
+/* Primary (orange) */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-btn.ppa-btn-primary{
+  background: var(--ppa-accent);
+  border-color: var(--ppa-accent);
+  color: #ffffff;
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-btn.ppa-btn-primary:hover{
+  background: #ff8126;
+  border-color: #ff8126;
+}
+
+/* Note text beside buttons */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-note{
+  display: block;
+  flex: 1 1 100%;
+  margin-top: 8px;
+
+  color: var(--ppa-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Preview panel */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-preview-panel{
+  position: relative;
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+}
+
+/* Preview box */
+body.toplevel_page_postpress-ai #ppa-preview-pane{
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+  color: #eaeaea;
+}
+
+/* Preview typography */
+body.toplevel_page_postpress-ai #ppa-preview-pane h2,
+body.toplevel_page_postpress-ai #ppa-preview-pane h3,
+body.toplevel_page_postpress-ai #ppa-preview-pane h4{
+  color: var(--ppa-accent);
+  margin-top: 1.1em;
+  margin-bottom: .35em;
+  font-weight: 900;
+}
+
+body.toplevel_page_postpress-ai #ppa-preview-pane p{
+  margin: 0 0 12px;
+  line-height: 1.7;
+}
+
+body.toplevel_page_postpress-ai #ppa-preview-pane ul,
+body.toplevel_page_postpress-ai #ppa-preview-pane ol{
+  margin: 10px 0 12px 18px;
+}
+
+body.toplevel_page_postpress-ai #ppa-preview-pane a{
+  color: #ff8126;
+  text-decoration: underline;
+}
+body.toplevel_page_postpress-ai #ppa-preview-pane a:hover{
+  color: #ffa45b;
+}
+
+
+/* Outline toggle (Preview panel control injected by admin.js) */ /* # CHANGED: */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-outline-toggle-wrap{ /* # CHANGED: */
+  display: inline-flex; /* # CHANGED: */
+  align-items: center; /* # CHANGED: */
+  gap: 8px; /* # CHANGED: */
+
+  padding: 6px 10px; /* # CHANGED: */
+  border-radius: 999px; /* # CHANGED: */
+  border: 1px solid rgba(255,255,255,.12); /* # CHANGED: */
+  background: rgba(255,255,255,.04); /* # CHANGED: */
+
+  color: #ffffff; /* # CHANGED: */
+  font-size: 12px; /* # CHANGED: */
+  font-weight: 900; /* # CHANGED: */
+
+  /* Keep it visually aligned with action buttons when it’s appended there */ /* # CHANGED: */
+  margin-left: 6px; /* # CHANGED: */
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-outline-toggle-wrap input[type="checkbox"]{ /* # CHANGED: */
+  width: 16px; /* # CHANGED: */
+  height: 16px; /* # CHANGED: */
+  margin: 0; /* # CHANGED: */
+  accent-color: var(--ppa-accent); /* # CHANGED: */
+  cursor: pointer; /* # CHANGED: */
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-outline-toggle-wrap label{ /* # CHANGED: */
+  margin: 0; /* # CHANGED: */
+  font-weight: 900; /* # CHANGED: */
+  font-size: 12px; /* # CHANGED: */
+  color: #ffffff; /* # CHANGED: */
+  cursor: pointer; /* # CHANGED: */
+}
+
+body.toplevel_page_postpress-ai #ppa-composer .ppa-outline-toggle-wrap:focus-within{ /* # CHANGED: */
+  border-color: var(--ppa-accent); /* # CHANGED: */
+  box-shadow: 0 0 0 1px var(--ppa-accent); /* # CHANGED: */
+}
+
+/* View Draft CTA (shows after Save Draft, if markup exists) */
+body.toplevel_page_postpress-ai #ppa-view-draft-wrap{
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+body.toplevel_page_postpress-ai a#ppa-view-draft-link{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 10px 16px;
+  border-radius: 999px;
+
+  background: var(--ppa-accent);
+  color: #ffffff !important;
+  font-weight: 900;
+
+  text-decoration: none !important;
+  border: 1px solid rgba(0,0,0,0);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+
+body.toplevel_page_postpress-ai a#ppa-view-draft-link:hover{
+  background: #ff8126;
+}
+
+body.toplevel_page_postpress-ai a#ppa-view-draft-link:focus{
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255,108,0,.65), 0 6px 18px rgba(0,0,0,.35);
+}
+
+/* Responsive */
+@media (max-width: 980px){
+  body.toplevel_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap{
+    grid-template-columns: 1fr;
+  }
+
+  body.toplevel_page_postpress-ai #ppa-composer .ppa-inline{
+    grid-template-columns: 1fr;
+  }
+
+  body.toplevel_page_postpress-ai #ppa-composer .ppa-preview-panel{
+    max-height: none;
+  }
+}

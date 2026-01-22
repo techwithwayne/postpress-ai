@@ -1,139 +1,206 @@
-/*!
- * PostPress AI — Generate View Renderer
- * File: assets/js/ppa-admin-generate-view.js
+/* global window, document */
+/**
+ * PostPress AI — Generate View Module (ES5-safe)
  *
- * Renders the "Generate Preview" response into:
- * - Draft (HTML)
- * - SEO meta
- * - Optional Outline (toggle)
+ * Purpose:
+ * - Provide pure view helpers for rendering a Generate Preview result into a preview pane.
+ * - NO side effects on load.
+ * - Not wired into admin.js yet (one-file rule).
+ *
+ * Inputs supported (defensive):
+ * - Normalized Django/WP proxy shapes:
+ *   - { title, outline:[], body_markdown, meta:{...} }
+ *   - { result:{...} }
+ *   - { data:{ result:{...} } } (common WP ajax wrapper)
  *
  * ========= CHANGE LOG =========
- * 2026-01-21: FIX: Outline items normalize into individual lines and link to matching headings  // CHANGED:
- *            inside the Draft section (adds stable heading IDs during markdown render).        // CHANGED:
- * 2025-12-22.1: Safety hardening: only accept ELEMENT containers (never the Document); guard DOM mutations with try/catch so bad callers don't break editor; auto-hide outline container when empty.
+ * 2026-01-21.1: FIX: Outline now renders as true individual list items (splits multi-line outline strings,
+ *               strips bullets/numbering), and links each item to its matching heading in the Draft by
+ *               injecting stable heading IDs into the rendered preview HTML.                              // CHANGED:
+ * 2025-12-22.1: Safety hardening: only accept ELEMENT containers (never the Document); guard DOM mutations with try/catch so bad callers can’t hard-crash the Composer screen. Output HTML unchanged. // CHANGED:
+ * 2025-12-21.1: Render Generate preview like stable admin.js (Title as h2; Outline/Draft/SEO sections); // CHANGED:
+ *               replace raw <pre> dump + "Title/Outline/Body/Meta" blocks with safe Markdown-ish HTML. // CHANGED:
+ * 2025-12-20.2: Merge export (no early return) to avoid late-load clobber during modular cutover; no behavior change. // CHANGED:
  */
 
-(function () {
+(function (window, document) {
   "use strict";
 
-  var MOD_VER = "ppa-admin-generate-view.v2026-01-21.1"; // CHANGED:
+  window.PPAAdminModules = window.PPAAdminModules || {};
 
-  function isArray(v) { return Object.prototype.toString.call(v) === "[object Array]"; }
-  function safeText(v) { return (v === null || v === undefined) ? "" : String(v); }
-  function escapeHtml(s) {
-    s = safeText(s);
-    return s
+  var MOD_VER = "ppa-admin-generate-view.v2025-12-22.1"; // CHANGED:
+  var generateView = window.PPAAdminModules.generateView || {}; // CHANGED:
+
+  function hasOwn(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
+  function toStr(val) { return (val === undefined || val === null) ? "" : String(val); }
+  function trim(val) { return toStr(val).replace(/^\s+|\s+$/g, ""); }
+  function isArray(val) { return Object.prototype.toString.call(val) === "[object Array]"; }
+
+  // CHANGED: Normalize text for matching (outline item -> heading).
+  function normText(s) {
+    return toStr(s)
+      .toLowerCase()
+      .replace(/<[^>]*>/g, '')
+      .replace(/&[^;]+;/g, ' ')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // CHANGED: Strip common outline prefixes (bullets/numbering).
+  function stripOutlinePrefix(line) {
+    var s = trim(line);
+    // Examples: "- Item", "* Item", "1. Item", "1) Item", "I. Item"
+    s = s.replace(/^\s*(?:[-*+•]|\(?\d+\)?[\.)]|[ivxlcdm]+\.)\s+/i, '');
+    return trim(s);
+  }
+
+  // CHANGED: Turn outline into clean array of items (supports array, string, multi-line strings).
+  function parseOutlineItems(outline) {
+    var out = [];
+    var pushLine = function (ln) {
+      var cleaned = stripOutlinePrefix(ln);
+      if (cleaned) out.push(cleaned);
+    };
+
+    if (!outline) return out;
+
+    if (typeof outline === 'string') {
+      var lines = outline.split(/\r?\n/);
+      for (var i = 0; i < lines.length; i++) {
+        pushLine(lines[i]);
+      }
+      return out;
+    }
+
+    if (isArray(outline)) {
+      for (var j = 0; j < outline.length; j++) {
+        var item = outline[j];
+        if (typeof item === 'string') {
+          // Some backends send a single string containing a markdown list.
+          if (item.indexOf('\n') !== -1) {
+            var sub = item.split(/\r?\n/);
+            for (var k = 0; k < sub.length; k++) pushLine(sub[k]);
+          } else {
+            pushLine(item);
+          }
+        }
+      }
+    }
+
+    return out;
+  }
+
+  // CHANGED: Slugify for heading ids (stable + URL-safe).
+  function slugifyId(text) {
+    var s = normText(text);
+    if (!s) return 'section';
+    return s.replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  // CHANGED: Ensure IDs are unique within one rendered preview.
+  function uniqueId(base, used) {
+    var b = base || 'section';
+    if (!used[b]) { used[b] = 1; return b; }
+    used[b] += 1;
+    return b + '-' + used[b];
+  }
+
+  function escapeHtml(str) {
+    return toStr(str)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/\'/g, "&#39;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
-  /**
-   * Normalize response shapes.
-   * We accept:
-   * - { ok: true, result: {...}, meta: {...} }
-   * - { success: true, data: { ok:true, ... } } (WP ajax wrapper)
-   * - { data: {...} } variants
-   */
+  function isEl(node) { return !!(node && node.nodeType === 1); } // CHANGED:
+
+  function getEl(selectorOrEl) {
+    if (!selectorOrEl) return null;
+    if (isEl(selectorOrEl)) return selectorOrEl;
+    if (typeof selectorOrEl === "string") {
+      try { return document.querySelector(selectorOrEl); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  function removeAllChildren(el) {
+    if (!el || el.nodeType !== 1) return; // CHANGED:
+    while (el.firstChild) el.removeChild(el.firstChild);
+  }
+
   function unwrapResultShape(input) {
     if (!input || typeof input !== "object") return {};
-    // WP ajax wrapper: {success:true, data:{...}}
-    if (input.data && typeof input.data === "object") return input.data;
+    if (hasOwn(input, "title") || hasOwn(input, "outline") || hasOwn(input, "body_markdown")) return input;
+    if (input.result && typeof input.result === "object") return input.result;
+    if (input.data && typeof input.data === "object") {
+      if (input.data.result && typeof input.data.result === "object") return input.data.result;
+      if (hasOwn(input.data, "title") || hasOwn(input.data, "outline") || hasOwn(input.data, "body_markdown")) return input.data;
+    }
     return input;
   }
-
-  // Split a raw outline blob into individual lines.                                      // CHANGED:
-  function splitOutlineLines(raw) {                                                       // CHANGED:
-    var s = safeText(raw);                                                                // CHANGED:
-    if (!s) return [];                                                                    // CHANGED:
-    // Normalize newlines                                                                 // CHANGED:
-    s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");                                    // CHANGED:
-    // If it's a markdown-ish bullet list, split by newline.                              // CHANGED:
-    var lines = s.split("\n");                                                           // CHANGED:
-    var out = [];                                                                         // CHANGED:
-    for (var i = 0; i < lines.length; i++) {                                              // CHANGED:
-      var line = safeText(lines[i]).trim();                                               // CHANGED:
-      if (!line) continue;                                                                // CHANGED:
-      // Strip common list prefixes: "-", "*", "+", "1.", "1)" etc                         // CHANGED:
-      line = line.replace(/^(\*|\-|\+)\s+/, "");                                          // CHANGED:
-      line = line.replace(/^\d+\s*[\.\)]\s+/, "");                                        // CHANGED:
-      line = line.trim();                                                                 // CHANGED:
-      if (line) out.push(line);                                                           // CHANGED:
-    }                                                                                     // CHANGED:
-    return out;                                                                           // CHANGED:
-  }                                                                                       // CHANGED:
 
   function normalizeGenerateResult(input) {
     var r = unwrapResultShape(input);
     var meta = (r && r.meta && typeof r.meta === "object") ? r.meta : {};
-    var outline = [];
-
-    // Outline may arrive as array OR as a single string blob.                               // CHANGED:
-    if (r && isArray(r.outline)) outline = r.outline;                                       // CHANGED:
-    else if (r && r.outline) outline = [r.outline];                                         // CHANGED:
-
-    // Expand any multi-line items into individual lines.                                    // CHANGED:
-    var cleanOutline = [];                                                                  // CHANGED:
-    for (var i = 0; i < outline.length; i++) {                                              // CHANGED:
-      var it = outline[i];                                                                  // CHANGED:
-      if (it === null || it === undefined) continue;                                        // CHANGED:
-      if (typeof it === "string") {                                                         // CHANGED:
-        var pieces = splitOutlineLines(it);                                                 // CHANGED:
-        for (var p = 0; p < pieces.length; p++) cleanOutline.push(pieces[p]);               // CHANGED:
-      } else {                                                                              // CHANGED:
-        cleanOutline.push(safeText(it));                                                    // CHANGED:
-      }                                                                                    // CHANGED:
-    }                                                                                       // CHANGED:
+    // CHANGED: Robust outline parsing.
+    // - Accept array or string.
+    // - Split multi-line strings into individual items.
+    // - Strip bullets/numbering ("- ", "1.", "1)" etc.).
+    var cleanOutline = parseOutlineItems(r && r.outline);
 
     return {
-      title: safeText(r.title || (r.result && r.result.title) || ""),
-      excerpt: safeText(r.excerpt || (r.result && r.result.excerpt) || ""),
-      slug: safeText(r.slug || (r.result && r.result.slug) || ""),
-      seo: (r.seo && typeof r.seo === "object") ? r.seo : ((r.result && r.result.seo) ? r.result.seo : {}),
-      outline: cleanOutline,                                                                 // CHANGED:
-      html: safeText(r.html || (r.result && r.result.html) || ""),
-      content: safeText(r.content || (r.result && r.result.content) || ""),
-      meta: meta,
-      raw: r
+      title: trim(r && r.title),
+      outline: cleanOutline,
+      body_markdown: toStr(r && r.body_markdown),
+      meta: {
+        focus_keyphrase: trim(meta.focus_keyphrase),
+        meta_description: trim(meta.meta_description),
+        slug: trim(meta.slug)
+      }
     };
   }
 
-  function toHtmlFromText(txt) {
-    txt = safeText(txt);
-    if (!txt) return "";
-    // very safe: split paragraphs
-    var parts = txt.split(/\n{2,}/);
-    var out = "";
+  function toHtmlFromText(text) {
+    var t = trim(text);
+    if (!t) return "";
+    var parts = t.split(/\n{2,}/);
     for (var i = 0; i < parts.length; i++) {
-      var p = parts[i].trim();
-      if (!p) continue;
-      out += "<p>" + escapeHtml(p).replace(/\n/g, "<br>") + "</p>";
+      var safe = escapeHtml(parts[i]).replace(/\n/g, "<br>");
+      parts[i] = "<p>" + safe + "</p>";
     }
-    return out;
+    return parts.join("");
   }
 
-  /**
-   * Minimal markdown-ish to HTML:
-   * - Headings (#, ##, ###)
-   * - Lists (-, *)
-   * - Paragraphs
-   */
-  function markdownToHtml(m) {
-    var txt = safeText(m);
+  function markdownToHtml(m, ctx) { // CHANGED: ctx collects headings + id map for outline linking
+    var txt = toStr(m);
     if (!txt) return "";
+    if (/<[a-z][\s\S]*>/i.test(txt)) return txt;
 
-    var lines = txt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    function applyInline(mdText) {
+      var s = escapeHtml(mdText);
+      s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      s = s.replace(/__(.+?)__/g, "<strong>$1</strong>");
+      s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+      s = s.replace(/_(.+?)_/g, "<em>$1</em>");
+      return s;
+    }
+
+    var lines = txt.split(/\r?\n/);
     var htmlParts = [];
     var inList = false;
-    var para = [];
+    var paraBuf = [];
 
     function flushParagraph() {
-      if (!para.length) return;
-      htmlParts.push("<p>" + escapeHtml(para.join(" ")).replace(/\n/g, "<br>") + "</p>");
-      para = [];
+      if (!paraBuf.length) return;
+      var text = paraBuf.join(" ").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+      if (!text) { paraBuf = []; return; }
+      htmlParts.push("<p>" + applyInline(text) + "</p>");
+      paraBuf = [];
     }
+
     function flushList() {
       if (!inList) return;
       htmlParts.push("</ul>");
@@ -141,345 +208,204 @@
     }
 
     for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var t = line.trim();
+      var trimmedLine = trim(lines[i]);
+      if (!trimmedLine) { flushParagraph(); flushList(); continue; }
 
-      // heading
-      var m1 = t.match(/^(#{1,6})\s+(.*)$/);
-      if (m1) {
+      var mHeading = trimmedLine.match(/^(#{1,6})\s+(.*)$/);
+      if (mHeading) {
         flushParagraph(); flushList();
-        var level = m1[1].length;
-        var text = m1[2].trim();
-        htmlParts.push("<h" + level + ">" + escapeHtml(text) + "</h" + level + ">");
+        var level = Math.min(Math.max(mHeading[1].length, 1), 6);
+        var rawHeadingText = trim(mHeading[2] || ""); // CHANGED
+
+        // CHANGED: Inject stable IDs into headings so the Outline can link/scroll.
+        // ctx is created per-render (see buildPreviewHtml) so ids are stable within the current preview.
+        var idAttr = "";
+        if (ctx && typeof ctx === 'object') {
+          if (!ctx._usedIds) ctx._usedIds = {};
+          if (!ctx._headingMap) ctx._headingMap = {};
+          if (!ctx._headings) ctx._headings = [];
+
+          var baseId = slugifyId(rawHeadingText);
+          var hid = uniqueId(baseId, ctx._usedIds);
+          var key = normText(rawHeadingText);
+          if (key && !ctx._headingMap[key]) {
+            ctx._headingMap[key] = hid;
+          }
+          ctx._headings.push({ text: rawHeadingText, id: hid, level: level });
+          idAttr = ' id="' + escapeHtml(hid) + '"';
+        }
+
+        htmlParts.push("<h" + level + idAttr + ">" + applyInline(rawHeadingText) + "</h" + level + ">");
         continue;
       }
 
-      // list item
-      var m2 = t.match(/^(\-|\*)\s+(.*)$/);
-      if (m2) {
+      var mList = trimmedLine.match(/^[-*+]\s+(.*)$/);
+      if (mList) {
         flushParagraph();
         if (!inList) { htmlParts.push("<ul>"); inList = true; }
-        htmlParts.push("<li>" + escapeHtml(m2[2].trim()) + "</li>");
+        htmlParts.push("<li>" + applyInline(mList[1] || "") + "</li>");
         continue;
       }
 
-      // blank
-      if (!t) {
-        flushParagraph(); flushList();
-        continue;
-      }
-
-      // paragraph
-      flushList();
-      para.push(t);
+      paraBuf.push(trimmedLine);
     }
 
     flushParagraph(); flushList();
     return htmlParts.length ? htmlParts.join("") : toHtmlFromText(txt);
   }
 
-  // Create a stable anchor slug from a heading/outline line.                                     // CHANGED:
-  function slugify(text) {                                                                        // CHANGED:
-    var s = safeText(text).toLowerCase();                                                          // CHANGED:
-    s = s.replace(/&/g, " and ");                                                                  // CHANGED:
-    s = s.replace(/['"]/g, "");                                                                    // CHANGED:
-    s = s.replace(/[^a-z0-9\\s\\-]/g, "");                                                         // CHANGED:
-    s = s.replace(/\\s+/g, "-");                                                                   // CHANGED:
-    s = s.replace(/\\-+/g, "-");                                                                   // CHANGED:
-    s = s.replace(/^\\-+|\\-+$/g, "");                                                             // CHANGED:
-    if (!s) s = "section";                                                                         // CHANGED:
-    // Keep it reasonable (helps avoid insane ids)                                                  // CHANGED:
-    if (s.length > 80) s = s.slice(0, 80).replace(/\\-+$/g, "");                                   // CHANGED:
-    return s;                                                                                      // CHANGED:
-  }                                                                                                // CHANGED:
+  function buildOutlineHtml(outlineArr, ctx) { // CHANGED: link outline items to headings when possible
+    if (!outlineArr || !outlineArr.length) return "";
 
-  // Convert markdown to HTML BUT add id attributes for headings; also collect heading map.        // CHANGED:
-  function markdownToHtmlAnchored(m) {                                                             // CHANGED:
-    var txt = safeText(m);                                                                         // CHANGED:
-    if (!txt) return { html: "", headings: [] };                                                    // CHANGED:
+    var html = "<ol>";
+    for (var i = 0; i < outlineArr.length; i++) {
+      var itemText = trim(outlineArr[i]);
+      if (!itemText) continue;
 
-    var lines = txt.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");                  // CHANGED:
-    var htmlParts = [];                                                                            // CHANGED:
-    var headings = [];                                                                             // CHANGED:
-    var usedIds = {};                                                                              // CHANGED:
-    var inList = false;                                                                            // CHANGED:
-    var para = [];                                                                                 // CHANGED:
+      var id = "";
+      if (ctx && ctx._headingMap) {
+        var key = normText(itemText);
+        id = ctx._headingMap[key] || "";
 
-    function uniqueId(base) {                                                                      // CHANGED:
-      var id = base;                                                                               // CHANGED:
-      var n = 2;                                                                                   // CHANGED:
-      while (usedIds[id]) {                                                                        // CHANGED:
-        id = base + "-" + n;                                                                       // CHANGED:
-        n++;                                                                                       // CHANGED:
-      }                                                                                            // CHANGED:
-      usedIds[id] = true;                                                                          // CHANGED:
-      return id;                                                                                   // CHANGED:
-    }                                                                                              // CHANGED:
+        // Loose matching: sometimes outline text is slightly different than heading text.
+        if (!id && ctx._headings && ctx._headings.length) {
+          for (var h = 0; h < ctx._headings.length; h++) {
+            var ht = normText(ctx._headings[h].text);
+            if (ht && (ht === key || ht.indexOf(key) !== -1 || key.indexOf(ht) !== -1)) {
+              id = ctx._headings[h].id;
+              break;
+            }
+          }
+        }
+      }
 
-    function flushParagraph() {                                                                    // CHANGED:
-      if (!para.length) return;                                                                    // CHANGED:
-      htmlParts.push("<p>" + escapeHtml(para.join(" ")).replace(/\\n/g, "<br>") + "</p>");          // CHANGED:
-      para = [];                                                                                   // CHANGED:
-    }                                                                                              // CHANGED:
-    function flushList() {                                                                         // CHANGED:
-      if (!inList) return;                                                                         // CHANGED:
-      htmlParts.push("</ul>");                                                                     // CHANGED:
-      inList = false;                                                                              // CHANGED:
-    }                                                                                              // CHANGED:
-
-    for (var i = 0; i < lines.length; i++) {                                                       // CHANGED:
-      var line = lines[i];                                                                         // CHANGED:
-      var t = safeText(line).trim();                                                               // CHANGED:
-
-      // heading
-      var m1 = t.match(/^(#{1,6})\\s+(.*)$/);                                                      // CHANGED:
-      if (m1) {                                                                                    // CHANGED:
-        flushParagraph(); flushList();                                                             // CHANGED:
-        var level = m1[1].length;                                                                  // CHANGED:
-        var text = m1[2].trim();                                                                   // CHANGED:
-        var idBase = slugify(text);                                                                // CHANGED:
-        var id = uniqueId(idBase);                                                                 // CHANGED:
-        headings.push({ text: text, id: id, level: level });                                       // CHANGED:
-        htmlParts.push("<h" + level + " id=\\"" + escapeHtml(id) + "\\">" + escapeHtml(text) + "</h" + level + ">"); // CHANGED:
-        continue;                                                                                  // CHANGED:
-      }                                                                                            // CHANGED:
-
-      // list item
-      var m2 = t.match(/^(\\-|\\*)\\s+(.*)$/);                                                     // CHANGED:
-      if (m2) {                                                                                    // CHANGED:
-        flushParagraph();                                                                          // CHANGED:
-        if (!inList) { htmlParts.push("<ul>"); inList = true; }                                    // CHANGED:
-        htmlParts.push("<li>" + escapeHtml(m2[2].trim()) + "</li>");                               // CHANGED:
-        continue;                                                                                  // CHANGED:
-      }                                                                                            // CHANGED:
-
-      // blank
-      if (!t) {                                                                                    // CHANGED:
-        flushParagraph(); flushList();                                                             // CHANGED:
-        continue;                                                                                  // CHANGED:
-      }                                                                                            // CHANGED:
-
-      // paragraph
-      flushList();                                                                                 // CHANGED:
-      para.push(t);                                                                                // CHANGED:
-    }                                                                                              // CHANGED:
-
-    flushParagraph(); flushList();                                                                 // CHANGED:
-    return { html: htmlParts.length ? htmlParts.join("") : toHtmlFromText(txt), headings: headings }; // CHANGED:
-  }                                                                                                // CHANGED:
-
-  // Find the best heading id for an outline item.                                                  // CHANGED:
-  function findHeadingIdForOutlineItem(itemText, headings) {                                        // CHANGED:
-    var t = safeText(itemText).trim();                                                              // CHANGED:
-    if (!t) return "";                                                                              // CHANGED:
-    headings = headings || [];                                                                      // CHANGED:
-
-    // 1) Exact text match (case-insensitive)                                                       // CHANGED:
-    var low = t.toLowerCase();                                                                      // CHANGED:
-    for (var i = 0; i < headings.length; i++) {                                                     // CHANGED:
-      if (safeText(headings[i].text).trim().toLowerCase() === low) return headings[i].id;           // CHANGED:
-    }                                                                                               // CHANGED:
-
-    // 2) Slug match                                                                                // CHANGED:
-    var s = slugify(t);                                                                             // CHANGED:
-    for (var j = 0; j < headings.length; j++) {                                                     // CHANGED:
-      if (slugify(headings[j].text) === s) return headings[j].id;                                   // CHANGED:
-    }                                                                                               // CHANGED:
-
-    // 3) Fallback: just use the outline slug (may not exist, but harmless)                         // CHANGED:
-    return s;                                                                                       // CHANGED:
-  }                                                                                                 // CHANGED:
-
-  // Build outline list with links that jump to headings in the Draft section.                       // CHANGED:
-  function buildOutlineHtml(outlineArr, headings) {                                                  // CHANGED:
-    if (!outlineArr || !outlineArr.length) return "";                                                // CHANGED:
-    var html = "<ol>";                                                                               // CHANGED:
-    for (var i = 0; i < outlineArr.length; i++) {                                                     // CHANGED:
-      var label = safeText(outlineArr[i]).trim();                                                     // CHANGED:
-      if (!label) continue;                                                                          // CHANGED:
-      var hid = findHeadingIdForOutlineItem(label, headings);                                         // CHANGED:
-      html += "<li><a class=\\"ppa-outline-link\\" href=\\"#" + escapeHtml(hid) + "\\">" + escapeHtml(label) + "</a></li>"; // CHANGED:
-    }                                                                                                 // CHANGED:
-    html += "</ol>";                                                                                  // CHANGED:
-    return html;                                                                                      // CHANGED:
-  }                                                                                                   // CHANGED:
-
-  function buildMetaHtml(seo) {
-    if (!seo || typeof seo !== "object") return "";
-    var keys = ["focus_keyphrase", "seo_title", "meta_description"];
-    var labels = {
-      focus_keyphrase: "Focus keyphrase",
-      seo_title: "SEO title",
-      meta_description: "Meta description"
-    };
-    var html = "<div class=\"ppa-seo-meta\"><h3>SEO</h3><dl>";
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      var v = seo[k];
-      if (!v) continue;
-      html += "<dt>" + escapeHtml(labels[k] || k) + "</dt><dd>" + escapeHtml(v) + "</dd>";
+      if (id) {
+        html += "<li><a href=\"#" + escapeHtml(id) + "\" data-ppa-outline-link=\"1\">" + escapeHtml(itemText) + "</a></li>";
+      } else {
+        html += "<li>" + escapeHtml(itemText) + "</li>";
+      }
     }
-    html += "</dl></div>";
+    html += "</ol>";
     return html;
   }
 
-  function buildPreviewHtml(result) {
-    var r = normalizeGenerateResult(result);
-
-    // Choose draft source:
-    var draftSource = "";
-    if (r.html) draftSource = r.html;
-    else if (r.content) draftSource = r.content;
-    else if (r.raw && r.raw.result && (r.raw.result.html || r.raw.result.content)) {
-      draftSource = r.raw.result.html || r.raw.result.content;
-    }
-
-    // Build Draft HTML with stable heading IDs.                                                    // CHANGED:
-    var anchored = { html: "", headings: [] };                                                      // CHANGED:
-    var draftHtml = "";                                                                             // CHANGED:
-    if (draftSource && /<\\w+[^>]*>/.test(draftSource)) {                                           // CHANGED:
-      // Already HTML; don't rewrite.                                                                // CHANGED:
-      draftHtml = draftSource;                                                                      // CHANGED:
-    } else {                                                                                        // CHANGED:
-      anchored = markdownToHtmlAnchored(draftSource);                                                // CHANGED:
-      draftHtml = anchored.html;                                                                     // CHANGED:
-    }                                                                                               // CHANGED:
-
-    var outlineHtml = buildOutlineHtml(r.outline, anchored.headings);                                // CHANGED:
-    var metaHtml = buildMetaHtml(r.seo);
-
-    return {
-      draftHtml: draftHtml || "<p><em>No content returned.</em></p>",
-      outlineHtml: outlineHtml,
-      metaHtml: metaHtml,
-      title: r.title,
-      excerpt: r.excerpt,
-      slug: r.slug,
-      outlineCount: r.outline ? r.outline.length : 0
-    };
+  function buildMetaListHtml(meta) {
+    meta = meta || {};
+    var items = [];
+    if (meta.focus_keyphrase) items.push("<li><strong>Focus keyphrase:</strong> " + escapeHtml(meta.focus_keyphrase) + "</li>");
+    if (meta.meta_description) items.push("<li><strong>Meta description:</strong> " + escapeHtml(meta.meta_description) + "</li>");
+    if (meta.slug) items.push("<li><strong>Slug:</strong> " + escapeHtml(meta.slug) + "</li>");
+    return items.length ? "<ul>" + items.join("") + "</ul>" : "";
   }
 
-  /**
-   * Render into DOM
-   * container: ELEMENT (not document)
-   *
-   * Expected structure in composer.php:
-   * - #ppa-preview-pane
-   *   - #ppa-outline (optional)
-   *   - #ppa-draft
-   *   - #ppa-seo
-   * - #ppa-show-outline checkbox exists
-   */
-  function render(containerEl, apiResponse) {
-    // Safety: only element nodes
-    if (!containerEl || containerEl.nodeType !== 1) {
-      console.warn("PPA: generate-view render aborted (invalid container)", containerEl);
-      return;
+  function buildPreviewHtml(model) {
+    var parts = [];
+    if (model.title) parts.push("<h2>" + escapeHtml(model.title) + "</h2>");
+
+    // CHANGED: Build the draft first so we can inject stable heading IDs and then link outline items to those headings.
+    var ctx = { _usedIds: {}, _headingMap: {}, _headings: [] };
+    var bodyHtml = markdownToHtml(model.body_markdown, ctx);
+
+    // CHANGED: If outline is empty/missing, derive a simple outline from headings (skip H1).
+    var outlineItems = (model.outline && model.outline.length) ? model.outline : [];
+    if ((!outlineItems || !outlineItems.length) && ctx._headings && ctx._headings.length) {
+      var derived = [];
+      for (var d = 0; d < ctx._headings.length; d++) {
+        if (ctx._headings[d].level && ctx._headings[d].level <= 1) continue;
+        derived.push(ctx._headings[d].text);
+      }
+      outlineItems = derived;
     }
 
-    var dom = {};
-    try {
-      dom.previewPane = containerEl.querySelector("#ppa-preview-pane");
-      if (!dom.previewPane) return;
-
-      dom.outlineWrap = dom.previewPane.querySelector("#ppa-outline");
-      dom.draftEl = dom.previewPane.querySelector("#ppa-draft");
-      dom.seoEl = dom.previewPane.querySelector("#ppa-seo");
-
-      // If the template doesn't include these, create them.
-      if (!dom.outlineWrap) {
-        dom.outlineWrap = document.createElement("div");
-        dom.outlineWrap.id = "ppa-outline";
-        dom.outlineWrap.className = "ppa-outline";
-        dom.previewPane.appendChild(dom.outlineWrap);
-      }
-      if (!dom.draftEl) {
-        dom.draftEl = document.createElement("div");
-        dom.draftEl.id = "ppa-draft";
-        dom.draftEl.className = "ppa-draft";
-        dom.previewPane.appendChild(dom.draftEl);
-      }
-      if (!dom.seoEl) {
-        dom.seoEl = document.createElement("div");
-        dom.seoEl.id = "ppa-seo";
-        dom.seoEl.className = "ppa-seo";
-        dom.previewPane.appendChild(dom.seoEl);
-      }
-    } catch (e) {
-      console.warn("PPA: generate-view query failed", e);
-      return;
+    if (outlineItems && outlineItems.length) {
+      parts.push("<h3>Outline</h3>");
+      parts.push(buildOutlineHtml(outlineItems, ctx));
     }
 
-    var built = buildPreviewHtml(apiResponse);
+    if (bodyHtml) { parts.push("<h3>Draft</h3>"); parts.push(bodyHtml); }
+    var metaHtml = buildMetaListHtml(model.meta);
+    if (metaHtml) { parts.push("<h3>SEO</h3>"); parts.push(metaHtml); }
+    if (!parts.length) parts.push("<p>No preview content available.</p>");
+    return "<div class=\"ppa-preview\">" + parts.join("") + "</div>";
+  }
 
-    // Outline
+  // CHANGED: Make outline links scroll within the preview pane (not the whole admin page).
+  function bindOutlineScroll(container) {
+    if (!container || container.nodeType !== 1) return;
+    if (container.dataset && container.dataset.ppaOutlineBound === "1") return;
+    if (container.dataset) container.dataset.ppaOutlineBound = "1";
+
+    container.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t) return;
+      // Support clicks on nested spans inside the link.
+      var link = (t.closest) ? t.closest('a[data-ppa-outline-link="1"]') : null;
+      if (!link) return;
+
+      var href = link.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") return;
+      var id = href.slice(1);
+      if (!id) return;
+
+      var escId = (window.CSS && typeof CSS.escape === 'function')
+        ? CSS.escape(id)
+        : id.replace(/[^a-zA-Z0-9_\-]/g, "\\$"); // fallback
+      var target = container.querySelector("#" + escId);
+      if (!target) return;
+
+      ev.preventDefault();
+
+      try {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {
+        target.scrollIntoView();
+      }
+
+      // Keep the hash updated (without jumping the entire page).
+      try {
+        if (history && history.replaceState) {
+          history.replaceState(null, document.title, "#" + id);
+        }
+      } catch (e2) {}
+    }, { passive: false });
+  }
+
+  function renderPreview(containerOrSelector, input, options) {
+    options = options || {};
+    var container = getEl(containerOrSelector);
+    if (!container || container.nodeType !== 1) {
+      return { model: normalizeGenerateResult(input), html: "", container: null };
+    }
+
+    var model = normalizeGenerateResult(input);
+    var html = buildPreviewHtml(model);
+    var mode = options.mode || "replace";
+
     try {
-      if (built.outlineHtml) {
-        dom.outlineWrap.innerHTML = "<h3>Outline</h3>" + built.outlineHtml;
-        dom.outlineWrap.style.display = "";
+      if (mode === "append") {
+        var wrapper = document.createElement("div");
+        wrapper.innerHTML = html;
+        container.appendChild(wrapper);
       } else {
-        dom.outlineWrap.innerHTML = "";
-        dom.outlineWrap.style.display = "none";
+        removeAllChildren(container);
+        container.innerHTML = html;
       }
-    } catch (e1) {
-      console.warn("PPA: outline render failed", e1);
+      bindOutlineScroll(container); // CHANGED
+    } catch (e) {
+      return { model: model, html: "", container: null };
     }
 
-    // Draft + SEO
-    try { dom.draftEl.innerHTML = built.draftHtml; } catch (e2) {}
-    try { dom.seoEl.innerHTML = built.metaHtml; } catch (e3) {}
-
-    // Autofill advanced fields if present
-    try {
-      var titleEl = containerEl.querySelector("#ppa-title");
-      var excerptEl = containerEl.querySelector("#ppa-excerpt");
-      var slugEl = containerEl.querySelector("#ppa-slug");
-
-      if (titleEl && !titleEl.value && built.title) titleEl.value = built.title;
-      if (excerptEl && !excerptEl.value && built.excerpt) excerptEl.value = built.excerpt;
-      if (slugEl && !slugEl.value && built.slug) slugEl.value = built.slug;
-    } catch (e4) {}
-
-    // Outline toggle logic (checkbox)
-    try {
-      var chk = containerEl.querySelector("#ppa-show-outline");
-      if (chk) {
-        // default: show if outline exists
-        if (built.outlineHtml) {
-          chk.disabled = false;
-          if (chk.checked === false) {
-            // leave user choice as-is; if never interacted, keep default checked for visibility
-            chk.checked = true;
-          }
-          dom.outlineWrap.style.display = chk.checked ? "" : "none";
-        } else {
-          chk.checked = false;
-          chk.disabled = true;
-          dom.outlineWrap.style.display = "none";
-        }
-
-        // ensure change handler only binds once
-        if (!chk._ppaBound) {
-          chk.addEventListener("change", function () {
-            try {
-              dom.outlineWrap.style.display = chk.checked ? "" : "none";
-            } catch (e) {}
-          });
-          chk._ppaBound = true;
-        }
-      }
-    } catch (e5) {}
+    return { model: model, html: html, container: container };
   }
 
-  // expose module
-  window.PPAAdmin = window.PPAAdmin || {};
-  window.PPAAdmin.generateView = {
-    render: render,
-    normalizeGenerateResult: normalizeGenerateResult,
-    buildPreviewHtml: buildPreviewHtml,
-    _markdownToHtml: markdownToHtml,
-    ver: MOD_VER
-  };
+  generateView.ver = MOD_VER;
+  generateView.normalizeGenerateResult = normalizeGenerateResult;
+  generateView.buildPreviewHtml = buildPreviewHtml;
+  generateView.renderPreview = renderPreview;
 
-  try { console.log("PPA: ppa-admin-generate-view.js loaded →", MOD_VER); } catch (e) {}
-})();
+  generateView._escapeHtml = escapeHtml;
+  generateView._unwrapResultShape = unwrapResultShape;
+  generateView._markdownToHtml = markdownToHtml;
+
+  window.PPAAdminModules.generateView = generateView;
+})(window, document);
