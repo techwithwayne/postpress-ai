@@ -13,6 +13,9 @@
 
 /**
  * CHANGE LOG
+ * 2026-01-22 — ADD: Default Django base URL constant + ppa_django_base_url filter for customer sites
+ *              where WP options are intentionally absent (no wp-config edits allowed).               # CHANGED:
+ *
  * 2025-12-28 — HARDEN: Arm admin-post fallback only when the incoming request action matches our settings actions.
  *              This reduces debug.log noise and avoids attaching extra hooks on unrelated admin-post requests. # CHANGED:
  * 2025-12-28 — HARDEN: Detect admin-post via $pagenow OR PHP_SELF basename for stacks where $pagenow isn't set
@@ -63,6 +66,42 @@ if ( ! defined( 'PPA_VERSION' ) ) {                          // CHANGED:
         define( 'PPA_VERSION', PPA_PLUGIN_VER );                 // CHANGED:
 }
 
+/**
+ * CHANGED: Customer-safe default backend URL.
+ *
+ * Why:
+ * - Customer sites should NOT be forced to store infra URLs in WP options (and you forbade wp-config edits).
+ * - Our AJAX proxy (inc/ajax/translate.php) already checks constants FIRST, so defining this here makes
+ *   translate/preview/store endpoints work immediately without customer configuration.
+ *
+ * NOTE:
+ * - This is infra-only (not shown to end users).
+ * - If you ever need to override per environment, you can define PPA_DJANGO_URL / PPA_SERVER_URL elsewhere
+ *   BEFORE this plugin loads, and this block will not overwrite it.
+ */
+if ( ! defined( 'PPA_SERVER_URL' ) ) {                                                             // CHANGED:
+        define( 'PPA_SERVER_URL', 'https://apps.techwithwayne.com/postpress-ai' );                 // CHANGED:
+}                                                                                                  // CHANGED:
+
+/**
+ * CHANGED: Provide a canonical filter that returns the resolved Django base URL.
+ * This is used for diagnostics (wp eval) and can be used by other modules safely.
+ */
+add_filter( 'ppa_django_base_url', function( $base ) {                                              // CHANGED:
+        // If caller passes nothing, return our resolved base (constant-first).                      // CHANGED:
+        if ( ( ! is_string( $base ) || trim( $base ) === '' ) ) {                                   // CHANGED:
+                // Prefer PPA_DJANGO_URL if defined, else PPA_SERVER_URL.                            // CHANGED:
+                if ( defined( 'PPA_DJANGO_URL' ) && is_string( PPA_DJANGO_URL ) && trim( PPA_DJANGO_URL ) !== '' ) { // CHANGED:
+                        return rtrim( trim( PPA_DJANGO_URL ), '/' );                                // CHANGED:
+                }                                                                                   // CHANGED:
+                if ( defined( 'PPA_SERVER_URL' ) && is_string( PPA_SERVER_URL ) && trim( PPA_SERVER_URL ) !== '' ) { // CHANGED:
+                        return rtrim( trim( PPA_SERVER_URL ), '/' );                                // CHANGED:
+                }                                                                                   // CHANGED:
+                return '';                                                                          // CHANGED:
+        }                                                                                           // CHANGED:
+        return rtrim( trim( (string) $base ), '/' );                                                 // CHANGED:
+}, 10, 1 );                                                                                         // CHANGED:
+
 /** ---------------------------------------------------------------------------------
  * Includes (single source of truth)
  * -------------------------------------------------------------------------------- */
@@ -103,60 +142,60 @@ add_action( 'plugins_loaded', function () {
  * - This avoids loading settings.php on every admin request, and avoids duplicate hooks on normal pages. # CHANGED:
  * -------------------------------------------------------------------------------- */
 add_action( 'plugins_loaded', function () {                                                           // CHANGED:
-	if ( ! is_admin() ) {                                                                             // CHANGED:
-		return;                                                                                       // CHANGED:
-	}                                                                                                  // CHANGED:
+        if ( ! is_admin() ) {                                                                             // CHANGED:
+                return;                                                                                       // CHANGED:
+        }                                                                                                  // CHANGED:
 
-	// CHANGED: Robust detection: some stacks don't have $GLOBALS['pagenow'] ready this early.
-	$pagenow  = isset( $GLOBALS['pagenow'] ) ? (string) $GLOBALS['pagenow'] : '';                      // CHANGED:
-	$php_self = isset( $_SERVER['PHP_SELF'] ) ? basename( (string) $_SERVER['PHP_SELF'] ) : '';        // CHANGED:
-	if ( 'admin-post.php' !== $pagenow && 'admin-post.php' !== $php_self ) {                           // CHANGED:
-		return;                                                                                       // CHANGED:
-	}                                                                                                  // CHANGED:
+        // CHANGED: Robust detection: some stacks don't have $GLOBALS['pagenow'] ready this early.
+        $pagenow  = isset( $GLOBALS['pagenow'] ) ? (string) $GLOBALS['pagenow'] : '';                      // CHANGED:
+        $php_self = isset( $_SERVER['PHP_SELF'] ) ? basename( (string) $_SERVER['PHP_SELF'] ) : '';        // CHANGED:
+        if ( 'admin-post.php' !== $pagenow && 'admin-post.php' !== $php_self ) {                           // CHANGED:
+                return;                                                                                       // CHANGED:
+        }                                                                                                  // CHANGED:
 
-	// CHANGED: Only arm fallback when THIS request is actually one of our actions.
-	$req_action = '';                                                                                  // CHANGED:
-	if ( isset( $_REQUEST['action'] ) ) {                                                              // CHANGED:
-		$req_action = sanitize_key( wp_unslash( $_REQUEST['action'] ) );                               // CHANGED:
-	}                                                                                                  // CHANGED:
+        // CHANGED: Only arm fallback when THIS request is actually one of our actions.
+        $req_action = '';                                                                                  // CHANGED:
+        if ( isset( $_REQUEST['action'] ) ) {                                                              // CHANGED:
+                $req_action = sanitize_key( wp_unslash( $_REQUEST['action'] ) );                               // CHANGED:
+        }                                                                                                  // CHANGED:
 
-	$action_map = array(                                                                               // CHANGED:
-		'ppa_test_connectivity' => 'handle_test_connectivity',                                          // CHANGED:
-		'ppa_license_verify'    => 'handle_license_verify',                                             // CHANGED:
-		'ppa_license_activate'  => 'handle_license_activate',                                           // CHANGED:
-		'ppa_license_deactivate'=> 'handle_license_deactivate',                                         // CHANGED:
-	);                                                                                                  // CHANGED:
+        $action_map = array(                                                                               // CHANGED:
+                'ppa_test_connectivity' => 'handle_test_connectivity',                                          // CHANGED:
+                'ppa_license_verify'    => 'handle_license_verify',                                             // CHANGED:
+                'ppa_license_activate'  => 'handle_license_activate',                                           // CHANGED:
+                'ppa_license_deactivate'=> 'handle_license_deactivate',                                         // CHANGED:
+        );                                                                                                  // CHANGED:
 
-	if ( '' === $req_action || ! isset( $action_map[ $req_action ] ) ) {                               // CHANGED:
-		return;                                                                                       // CHANGED:
-	}                                                                                                  // CHANGED:
+        if ( '' === $req_action || ! isset( $action_map[ $req_action ] ) ) {                               // CHANGED:
+                return;                                                                                       // CHANGED:
+        }                                                                                                  // CHANGED:
 
-	$settings_file = PPA_PLUGIN_DIR . 'inc/admin/settings.php';                                        // CHANGED:
+        $settings_file = PPA_PLUGIN_DIR . 'inc/admin/settings.php';                                        // CHANGED:
 
-	$dispatch = function ( $method, $action ) use ( $settings_file ) {                                 // CHANGED:
-		// Require settings.php only when a settings action actually fires (this request).            // CHANGED:
-		if ( file_exists( $settings_file ) ) {                                                        // CHANGED:
-			require_once $settings_file;                                                              // CHANGED:
-		}                                                                                              // CHANGED:
+        $dispatch = function ( $method, $action ) use ( $settings_file ) {                                 // CHANGED:
+                // Require settings.php only when a settings action actually fires (this request).            // CHANGED:
+                if ( file_exists( $settings_file ) ) {                                                        // CHANGED:
+                        require_once $settings_file;                                                              // CHANGED:
+                }                                                                                              // CHANGED:
 
-		if ( class_exists( 'PPA_Admin_Settings' ) && is_callable( array( 'PPA_Admin_Settings', $method ) ) ) { // CHANGED:
-			// Call the real handler (it does capability + nonce checks and redirects).              // CHANGED:
-			call_user_func( array( 'PPA_Admin_Settings', $method ) );                                 // CHANGED:
-			exit; // Safety: the handler normally redirects+exits; this guarantees no fall-through.  // CHANGED:
-		}                                                                                              // CHANGED:
+                if ( class_exists( 'PPA_Admin_Settings' ) && is_callable( array( 'PPA_Admin_Settings', $method ) ) ) { // CHANGED:
+                        // Call the real handler (it does capability + nonce checks and redirects).              // CHANGED:
+                        call_user_func( array( 'PPA_Admin_Settings', $method ) );                                 // CHANGED:
+                        exit; // Safety: the handler normally redirects+exits; this guarantees no fall-through.  // CHANGED:
+                }                                                                                              // CHANGED:
 
-		error_log( 'PPA: admin-post fallback could not dispatch ' . $action . ' → ' . $method );       // CHANGED:
-		wp_die( esc_html__( 'PostPress AI settings handler missing. Please reinstall or contact support.', 'postpress-ai' ), 'PostPress AI', array( 'response' => 500 ) ); // CHANGED:
-	};                                                                                                 // CHANGED:
+                error_log( 'PPA: admin-post fallback could not dispatch ' . $action . ' → ' . $method );       // CHANGED:
+                wp_die( esc_html__( 'PostPress AI settings handler missing. Please reinstall or contact support.', 'postpress-ai' ), 'PostPress AI', array( 'response' => 500 ) ); // CHANGED:
+        };                                                                                                 // CHANGED:
 
-	$method = $action_map[ $req_action ];                                                              // CHANGED:
+        $method = $action_map[ $req_action ];                                                              // CHANGED:
 
-	// CHANGED: Register ONLY the one hook needed for this request.
-	add_action( 'admin_post_' . $req_action, function () use ( $dispatch, $method, $req_action ) {     // CHANGED:
-		$dispatch( $method, $req_action );                                                            // CHANGED:
-	}, 0 );                                                                                            // CHANGED:
+        // CHANGED: Register ONLY the one hook needed for this request.
+        add_action( 'admin_post_' . $req_action, function () use ( $dispatch, $method, $req_action ) {     // CHANGED:
+                $dispatch( $method, $req_action );                                                            // CHANGED:
+        }, 0 );                                                                                            // CHANGED:
 
-	error_log( 'PPA: admin-post fallback armed (action=' . $req_action . ')' );                        // CHANGED:
+        error_log( 'PPA: admin-post fallback armed (action=' . $req_action . ')' );                        // CHANGED:
 }, 7 );                                                                                                 // CHANGED:
 
 /** ---------------------------------------------------------------------------------
@@ -171,7 +210,7 @@ add_action( 'plugins_loaded', function () {
                 // Preferred: class registers wp_ajax_* hooks internally.
                 require_once $controller;
         } else {
-                foreach ( array( 'preview.php', 'store.php' ) as $file ) {
+                foreach ( array( 'preview.php', 'store.php', 'translate.php' ) as $file ) {
                         $path = $ajax_dir . $file;
                         if ( file_exists( $path ) ) { require_once $path; }
                 }
