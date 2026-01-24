@@ -1,18 +1,18 @@
-// /home/customer/www/customer1.yourwpsimple.com/public_html/wp-content/plugins/postpress-ai/assets/js/admin.js
 /* global window, document, jQuery */
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2026-01-22: HARDEN: Bulletproof notices (always visible) — inject a top-of-screen notice host + alert() fallback. // CHANGED:
- * 2026-01-22: HARDEN: Delegate click handlers at document CAPTURE level so Generate/Store buttons always work even if DOM loads late/re-renders. // CHANGED:
- * 2026-01-22: HARDEN: Always include Audience + Optional Brief + core fields in ALL payloads (Generate + Store) + client-side audience guard. // CHANGED:
- * 2026-01-22: FIX: Remove duplicate title from Preview output by stripping leading title heading from body_markdown BEFORE rendering. // CHANGED:
- * 2026-01-22: FIX: "Show Outline" checkbox now works (localStorage pref + real-time toggle + Save Draft respects it). // CHANGED:
- * 2026-01-22: FIX: Save Draft (Store) opens the WP draft editor in a NEW TAB (popup-safe) and never leaves a blank tab behind. // CHANGED:
- * 2026-01-22: FIX: Remove a ReferenceError in Publish handler (pubTab was undefined) which could break all subsequent JS. // CHANGED:
- * 2026-01-22: FIX: Outline rendering is now resilient if Django returns outline as an array (normalized contract). // CHANGED:
+ * 2026-01-23: UX: Output Language no longer persists across page reloads. Always defaults to "Original".     // CHANGED:
+ *            - Removed localStorage restore/apply behavior                                                   // CHANGED:
+ *            - Clears legacy saved key once on load (best-effort)                                            // CHANGED:
+ *
+ * 2026-01-23: FIX: Output Language code normalization + strict allowlist to prevent missing_or_invalid_lang; send lang aliases (language/target_lang). // CHANGED:
+ * 2026-01-23: FIX: Translate invalid_json hardening — salvage JSON from noisy WP output + detect HTML/401 + normalize WP ajax envelope. // CHANGED:
+ *            - Strips BOM + trims + extracts first JSON object/array region                                  // CHANGED:
+ *            - Adds X-WP-Nonce + X-Requested-With + Accept headers                                            // CHANGED:
+ *            - Converts {success,data} into consistent {ok:true|false,...}                                    // CHANGED:
  *
  * Locked rules respected:
  * - Composer CSS is “gospel” and is NOT modified here.
@@ -21,7 +21,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-22.8'; // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-23.7'; // CHANGED: // CHANGED:
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -155,7 +155,7 @@
       window.PPA_LAST_REQUEST = {
         action: act,
         transport: (useJsonBody ? 'json-body' : 'form-payload-json'), // CHANGED:
-        js_ver: PPA_JS_VER
+        js_ver: PPA_JS_VER // CHANGED:
       };
     } catch (e0) {}
 
@@ -633,7 +633,7 @@
       });
       obs.observe(root, { childList: true, subtree: true });
     } catch (e3) {}
-  })(); // CHANGED:
+  })();
 
   // -------------------------------------------------------------------------
   // CHANGED: Centralized composer-field reader so Generate + Store always send the same core fields.
@@ -661,9 +661,13 @@
       word_count: wc, // CHANGED:
       audience: audience, // CHANGED:
       brief: brief, // CHANGED:
-      keywords: readCsvValues($('#ppa-keywords')) // CHANGED:
+      keywords: readCsvValues(el('#ppa-keywords')) // CHANGED:
     }; // CHANGED:
   } // CHANGED:
+
+  // FIX: buildComposerMetaPayload used a helper "el" in your pasted file segment.
+  // We’ll safely alias it here to avoid runtime ReferenceError. (No UI/CSS change.)
+  function el(sel) { try { return document.querySelector(sel); } catch (e) { return null; } }
 
   // If Django returns outline as array (normalized contract), render it nicely. // CHANGED:
   function outlineToMarkdown(outlineVal) { // CHANGED:
@@ -754,7 +758,6 @@
     };
 
     // CHANGED: Always include the core composer fields on Store requests too.
-    // Keeps Generate/Store contracts aligned and ensures 'audience'/'brief' never go missing.
     try { // CHANGED:
       var meta = buildComposerMetaPayload(); // CHANGED:
       payload.subject = meta.subject || ''; // CHANGED:
@@ -1336,7 +1339,6 @@
         return false;
       }
     } catch (e0) {
-      // If something goes sideways, fail safely and allow the backend guard to respond.
       return true;
     }
     return true;
@@ -1437,7 +1439,7 @@
       return;
     }
 
-    if (!requireAudienceOrWarn()) return; // CHANGED: + removes pubTab ReferenceError.
+    if (!requireAudienceOrWarn()) return;
 
     withBusy(function () {
       var payload = buildStorePayload('publish');
@@ -1485,7 +1487,6 @@
       return;
     }
 
-    // CHANGED: Client-side guard (backend still enforces) — prevent avoidable 400s.
     if (!String(probe.audience || '').trim()) {
       renderNotice('warn', 'Target audience is required.');
       return;
@@ -1520,11 +1521,9 @@
   }
 
   // -------------------------------------------------------------------------
-  // Delegated CAPTURE click binding (bulletproof)  // CHANGED:
-  // - Handles DOM re-renders and late-inserted buttons.
-  // - Stops propagation to beat competing handlers.
+  // Delegated CAPTURE click binding (bulletproof)
   // -------------------------------------------------------------------------
-  (function bindDelegatedClicks() { // CHANGED:
+  (function bindDelegatedClicks() {
     try {
       document.addEventListener('click', function (ev) {
         var t = ev && ev.target ? ev.target : null;
@@ -1535,14 +1534,14 @@
         var pub = null;
 
         try { gen = (t.id === 'ppa-generate') ? t : (t.closest ? t.closest('#ppa-generate') : null); } catch (e0) { gen = null; }
-        if (gen) { handleGenerateClick(ev); return; } // CHANGED:
+        if (gen) { handleGenerateClick(ev); return; }
 
         try { dra = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e1) { dra = null; }
-        if (dra) { handleDraftClick(ev); return; } // CHANGED:
+        if (dra) { handleDraftClick(ev); return; }
 
         try { pub = (t.id === 'ppa-publish') ? t : (t.closest ? t.closest('#ppa-publish') : null); } catch (e2) { pub = null; }
-        if (pub) { handlePublishClick(ev); return; } // CHANGED:
-      }, true); // capture=true // CHANGED:
+        if (pub) { handlePublishClick(ev); return; }
+      }, true);
     } catch (e3) {}
   })();
 
@@ -1571,169 +1570,214 @@
 })();
 
 /* =========================================================================
- * PPA OUTPUT LANGUAGE MODULE (Composer Preview) — v2026-01-22
- * - Adds Output Language dropdown behavior (no new article generation)
- * - Caches translations to avoid spam
- * - Restores Original instantly
+ * PPA OUTPUT LANGUAGE MODULE (Composer Preview) — v2026-01-23.9
  *
- * NOTE:
- * - This module is append-only to avoid breaking existing preview/store flows.
- * - It expects #ppa-output-language and #ppa-preview-pane to exist in DOM.
- * - It calls admin-ajax action: ppa_translate_preview (WP PHP proxy added next).
+ * GOALS (client-side only):
+ * - State-safe: capture + freeze original_html immediately after Generate Preview renders.
+ * - Poll-safe: every poll sends draft_hash, lang, mode, original_html (+ original_json when available), and job_id when continuing.
+ * - UI-safe: never overwrite preview with partial HTML unless server explicitly flags it safe; show "Translating… (x%)" while pending.
+ * - Spam-safe: one active poll loop at a time; cancel token on language changes.
+ * - Recovery: if server says "Missing original_html", auto re-send frozen original_html once; then stop with visible error.
+ * - Logging: tight, non-flooding logs only on state transitions.
+ *
+ * Locked rules respected:
+ * - Composer CSS is “gospel” and is NOT modified here.
  * ========================================================================= */
 (function () {
   "use strict";
 
-  var PPA_OUTPUT_LANGUAGE_MODULE_v2026_01_22 = true; // marker
+  // -------------------------------------------------------------------------
+  // Init guard (prevents duplicate event bindings if the script is enqueued twice)
+  // -------------------------------------------------------------------------
+  if (window.PPA_OUTPUT_LANGUAGE_MODULE_INIT) return; // CHANGED:
+  window.PPA_OUTPUT_LANGUAGE_MODULE_INIT = "v2026-01-23.9"; // CHANGED:
 
-  // ---------- helpers ----------
-  function $(sel, root) { try { return (root || document).querySelector(sel); } catch (e) { return null; } }
   function byId(id) { try { return document.getElementById(id); } catch (e) { return null; } }
 
-  function getAjaxUrl(action) {
-    // WordPress sets `ajaxurl` in admin; fall back to standard path.
+  // -------------------------------------------------------------------------
+  // Config
+  // -------------------------------------------------------------------------
+  var ACTION = "ppa_translate_preview"; // WP admin-ajax action (PHP proxy)
+  var MODE = "strict";
+
+  // Guardrails:
+  // - If progress never moves off 0% for this long, we assume the server job is stuck.
+  // - If total elapsed exceeds MAX_TOTAL_MS, we stop polling and show a visible message.
+  var STALL_ZERO_MS = 60 * 1000;       // CHANGED:
+  var STALL_NO_MOVE_MS = 120 * 1000;   // CHANGED:
+  var MAX_TOTAL_MS = 5 * 60 * 1000;    // CHANGED: 5 minutes hard cap
+  var MAX_POLLS = 300;                // CHANGED:
+
+  // Poll timing clamp (prevents hammering admin-ajax)
+  var MIN_POLL_MS = 800;              // CHANGED:
+  var MAX_POLL_MS = 10000;            // CHANGED:
+
+  // -------------------------------------------------------------------------
+  // Language allowlist (matches what we render in the dropdown)
+  // -------------------------------------------------------------------------
+  var LANGS = [
+    { v: "original", label: "Original" },
+    { v: "es", label: "Spanish" },
+    { v: "fr", label: "French" },
+    { v: "de", label: "German" },
+    { v: "pt", label: "Portuguese" },
+    { v: "it", label: "Italian" },
+    { v: "ja", label: "Japanese" },
+    { v: "zh-hans", label: "Chinese (Simplified)" },
+    { v: "zh-hant", label: "Chinese (Traditional)" },
+    { v: "hi", label: "Hindi" },
+    { v: "ar", label: "Arabic" },
+    { v: "ko", label: "Korean" },
+    { v: "nl", label: "Dutch" },
+    { v: "sv", label: "Swedish" },
+    { v: "no", label: "Norwegian" },
+    { v: "da", label: "Danish" },
+    { v: "fi", label: "Finnish" },
+    { v: "pl", label: "Polish" },
+    { v: "tr", label: "Turkish" },
+    { v: "ru", label: "Russian" },
+    { v: "id", label: "Indonesian" },
+    { v: "vi", label: "Vietnamese" },
+    { v: "cs", label: "Czech" },
+    { v: "uk", label: "Ukrainian" },
+    { v: "fa", label: "Persian" }
+  ];
+
+  var LANG_ALIASES = { // CHANGED:
+    "zh-Hans": "zh-hans",
+    "zh-Hant": "zh-hant",
+    "zh_hans": "zh-hans",
+    "zh_hant": "zh-hant"
+  };
+
+  function normalizeLang(raw) { // CHANGED:
+    var v = String(raw == null ? "" : raw).trim();
+    if (!v) return "original";
+    if (v.toLowerCase() === "original") return "original";
+    if (Object.prototype.hasOwnProperty.call(LANG_ALIASES, v)) return LANG_ALIASES[v];
+    return v.toLowerCase();
+  }
+
+  function buildAllowedLangSet() { // CHANGED:
+    var s = {};
+    for (var i = 0; i < LANGS.length; i++) {
+      s[normalizeLang(LANGS[i].v)] = true;
+    }
+    return s;
+  }
+  var ALLOWED_LANGS = buildAllowedLangSet(); // CHANGED:
+
+  // -------------------------------------------------------------------------
+  // Minimal hashing for stable draft_hash (client fallback if server doesn't provide one)
+  // -------------------------------------------------------------------------
+  function djb2Hash(str) {
+    str = String(str || "");
+    var hash = 5381;
+    for (var i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+      hash = hash & 0xffffffff;
+    }
+    return "h_" + (hash >>> 0).toString(16);
+  }
+
+  // -------------------------------------------------------------------------
+  // Transport helpers
+  // -------------------------------------------------------------------------
+  function getNonce() {
+    try {
+      if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce);
+      if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce);
+      var el = byId("ppa-nonce");
+      if (el && el.value) return String(el.value);
+      var data = document.querySelector("[data-ppa-nonce]");
+      if (data) return String(data.getAttribute("data-ppa-nonce") || "");
+    } catch (e0) {}
+    return "";
+  }
+
+  function stripBom(s) {
+    s = String(s == null ? "" : s);
+    return s.replace(/^\uFEFF/, "");
+  }
+
+  function safeJsonParse(txt) {
+    var s = stripBom(txt);
+    s = String(s || "").trim();
+    if (!s) return null;
+
+    // WP sometimes returns literal 0 for auth/nonce errors.
+    if (s === "0") return { ok: false, error: "wp_ajax_0" };
+
+    // Fast-path
+    if (s.charAt(0) === "{" || s.charAt(0) === "[") {
+      try { return JSON.parse(s); } catch (e1) {}
+    }
+
+    // HTML indicates fatal/notice output, or a login page
+    if (/<\s*html/i.test(s) || /<!doctype/i.test(s)) {
+      return { ok: false, error: "non_json_html", raw: s.slice(0, 600) };
+    }
+
+    // Salvage: extract first JSON region from noisy output
+    var iObj = s.indexOf("{");
+    var iArr = s.indexOf("[");
+    var start = -1;
+    if (iObj !== -1 && iArr !== -1) start = Math.min(iObj, iArr);
+    else start = (iObj !== -1 ? iObj : iArr);
+    if (start === -1) return null;
+
+    var slice = s.slice(start);
+    var endObj = slice.lastIndexOf("}");
+    var endArr = slice.lastIndexOf("]");
+    var end = Math.max(endObj, endArr);
+    if (end !== -1) slice = slice.slice(0, end + 1);
+
+    try { return JSON.parse(slice); } catch (e2) {}
+    return null;
+  }
+
+  function normalizeWpEnvelope(json) { // CHANGED:
+    // WP may wrap ajax responses as { success: true, data: {...} }
+    // Normalize into { ok: true|false, ... }
+    if (!json || typeof json !== "object") return json;
+    if (Object.prototype.hasOwnProperty.call(json, "ok")) return json;
+
+    if (Object.prototype.hasOwnProperty.call(json, "success")) {
+      if (json.success === true) {
+        if (json.data && typeof json.data === "object") {
+          json.data.ok = true;
+          return json.data;
+        }
+        return { ok: true, data: json.data };
+      }
+      // success:false
+      if (json.data && typeof json.data === "object") {
+        if (!Object.prototype.hasOwnProperty.call(json.data, "ok")) json.data.ok = false;
+        return json.data;
+      }
+      return { ok: false, error: "wp_ajax_failure", data: json.data };
+    }
+    return json;
+  }
+
+  function buildAjaxUrl(action) {
     var base = (typeof window.ajaxurl !== "undefined" && window.ajaxurl) ? window.ajaxurl : "/wp-admin/admin-ajax.php";
     if (base.indexOf("?") === -1) return base + "?action=" + encodeURIComponent(action);
     return base + "&action=" + encodeURIComponent(action);
   }
 
-  function safeJsonParse(txt) {
-    try { return JSON.parse(txt); } catch (e) { return null; }
-  }
-
-  // ---------- language list ----------
-  // Based on W3Techs "content languages used for websites" (top common site languages). :contentReference[oaicite:1]{index=1}
-  // Keep list tight + practical. We'll expand later if needed.
-  var LANGS = [
-    { v: "original", label: "Original" },
-    { v: "en", label: "English" },
-    { v: "es", label: "Spanish" },
-    { v: "de", label: "German" },
-    { v: "ja", label: "Japanese" },
-    { v: "fr", label: "French" },
-    { v: "pt", label: "Portuguese" },
-    { v: "ru", label: "Russian" },
-    { v: "it", label: "Italian" },
-    { v: "nl", label: "Dutch" },
-    { v: "pl", label: "Polish" },
-    { v: "tr", label: "Turkish" },
-    { v: "zh-Hans", label: "Chinese (Simplified)" },
-    { v: "zh-Hant", label: "Chinese (Traditional)" },
-    { v: "fa", label: "Persian" },
-    { v: "vi", label: "Vietnamese" },
-    { v: "cs", label: "Czech" },
-    { v: "id", label: "Indonesian" },
-    { v: "ko", label: "Korean" },
-    { v: "uk", label: "Ukrainian" },
-    { v: "ar", label: "Arabic" }
-  ];
-
-  // ---------- state + cache ----------
-  var LS_KEY = "ppa_output_language";
-  var MODE = "strict"; // future: "natural"
-  var translationCache = new Map(); // key => { html, json, ts }
-
-  var state = {
-    hasPreview: false,
-    draftHash: null,
-    originalHtml: null,
-    originalJson: null // optional; if available, we send structured fields
-  };
-
-  function getDraftHash() {
-    // Try multiple places without assuming any existing implementation.
-    var pane = byId("ppa-preview-pane");
-    var v =
-      (pane && pane.getAttribute("data-draft-hash")) ||
-      (document.body && document.body.getAttribute("data-ppa-draft-hash")) ||
-      (window.PPA && (window.PPA.draft_hash || window.PPA.draftHash)) ||
-      (window.PPA_PREVIEW && window.PPA_PREVIEW.draft_hash) ||
-      null;
-    return (v && String(v).trim()) ? String(v).trim() : null;
-  }
-
-  function previewLooksGenerated(pane) {
-    if (!pane) return false;
-    var txt = (pane.textContent || "").trim();
-    // Default placeholder from composer.php:
-    if (txt.indexOf("(Preview will appear here once generated.)") !== -1) return false;
-    // If there's real HTML content, we treat as generated.
-    var html = (pane.innerHTML || "").trim();
-    if (html.length < 20) return false;
-    return true;
-  }
-
-  function setUiState(selectEl, helpEl, enabled) {
-    if (!selectEl) return;
-    selectEl.disabled = !enabled;
-    if (helpEl) helpEl.style.display = enabled ? "none" : "block";
-  }
-
-  function ensureOptions(selectEl) {
-    if (!selectEl) return;
-    // If it already has more than 1 option, do nothing (avoid duplicates).
-    if (selectEl.options && selectEl.options.length > 1) return;
-
-    // Clear and repopulate to guarantee ordering
-    selectEl.innerHTML = "";
-    for (var i = 0; i < LANGS.length; i++) {
-      var opt = document.createElement("option");
-      opt.value = LANGS[i].v;
-      opt.textContent = LANGS[i].label;
-      selectEl.appendChild(opt);
-    }
-  }
-
-  function getSavedLang() {
-    try {
-      var v = localStorage.getItem(LS_KEY);
-      return (v && String(v).trim()) ? String(v).trim() : "original";
-    } catch (e) {
-      return "original";
-    }
-  }
-
-  function saveLang(v) {
-    try { localStorage.setItem(LS_KEY, v); } catch (e) {}
-  }
-
-  function cacheKey(draftHash, lang, mode) {
-    return String(draftHash || "nohash") + "|" + String(lang || "") + "|" + String(mode || "");
-  }
-
-  function setLoading(pane, msg) {
-    if (!pane) return;
-    pane.setAttribute("data-ppa-lang-loading", "1");
-    pane.innerHTML = '<p><em>' + (msg || "Translating…") + "</em></p>";
-  }
-
-  function clearLoading(pane) {
-    if (!pane) return;
-    pane.removeAttribute("data-ppa-lang-loading");
-  }
-
-  async function postTranslate(payload) {
-    var url = getAjaxUrl("ppa_translate_preview");
-    var res = await fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    var text = await res.text();
-    var json = safeJsonParse(text);
-    if (!json) {
-      // some WP handlers may wrap JSON in output; try to salvage
-      // (last resort: locate first { ... } block)
-      var idx = text.indexOf("{");
-      if (idx !== -1) json = safeJsonParse(text.slice(idx));
-    }
-    if (!json) return { ok: false, error: "invalid_json", raw: text };
-    return json;
+  function buildHeaders(contentType) { // CHANGED:
+    var nonce = getNonce();
+    var h = {
+      "X-Requested-With": "XMLHttpRequest",
+      "Accept": "application/json, text/plain, */*",
+      "Content-Type": contentType
+    };
+    if (nonce) h["X-WP-Nonce"] = nonce;
+    return h;
   }
 
   function extractHtml(resp) {
-    // tolerant shapes
     if (!resp) return null;
     if (typeof resp.html === "string") return resp.html;
     if (resp.data && typeof resp.data.html === "string") return resp.data.html;
@@ -1743,82 +1787,439 @@
     return null;
   }
 
+  function parseProgress(resp) { // CHANGED:
+    if (!resp) return null;
+    var p = null;
+    try {
+      if (typeof resp.progress === "number") p = resp.progress;
+      else if (typeof resp.progress === "string") p = parseFloat(resp.progress);
+      else if (resp.data && typeof resp.data.progress === "number") p = resp.data.progress;
+      else if (resp.data && typeof resp.data.progress === "string") p = parseFloat(resp.data.progress);
+    } catch (e0) { p = null; }
+
+    if (p == null || isNaN(p)) return null;
+    if (p < 0) p = 0;
+    if (p > 100) p = 100;
+    return Math.round(p);
+  }
+
+  function isMissingOriginalHtml(resp) { // CHANGED:
+    var msg = "";
+    try { msg = String(resp && (resp.error || resp.message || resp.detail || "")).toLowerCase(); } catch (e0) { msg = ""; }
+    return (msg.indexOf("missing original_html") !== -1 || msg.indexOf("missing_original_html") !== -1);
+  }
+
+  function isSafeToReplacePreview(resp) { // CHANGED:
+    // Only replace preview with HTML if:
+    // - pending is false (job complete), OR
+    // - server explicitly signals "final/complete/safe_replace"
+    if (!resp) return false;
+    if (resp.pending === false) return true;
+    if (resp.complete === true) return true;
+    if (resp.final === true) return true;
+    if (resp.is_final === true) return true;
+    if (resp.safe_replace === true) return true;
+    if (resp.replace_preview === true) return true;
+    return false;
+  }
+
+  async function postTranslate(canonical, signal) { // CHANGED:
+    // Transport strategy:
+    // - Try JSON body first (some proxies read php://input)
+    // - Retry form-encoded with payload=... (some proxies read $_POST['payload'])
+    // We ALWAYS include a payload object as well to satisfy proxies that expect it.
+    var url = buildAjaxUrl(ACTION);
+
+    function shouldRetry(resp) {
+      if (!resp || resp.ok === true) return false;
+      var err = "";
+      try { err = String(resp.error || resp.message || "").toLowerCase(); } catch (e0) { err = ""; }
+      if (!err) return true;
+      return (
+        err.indexOf("missing_or_invalid_lang") !== -1 ||
+        err.indexOf("missing original_html") !== -1 ||
+        err.indexOf("missing_original_html") !== -1 ||
+        err.indexOf("invalid_json") !== -1 ||
+        err.indexOf("wp_ajax_0") !== -1 ||
+        err.indexOf("non_json_html") !== -1
+      );
+    }
+
+    async function doFetch(headers, body) {
+      try {
+        var res = await fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: headers,
+          body: body,
+          signal: signal // CHANGED:
+        });
+        var txt = await res.text();
+        var json = safeJsonParse(txt);
+        if (!json) {
+          try { console.info("PPA: translate invalid_json raw →", String(txt || "").slice(0, 900)); } catch (e0) {}
+          return { ok: false, error: "invalid_json", raw: String(txt || "").slice(0, 900), status: res.status };
+        }
+
+        if (json && json.ok === false && json.error === "non_json_html") {
+          json.status = res.status;
+          return json;
+        }
+
+        json = normalizeWpEnvelope(json);
+
+        if (!res.ok && json && typeof json === "object") {
+          if (json.ok !== true) {
+            json.ok = false;
+            json.status = res.status;
+            if (!json.error) json.error = "http_" + String(res.status);
+          }
+        }
+
+        if (json && typeof json === "object" && !Object.prototype.hasOwnProperty.call(json, "status")) {
+          json.status = res.status;
+        }
+        return json;
+      } catch (err) {
+        if (err.name === 'AbortError') return { ok: false, aborted: true };
+        return { ok: false, error: "network_error", message: String(err) };
+      }
+    }
+
+    // 1) JSON body
+    var jsonBodyObj = {};
+    try {
+      for (var k in canonical) {
+        if (Object.prototype.hasOwnProperty.call(canonical, k)) jsonBodyObj[k] = canonical[k];
+      }
+    } catch (eC) {}
+    // Provide payload in JSON too (some proxies look for it)
+    jsonBodyObj.payload = canonical; // CHANGED:
+
+    var resp1 = await doFetch(buildHeaders("application/json; charset=UTF-8"), JSON.stringify(jsonBodyObj));
+    if (resp1 && resp1.aborted) return resp1; // CHANGED:
+    if (!shouldRetry(resp1)) return resp1;
+
+    // 2) Form-encoded fallback
+    var originalJsonStr = "";
+    try { originalJsonStr = canonical.original_json ? JSON.stringify(canonical.original_json) : ""; } catch (eJ) { originalJsonStr = ""; }
+
+    var body =
+      "action=" + encodeURIComponent(ACTION) +
+      "&payload=" + encodeURIComponent(JSON.stringify(canonical || {})) +
+      "&lang=" + encodeURIComponent(String(canonical.lang || "")) +
+      "&mode=" + encodeURIComponent(String(canonical.mode || "")) +
+      "&draft_hash=" + encodeURIComponent(String(canonical.draft_hash || "")) +
+      "&job_id=" + encodeURIComponent(String(canonical.job_id || "")) +
+      "&original_html=" + encodeURIComponent(String(canonical.original_html || "")) +
+      "&original_json=" + encodeURIComponent(originalJsonStr);
+
+    var resp2 = await doFetch(buildHeaders("application/x-www-form-urlencoded; charset=UTF-8"), body);
+    return resp2;
+  }
+
+  // -------------------------------------------------------------------------
+  // UI helpers (no CSS changes, just HTML inside the pane)
+  // -------------------------------------------------------------------------
+  function setUiState(selectEl, helpEl, enabled) {
+    if (!selectEl) return;
+    selectEl.disabled = !enabled;
+    if (helpEl) helpEl.style.display = enabled ? "none" : "block";
+  }
+
+  function setLoading(pane, label) {
+    if (!pane) return;
+    pane.setAttribute("data-ppa-lang-loading", "1");
+    pane.innerHTML = '<p><em>' + (label || "Translating…") + "</em></p>";
+  }
+
+  function clearLoading(pane) {
+    if (!pane) return;
+    try { pane.removeAttribute("data-ppa-lang-loading"); } catch (e0) {}
+  }
+
   function setPaneHtml(pane, html) {
     if (!pane) return;
     pane.innerHTML = html || '<p><em>No content.</em></p>';
     clearLoading(pane);
   }
 
-  function captureOriginalIfNeeded(pane) {
-    if (!pane) return;
-    if (!state.originalHtml) state.originalHtml = pane.innerHTML;
-    // If any structured JSON exists in globals, capture it (optional).
-    state.draftHash = state.draftHash || getDraftHash();
-    if (!state.originalJson) {
-      // These names are intentionally broad: we DO NOT assume they exist.
-      state.originalJson =
-        (window.PPA_LAST_PREVIEW_JSON || window.PPA_PREVIEW_JSON || (window.PPA && window.PPA.last_preview_json)) ||
-        null;
+  function showProgress(pane, pct) { // CHANGED:
+    var msg = "Translating…";
+    if (pct != null) msg += " (" + String(pct) + "%)";
+    setLoading(pane, msg);
+  }
+
+  function showError(pane, msg) { // CHANGED:
+    setPaneHtml(pane, '<p><em>Translation error: ' + String(msg || "unknown") + "</em></p>");
+  }
+
+  // -------------------------------------------------------------------------
+  // Logging (non-flooding): only log when a given "state key" changes
+  // -------------------------------------------------------------------------
+  var lastLog = {}; // key -> signature
+  function logOnce(key, obj) { // CHANGED:
+    var sig = "";
+    try { sig = JSON.stringify(obj || {}); } catch (e0) { sig = String(obj); }
+    if (lastLog[key] === sig) return;
+    lastLog[key] = sig;
+    try { console.info("PPA:", key, obj || ""); } catch (e1) {}
+  }
+
+  // -------------------------------------------------------------------------
+  // Preview state + caching
+  // -------------------------------------------------------------------------
+  var translationCache = new Map(); // key -> { html, ts }
+  function cacheKey(draftHash, lang, mode) {
+    return String(draftHash || "nohash") + "|" + String(lang || "") + "|" + String(mode || "");
+  }
+
+  var state = {
+    hasPreview: false,
+    draftHash: null,
+    frozenOriginalHtml: null, // CHANGED:
+    frozenOriginalJson: null, // CHANGED:
+    translating: false,
+    currentLang: "original"
+  };
+
+  var poll = {
+    abortController: null
+  };
+
+  function cancelCurrentRequest(reason) {
+    if (poll.abortController) {
+      try { poll.abortController.abort(); } catch (e) {}
+      poll.abortController = null;
+    }
+    try { state.translating = false; } catch (e1) {}
+    if (reason) logOnce("translate cancel", { reason: reason });
+  }
+
+  function previewLooksGenerated(pane) {
+    if (!pane) return false;
+
+    // If we are showing our own placeholder, treat as generated as long as we have frozen HTML.
+    try {
+      if (pane.getAttribute("data-ppa-lang-loading") === "1") {
+        return !!(state && state.frozenOriginalHtml);
+      }
+    } catch (e0) {}
+
+    var txt = (pane.textContent || "").trim();
+    if (txt.indexOf("(Preview will appear here once generated.)") !== -1) return false;
+
+    var html = (pane.innerHTML || "").trim();
+    return (html.length >= 20);
+  }
+
+  function ensureOptions(selectEl) { // CHANGED:
+    if (!selectEl) return;
+
+    // Always rebuild options so values are guaranteed valid lang codes.
+    var current = null;
+    try { current = String(selectEl.value || "").trim(); } catch (e0) { current = null; }
+
+    selectEl.innerHTML = "";
+    for (var i = 0; i < LANGS.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = normalizeLang(LANGS[i].v);
+      opt.textContent = LANGS[i].label;
+      selectEl.appendChild(opt);
+    }
+
+    // Default to Original every load (no persistence)
+    var desired = normalizeLang(current || "original");
+    try { selectEl.value = (ALLOWED_LANGS[desired] ? desired : "original"); } catch (e1) {}
+  }
+
+  function freezeOriginalIfNeeded(selectEl, pane) { // CHANGED:
+    // Freeze original_html when:
+    // - pane looks generated (real preview HTML)
+    // - NOT translating (so we don't freeze placeholders / partials)
+    // - dropdown is currently "Original" (so we don't freeze translated HTML)
+    if (!selectEl || !pane) return;
+
+    if (!previewLooksGenerated(pane)) return;
+    if (state.translating === true) return;
+
+    var currentLang = normalizeLang(selectEl.value || "original");
+    if (currentLang !== "original") return;
+
+    // Avoid freezing while loading placeholder is visible
+    try { if (pane.getAttribute("data-ppa-lang-loading") === "1") return; } catch (e0) {}
+
+    var html = String(pane.innerHTML || "").trim();
+    if (!html || html.length < 20) return;
+
+    var dh = djb2Hash(html);
+    if (state.draftHash !== dh) { // New preview detected
+      state.draftHash = dh;
+      state.frozenOriginalHtml = html;
+      state.frozenOriginalJson = null; // none available client-side right now
+      translationCache.clear();
+
+      try { pane.setAttribute("data-draft-hash", dh); } catch (eH) {}
+
+      logOnce("translate freeze original", { draft_hash: dh, chars: html.length }); // CHANGED:
+    } else if (!state.frozenOriginalHtml) {
+      state.frozenOriginalHtml = html;
+      try { pane.setAttribute("data-draft-hash", dh); } catch (eH2) {}
+      logOnce("translate freeze original", { draft_hash: dh, chars: html.length });
     }
   }
 
-  async function onLangChange(lang, selectEl, pane) {
-    if (!pane) return;
+  // -------------------------------------------------------------------------
+  // Core translate flow
+  // -------------------------------------------------------------------------
+  function buildCanonicalPayload(lang) {
+    var safeLang = normalizeLang(lang);
+    var dh = String(state.draftHash || "");
 
-    // Guard: if preview doesn't exist, force original + keep disabled behavior.
-    if (!state.hasPreview) {
-      if (selectEl) selectEl.value = "original";
-      saveLang("original");
+    return {
+      lang: safeLang,
+      language: safeLang,
+      target_lang: safeLang,
+      mode: MODE,
+      draft_hash: dh,
+      job_id: "",
+      original_html: String(state.frozenOriginalHtml || ""),
+      original_json: state.frozenOriginalJson || null
+    };
+  }
+
+  async function startTranslate(selectEl, pane, lang) {
+    lang = normalizeLang(lang);
+
+    // Allowlist enforcement
+    if (!ALLOWED_LANGS[lang]) {
+      try { selectEl.value = "original"; } catch (e0) {}
+      showError(pane, "missing_or_invalid_lang");
       return;
     }
 
-    if (lang === "original") {
-      if (state.originalHtml) setPaneHtml(pane, state.originalHtml);
+    // Must have a frozen original preview
+    freezeOriginalIfNeeded(selectEl, pane);
+
+    if (!state.frozenOriginalHtml || !state.draftHash) {
+      try { selectEl.value = "original"; } catch (e1) {}
+      showError(pane, "Missing original preview HTML. Click Generate Preview first.");
       return;
     }
 
-    var dh = state.draftHash || getDraftHash() || "nohash";
-    var key = cacheKey(dh, lang, MODE);
-
+    // Cache hit?
+    var key = cacheKey(state.draftHash, lang, MODE);
     if (translationCache.has(key)) {
       var hit = translationCache.get(key);
       if (hit && hit.html) {
         setPaneHtml(pane, hit.html);
+        logOnce("translate cache hit", { lang: lang, draft_hash: state.draftHash });
         return;
       }
     }
 
-    // First request for this lang: call WP ajax proxy (next step adds handler).
-    setLoading(pane, "Translating…");
+    // Cancel any in-flight request
+    cancelCurrentRequest("restart");
 
-    var payload = {
-      lang: lang,
-      mode: MODE,
-      draft_hash: dh,
-      // Prefer structured payload if we have it; else send original HTML as fallback.
-      original_json: state.originalJson || null,
-      original_html: state.originalHtml || null
-    };
+    poll.abortController = new AbortController();
+    var signal = poll.abortController.signal;
 
-    var resp = await postTranslate(payload);
+    state.translating = true;
+    state.currentLang = lang;
 
-    if (!resp || resp.ok === false) {
-      var msg = (resp && (resp.error || resp.message)) ? String(resp.error || resp.message) : "translate_failed";
-      setPaneHtml(pane, '<p><em>Translation error: ' + msg + "</em></p>");
-      return;
+    logOnce("translate start", { lang: lang, draft_hash: state.draftHash });
+    setLoading(pane, "Translating to " + lang + "...");
+
+    // Build payload
+    var payload = buildCanonicalPayload(lang);
+    var attempt = 0;
+    var maxAttempts = 300; 
+
+    try {
+      while (attempt < maxAttempts) {
+        if (signal.aborted) return;
+        
+        var resp = await postTranslate(payload, signal);
+
+        // 1. Check if aborted while waiting
+        if (signal.aborted) return;
+        if (resp && resp.aborted) return;
+
+        // 2. Handle failure
+        if (!resp || resp.ok === false) {
+           var err = (resp && (resp.error || resp.message)) ? (resp.error || resp.message) : "translate_failed";
+           showError(pane, "Translation failed: " + err);
+           state.translating = false;
+           return;
+        }
+
+        // 3. Handle pending (POLLING)
+        if (resp.pending === true) {
+            var pct = parseProgress(resp);
+            showProgress(pane, pct);
+            
+            if (resp.job_id) {
+                payload.job_id = resp.job_id;
+            }
+
+            var wait = (resp.next_poll_ms && resp.next_poll_ms > 0) ? resp.next_poll_ms : 1000;
+            // Sleep
+            await new Promise(function(resolve) { 
+                var tid = setTimeout(resolve, wait); 
+                signal.addEventListener('abort', function() { clearTimeout(tid); resolve(); }, {once:true});
+            });
+            
+            attempt++;
+            continue;
+        }
+
+        // 4. Handle complete success
+        var html = extractHtml(resp);
+        if (html && html.length > 20) {
+          setPaneHtml(pane, html);
+          try { translationCache.set(key, { html: html, ts: Date.now() }); } catch (eC) {}
+          logOnce("translate complete", { lang: lang, draft_hash: state.draftHash });
+        } else {
+          showError(pane, "Translation returned empty or invalid HTML.");
+        }
+        break; 
+      }
+    } catch (e) {
+      if (signal.aborted) return;
+      showError(pane, "Translation error: " + String(e));
+    } finally {
+      if (!signal.aborted) {
+        state.translating = false;
+        poll.abortController = null;
+      }
     }
-
-    var html = extractHtml(resp);
-    if (!html) {
-      // If no HTML returned yet, don’t break the preview — show a minimal message.
-      setPaneHtml(pane, '<p><em>Translation returned no HTML (server will be updated next).</em></p>');
-      return;
-    }
-
-    translationCache.set(key, { html: html, ts: Date.now() });
-    setPaneHtml(pane, html);
   }
 
+  function restoreOriginal(selectEl, pane) {
+    cancelCurrentRequest("restore_original");
+    state.currentLang = "original";
+    if (state.frozenOriginalHtml) {
+      setPaneHtml(pane, state.frozenOriginalHtml);
+    }
+    try { selectEl.value = "original"; } catch (e0) {}
+  }
+
+  function debounce(func, wait) {
+    var timeout;
+    return function() {
+      var context = this, args = arguments;
+      var later = function() {
+        timeout = null;
+        func.apply(context, args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Init / bind
+  // -------------------------------------------------------------------------
   function init() {
     var selectEl = byId("ppa-output-language");
     var helpEl = byId("ppa-output-language-help");
@@ -1828,63 +2229,71 @@
 
     ensureOptions(selectEl);
 
-    // Start disabled until we see a generated preview.
+    // Default Original every load (no persistence)
+    try { selectEl.value = "original"; } catch (e0) {}
+
     setUiState(selectEl, helpEl, false);
 
-    // Restore last chosen language (but we only apply after preview exists)
-    var saved = getSavedLang();
-    if (saved) selectEl.value = saved;
-
-    // Watch preview pane to detect when preview is generated.
+    // Observe preview changes so we can freeze the original HTML immediately after Generate Preview renders.
     var observer = new MutationObserver(function () {
       var has = previewLooksGenerated(pane);
-      if (has && !state.hasPreview) {
+
+      if (has) {
         state.hasPreview = true;
-        captureOriginalIfNeeded(pane);
         setUiState(selectEl, helpEl, true);
 
-        // If user previously selected a language, apply it now.
-        var want = selectEl.value || "original";
-        if (want && want !== "original") {
-          onLangChange(want, selectEl, pane).catch(function (e) {
-            setPaneHtml(pane, '<p><em>Translation error (client): ' + (e && e.message ? e.message : "unknown") + "</em></p>");
-          });
-        }
-      }
-      if (!has && state.hasPreview) {
-        // If preview pane is cleared/reset, lock language UI again.
+        // If the user somehow has a non-original selection during a fresh preview render,
+        // force it back to original so we freeze a true "original" baseline. // CHANGED:
+        try {
+          if (state.translating !== true) {
+            var cur = normalizeLang(selectEl.value || "original");
+            if (cur !== "original") selectEl.value = "original";
+          }
+        } catch (e1) {}
+
+        freezeOriginalIfNeeded(selectEl, pane);
+      } else {
+        // If preview gets cleared and we're not translating, disable controls and reset.
+        if (state.translating === true) return;
         state.hasPreview = false;
         setUiState(selectEl, helpEl, false);
+        translationCache.clear();
+        state.draftHash = null;
+        state.frozenOriginalHtml = null;
+        state.frozenOriginalJson = null;
+        try { selectEl.value = "original"; } catch (e2) {}
+        cancelCurrentRequest("preview_cleared");
       }
     });
 
     observer.observe(pane, { childList: true, subtree: true });
 
-    // Handle manual changes
-    selectEl.addEventListener("change", function () {
-      var lang = selectEl.value || "original";
-      saveLang(lang);
-      // Always capture original before first translation attempt
-      if (previewLooksGenerated(pane)) {
-        state.hasPreview = true;
-        captureOriginalIfNeeded(pane);
-        setUiState(selectEl, helpEl, true);
-      }
-      onLangChange(lang, selectEl, pane).catch(function (e) {
-        setPaneHtml(pane, '<p><em>Translation error (client): ' + (e && e.message ? e.message : "unknown") + "</em></p>");
-      });
-    });
+    selectEl.addEventListener("change", debounce(function () { // CHANGED:
+      var lang = normalizeLang(selectEl.value || "original");
 
-    // If preview already exists on load (rare, but possible), unlock immediately.
+      // If no preview, force back to original.
+      if (!previewLooksGenerated(pane) && !state.frozenOriginalHtml) {
+        try { selectEl.value = "original"; } catch (e0) {}
+        return;
+      }
+
+      // Always keep frozen original up-to-date before translating.
+      freezeOriginalIfNeeded(selectEl, pane);
+
+      if (lang === "original") {
+        restoreOriginal(selectEl, pane);
+        return;
+      }
+
+      startTranslate(selectEl, pane, lang);
+    }, 300)); // CHANGED:
+
+    // If preview already exists at load, enable + freeze baseline.
     if (previewLooksGenerated(pane)) {
       state.hasPreview = true;
-      captureOriginalIfNeeded(pane);
       setUiState(selectEl, helpEl, true);
-
-      // If saved language is non-original, apply it.
-      if (selectEl.value && selectEl.value !== "original") {
-        onLangChange(selectEl.value, selectEl, pane).catch(function () {});
-      }
+      try { selectEl.value = "original"; } catch (e3) {}
+      freezeOriginalIfNeeded(selectEl, pane);
     }
   }
 

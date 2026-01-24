@@ -4,260 +4,391 @@
  *
  * Purpose:
  * - Handles admin-ajax.php?action=ppa_translate_preview
- * - Forwards the already-generated preview content to Django /translate/
+ * - Forwards ALREADY-GENERATED preview content to Django /translate/
  * - Returns translated preview payload (HTML and/or JSON) back to the JS layer
  *
- * Security:
- * - Admin-only by default (logged-in)
- * - Capability check: edit_posts (safe for authors/editors using Composer)
+ * Core Fix (2026-01-23):
+ * - Bulletproof against large payloads (WAF/timeouts/empty reply) by sending minimal payload when needed.   // CHANGED:
+ * - Adds deep debug fields when wp_remote_post() returns WP_Error (502) so we can see the REAL cause.      // CHANGED:
+ * - Hardens JSON encoding/decoding so "invalid json" becomes a clean structured JSON error.                // CHANGED:
  *
  * Notes:
- * - We DO NOT generate a new article here. This is translation only.
- * - We pass through payload shapes (original_json or original_html) to Django.
- * - Django is expected to enforce auth, rate-limit, and server-side caching keyed by (draft_hash, lang, mode).
+ * - Translation-only. No new article generation here.
+ * - Django should ideally cache original content by draft_hash during /generate/ so translate can be hash-only.
+ *
+ * ========= CHANGE LOG =========
+ * 2026-01-23
+ * - FIX: Prevent upstream timeout / empty reply on large payloads:
+ *        If original_html/original_json are too large, DO NOT send them; send hash-only.                  // CHANGED:
+ * - HARDEN: Always return JSON from WP proxy, even when upstream returns HTML or encoding fails.          // CHANGED:
+ * - DEBUG: Add payload sizing + wp_error code/message + raw snippet for upstream_invalid_json.            // CHANGED:
+ * - HARDEN: Disable "Expect: 100-continue" behavior (some hosts/proxies choke on it).                    // CHANGED:
  */
 
 namespace PPA\Ajax;
 
 if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+        exit;
 }
 
 if ( ! function_exists( __NAMESPACE__ . '\\ppa_read_json_body' ) ) {
-	/**
-	 * Read JSON body from php://input.
-	 *
-	 * @return array
-	 */
-	function ppa_read_json_body() {
-		$raw = file_get_contents( 'php://input' );
-		if ( ! is_string( $raw ) || $raw === '' ) {
-			return array();
-		}
-		$decoded = json_decode( $raw, true );
-		return is_array( $decoded ) ? $decoded : array();
-	}
+        /**
+         * Read JSON body from php://input.
+         * Falls back to $_POST if request isn't JSON.                                                        // CHANGED:
+         *
+         * @return array
+         */
+        function ppa_read_json_body() {
+                $raw = file_get_contents( 'php://input' );
+                if ( is_string( $raw ) && trim( $raw ) !== '' ) {
+                        $decoded = json_decode( $raw, true );
+                        if ( is_array( $decoded ) ) {
+                                return $decoded;
+                        }
+                }
+
+                // CHANGED: fallback for form-encoded requests
+                if ( ! empty( $_POST ) && is_array( $_POST ) ) {
+                        // phpcs:ignore WordPress.Security.NonceVerification.Missing
+                        return wp_unslash( $_POST );
+                }
+
+                return array();
+        }
 }
 
 if ( ! function_exists( __NAMESPACE__ . '\\ppa_get_django_base_url' ) ) {
-	/**
-	 * Try to find Django base URL from known plugin constants/options.
-	 * Keep this flexible to avoid coupling to one naming scheme.
-	 *
-	 * @return string
-	 */
-	function ppa_get_django_base_url() {
-		// Preferred constants (if your plugin defines them).
-		if ( defined( 'PPA_DJANGO_URL' ) && is_string( PPA_DJANGO_URL ) && PPA_DJANGO_URL ) {
-			return rtrim( PPA_DJANGO_URL, '/' );
-		}
-		if ( defined( 'PPA_SERVER_URL' ) && is_string( PPA_SERVER_URL ) && PPA_SERVER_URL ) {
-			return rtrim( PPA_SERVER_URL, '/' );
-		}
+        /**
+         * Try to find Django base URL from known plugin constants/options.
+         *
+         * @return string
+         */
+        function ppa_get_django_base_url() {
+                // Preferred constants (if your plugin defines them).
+                if ( defined( 'PPA_DJANGO_URL' ) && is_string( PPA_DJANGO_URL ) && trim( PPA_DJANGO_URL ) !== '' ) {
+                        return rtrim( trim( PPA_DJANGO_URL ), '/' );
+                }
+                if ( defined( 'PPA_SERVER_URL' ) && is_string( PPA_SERVER_URL ) && trim( PPA_SERVER_URL ) !== '' ) {
+                        return rtrim( trim( PPA_SERVER_URL ), '/' );
+                }
 
-		// Common option keys (defensive).
-		$candidates = array(
-			'ppa_django_url',
-			'ppa_server_url',
-			'postpress_ai_django_url',
-			'postpress_ai_server_url',
-		);
+                // Common option keys (defensive).
+                $candidates = array(
+                        'ppa_django_url',
+                        'ppa_server_url',
+                        'postpress_ai_django_url',
+                        'postpress_ai_server_url',
+                );
 
-		foreach ( $candidates as $key ) {
-			$val = get_option( $key, '' );
-			if ( is_string( $val ) && trim( $val ) !== '' ) {
-				return rtrim( trim( $val ), '/' );
-			}
-		}
+                foreach ( $candidates as $key ) {
+                        $val = get_option( $key, '' );
+                        if ( is_string( $val ) && trim( $val ) !== '' ) {
+                                return rtrim( trim( $val ), '/' );
+                        }
+                }
 
-		return '';
-	}
+                return '';
+        }
 }
 
 if ( ! function_exists( __NAMESPACE__ . '\\ppa_get_auth_key' ) ) {
-	/**
-	 * Get auth key used for server-to-server requests.
-	 * Matches your Settings rule: Connection Key (legacy) if present, else License Key.
-	 *
-	 * @return string
-	 */
-	function ppa_get_auth_key() {
-		// Legacy connection key first (if present).
-		$connection_keys = array(
-			'ppa_connection_key',
-			'postpress_ai_connection_key',
-		);
+        /**
+         * Get auth key used for server-to-server requests.
+         * Matches Settings rule: Connection Key (legacy) if present, else License Key.
+         *
+         * @return string
+         */
+        function ppa_get_auth_key() {
+                // Legacy connection key first (if present).
+                $connection_keys = array(
+                        'ppa_connection_key',
+                        'postpress_ai_connection_key',
+                );
 
-		foreach ( $connection_keys as $k ) {
-			$v = get_option( $k, '' );
-			if ( is_string( $v ) && trim( $v ) !== '' ) {
-				return trim( $v );
-			}
-		}
+                foreach ( $connection_keys as $k ) {
+                        $v = get_option( $k, '' );
+                        if ( is_string( $v ) && trim( $v ) !== '' ) {
+                                return trim( $v );
+                        }
+                }
 
-		// License key fallback.
-		$license_keys = array(
-			'ppa_license_key',
-			'postpress_ai_license_key',
-		);
+                // License key fallback.
+                $license_keys = array(
+                        'ppa_license_key',
+                        'postpress_ai_license_key',
+                        'ppa_activation_key',
+                        'postpress_ai_activation_key',
+                );
 
-		foreach ( $license_keys as $k ) {
-			$v = get_option( $k, '' );
-			if ( is_string( $v ) && trim( $v ) !== '' ) {
-				return trim( $v );
-			}
-		}
+                foreach ( $license_keys as $k ) {
+                        $v = get_option( $k, '' );
+                        if ( is_string( $v ) && trim( $v ) !== '' ) {
+                                return trim( $v );
+                        }
+                }
 
-		return '';
-	}
+                return '';
+        }
+}
+
+if ( ! function_exists( __NAMESPACE__ . '\\ppa_force_ipv4_for_url' ) ) {
+        /**
+         * Force IPv4 for WP HTTP API cURL handle when URL matches.
+         * Prevents "timeout with 0 bytes received" when IPv6 route is broken upstream.
+         *
+         * @param resource $handle
+         * @param array    $r
+         * @param string   $url
+         * @return void
+         */
+        function ppa_force_ipv4_for_url( $handle, $r, $url ) { // CHANGED:
+                if ( ! is_string( $url ) || $url === '' ) {
+                        return;
+                }
+
+                // Only affect our Django host.
+                if ( strpos( $url, 'apps.techwithwayne.com' ) === false ) {
+                        return;
+                }
+
+                if ( defined( 'CURL_IPRESOLVE_V4' ) && function_exists( 'curl_setopt' ) ) {
+                        @curl_setopt( $handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+                }
+        }
 }
 
 if ( ! function_exists( __NAMESPACE__ . '\\translate_preview' ) ) {
-	/**
-	 * AJAX handler: ppa_translate_preview
-	 *
-	 * Input (JSON):
-	 * - lang (string) e.g. "es"
-	 * - mode (string) "strict" (future: "natural")
-	 * - draft_hash (string) stable hash of the generated draft
-	 * - original_json (object|null) structured preview contract if available
-	 * - original_html (string|null) fallback if structured JSON not available
-	 *
-	 * Output:
-	 * - Pass-through JSON from Django (expected to include ok:true + html + normalized fields)
-	 */
-	function translate_preview() {
-		// Basic auth: must be logged-in.
-		if ( ! is_user_logged_in() ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'not_logged_in',
-				),
-				401
-			);
-		}
+        /**
+         * AJAX handler: ppa_translate_preview
+         */
+        function translate_preview() {
+                $start = microtime( true );
 
-		// Capability: keep Composer usable for editors/authors, but not public.
-		if ( ! current_user_can( 'edit_posts' ) ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'insufficient_permissions',
-				),
-				403
-			);
-		}
+                // Basic auth: must be logged-in.
+                if ( ! is_user_logged_in() ) {
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'not_logged_in',
+                                ),
+                                401
+                        );
+                }
 
-		$body = ppa_read_json_body();
+                // Capability: keep Composer usable for editors/authors, but not public.
+                if ( ! current_user_can( 'edit_posts' ) ) {
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'insufficient_permissions',
+                                ),
+                                403
+                        );
+                }
 
-		$lang      = isset( $body['lang'] ) ? sanitize_text_field( (string) $body['lang'] ) : '';
-		$mode      = isset( $body['mode'] ) ? sanitize_text_field( (string) $body['mode'] ) : 'strict';
-		$drafthash = isset( $body['draft_hash'] ) ? sanitize_text_field( (string) $body['draft_hash'] ) : '';
+                $body = ppa_read_json_body();
 
-		// Validate required.
-		if ( $lang === '' || $lang === 'original' ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'missing_or_invalid_lang',
-				),
-				400
-			);
-		}
+                $lang      = isset( $body['lang'] ) ? sanitize_text_field( (string) $body['lang'] ) : '';
+                $mode      = isset( $body['mode'] ) ? sanitize_text_field( (string) $body['mode'] ) : 'strict';
+                $drafthash = isset( $body['draft_hash'] ) ? sanitize_text_field( (string) $body['draft_hash'] ) : '';
 
-		$django = ppa_get_django_base_url();
-		if ( $django === '' ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'missing_django_url',
-				),
-				500
-			);
-		}
+                // Validate required.
+                if ( $lang === '' || $lang === 'original' ) {
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'missing_or_invalid_lang',
+                                ),
+                                400
+                        );
+                }
 
-		$key = ppa_get_auth_key();
-		if ( $key === '' ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'missing_auth_key',
-				),
-				500
-			);
-		}
+                $django = ppa_get_django_base_url();
+                if ( $django === '' ) {
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'missing_django_url',
+                                ),
+                                500
+                        );
+                }
 
-		// Build payload for Django. We pass through both shapes; Django decides what to use.
-		$payload = array(
-			'lang'         => $lang,
-			'mode'         => $mode ? $mode : 'strict',
-			'draft_hash'   => $drafthash,
-			'site_url'     => home_url(),
-			'original_json'=> isset( $body['original_json'] ) ? $body['original_json'] : null,
-			'original_html'=> isset( $body['original_html'] ) ? (string) $body['original_html'] : null,
-		);
+                $key = ppa_get_auth_key();
+                if ( $key === '' ) {
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'missing_auth_key',
+                                ),
+                                500
+                        );
+                }
 
-		$endpoint = rtrim( $django, '/' ) . '/translate/';
+                // -------------------------------
+                // CHANGED: Payload sizing guards
+                // -------------------------------
+                $max_bytes = 250000; // Bumped to 250KB.        // CHANGED:
 
-		// Send request to Django.
-		$args = array(
-			'timeout' => 45,
-			'headers' => array(
-				'Content-Type'      => 'application/json',
-				// Send multiple header names so Django can accept whichever it already supports.
-				'Authorization'     => 'Bearer ' . $key,
-				'X-PPA-Key'         => $key,
-				'X-PostPress-Key'   => $key,
-				'X-PPA-Site'        => home_url(),
-			),
-			'body'    => wp_json_encode( $payload ),
-		);
+                $original_html = null;
+                if ( isset( $body['original_html'] ) ) {
+                        $original_html = (string) $body['original_html'];
+                }
 
-		$res = wp_remote_post( $endpoint, $args );
+                $original_json = null;
+                if ( isset( $body['original_json'] ) ) {
+                        $original_json = $body['original_json']; // could be array/object
+                }
 
-		if ( is_wp_error( $res ) ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'upstream_request_failed',
-					'msg'   => $res->get_error_message(),
-				),
-				502
-			);
-		}
+                $orig_html_len = ( is_string( $original_html ) ? strlen( $original_html ) : 0 );
+                $orig_json_len = 0;
 
-		$code = (int) wp_remote_retrieve_response_code( $res );
-		$raw  = (string) wp_remote_retrieve_body( $res );
+                // IMPORTANT: encoding large arrays can be expensive; only measure if it's not huge-looking.
+                // If it's an array/object, we estimate size by encoding but cap time by only doing it if small-ish. // CHANGED:
+                if ( is_string( $original_json ) ) {
+                        $orig_json_len = strlen( $original_json );
+                } elseif ( is_array( $original_json ) || is_object( $original_json ) ) {
+                        $tmp = wp_json_encode( $original_json );
+                        $orig_json_len = is_string( $tmp ) ? strlen( $tmp ) : 0;
+                }
 
-		$decoded = json_decode( $raw, true );
+                $send_original = true;
+                $drop_reason   = null;
 
-		// If upstream returns non-JSON, surface safely.
-		if ( ! is_array( $decoded ) ) {
-			wp_send_json(
-				array(
-					'ok'    => false,
-					'error' => 'upstream_invalid_json',
-					'code'  => $code,
-				),
-				502
-			);
-		}
+                // If either component is too large, drop them and rely on Django cache by draft_hash.            // CHANGED:
+                if ( $orig_html_len > $max_bytes || $orig_json_len > $max_bytes ) {
+                        $send_original = false;
+                        $drop_reason   = 'payload_too_large_send_hash_only';
+                }
 
-		// Preserve upstream HTTP status if it's an error.
-		if ( $code >= 400 ) {
-			$decoded['ok']   = false;
-			$decoded['code'] = $code;
-			wp_send_json( $decoded, $code );
-		}
+                // Build payload for Django.
+                $payload = array(
+                        'lang'       => $lang,
+                        'mode'       => ( $mode ? $mode : 'strict' ),
+                        'draft_hash' => $drafthash,
+                        'site_url'   => home_url(),
 
-		// Success pass-through
-		if ( ! isset( $decoded['ok'] ) ) {
-			$decoded['ok'] = true;
-		}
+                        // CHANGED: tell Django what we did
+                        'meta'       => array(
+                                'send_original'   => $send_original,
+                                'drop_reason'     => $drop_reason,
+                                'orig_html_len'   => $orig_html_len,
+                                'orig_json_len'   => $orig_json_len,
+                                'max_bytes'       => $max_bytes,
+                        ),
+                );
 
-		wp_send_json( $decoded, 200 );
-	}
+                if ( $send_original ) { // CHANGED:
+                        $payload['original_json'] = $original_json;
+                        $payload['original_html'] = $original_html;
+                } else {
+                        $payload['original_json'] = null;
+                        $payload['original_html'] = null;
+                }
+
+                $endpoint = rtrim( $django, '/' ) . '/translate/';
+
+                // Force IPv4 for this request only.
+                add_action( 'http_api_curl', __NAMESPACE__ . '\\ppa_force_ipv4_for_url', 10, 3 ); // CHANGED:
+
+                $encoded = wp_json_encode( $payload ); // CHANGED:
+                if ( ! is_string( $encoded ) || $encoded === '' ) { // CHANGED:
+                        remove_action( 'http_api_curl', __NAMESPACE__ . '\\ppa_force_ipv4_for_url', 10 ); // CHANGED:
+                        wp_send_json(
+                                array(
+                                        'ok'    => false,
+                                        'error' => 'payload_encode_failed',
+                                        'msg'   => function_exists( 'json_last_error_msg' ) ? json_last_error_msg() : 'json_encode_failed',
+                                        'meta'  => $payload['meta'],
+                                ),
+                                500
+                        );
+                }
+
+                // Send request to Django.
+                $args = array(
+                        'timeout' => 120,
+                        'headers' => array(
+                                'Content-Type'    => 'application/json',
+                                'Authorization'   => 'Bearer ' . $key,
+                                'X-PPA-Key'       => $key,
+                                'X-PPA-Site'      => home_url(),
+                                'Expect'          => '', // CHANGED: prevent 100-continue behavior on some hosts
+                        ),
+                        'body'    => $encoded,
+                );
+
+                $res = wp_remote_post( $endpoint, $args );
+
+                // remove hook immediately so we don't affect other requests.
+                remove_action( 'http_api_curl', __NAMESPACE__ . '\\ppa_force_ipv4_for_url', 10 ); // CHANGED:
+
+                if ( is_wp_error( $res ) ) {
+                        $elapsed_ms   = (int) round( ( microtime( true ) - $start ) * 1000 );
+                        $err_code     = $res->get_error_code();
+                        $err_msg      = $res->get_error_message();
+                        $err_data     = $res->get_error_data();
+                        $payload_size = strlen( $encoded );
+
+                        wp_send_json(
+                                array(
+                                        'ok'           => false,
+                                        'error'        => 'upstream_request_failed',
+                                        'wp_error'     => true,
+                                        'wp_err_code'  => $err_code,
+                                        'wp_err_msg'   => $err_msg,
+                                        'wp_err_data'  => is_scalar( $err_data ) ? $err_data : ( $err_data ? wp_json_encode( $err_data ) : null ),
+                                        'endpoint'     => $endpoint,       // safe (no secrets)
+                                        'elapsed_ms'   => $elapsed_ms,
+                                        'payload_bytes'=> $payload_size,
+                                        'meta'         => $payload['meta'], // includes orig sizes + whether we dropped originals
+                                ),
+                                502
+                        );
+                }
+
+                $code = (int) wp_remote_retrieve_response_code( $res );
+                $raw  = (string) wp_remote_retrieve_body( $res );
+                $ct   = (string) wp_remote_retrieve_header( $res, 'content-type' ); // CHANGED:
+
+                $decoded = json_decode( $raw, true );
+
+                // If upstream returns non-JSON, surface safely with a snippet (for debugging).
+                if ( ! is_array( $decoded ) ) {
+                        wp_send_json(
+                                array(
+                                        'ok'          => false,
+                                        'error'       => 'upstream_invalid_json',
+                                        'code'        => $code,
+                                        'content_type'=> $ct,
+                                        'raw_len'     => strlen( $raw ),
+                                        'raw_snippet' => substr( $raw, 0, 600 ),
+                                        'meta'        => $payload['meta'],
+                                ),
+                                502
+                        );
+                }
+
+                // Preserve upstream HTTP status if it's an error.
+                if ( $code >= 400 ) {
+                        $decoded['ok']   = false;
+                        $decoded['code'] = $code;
+                        $decoded['meta'] = $payload['meta']; // CHANGED:
+                        wp_send_json( $decoded, $code );
+                }
+
+                // Success pass-through
+                if ( ! isset( $decoded['ok'] ) ) {
+                        $decoded['ok'] = true;
+                }
+
+                // CHANGED: include meta so JS/devtools can see whether we dropped original payload.
+                if ( ! isset( $decoded['meta'] ) ) {
+                        $decoded['meta'] = $payload['meta'];
+                }
+
+                wp_send_json( $decoded, 200 );
+        }
 }
 
 // Register handler (admin only).
