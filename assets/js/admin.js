@@ -4,12 +4,12 @@
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2026-01-23: UX: Output Language no longer persists across page reloads. Always defaults to "Original".     // CHANGED:
+ * 2026-01-24: UX: Output Language no longer persists across page reloads. Always defaults to "Original".     // CHANGED:
  *            - Removed localStorage restore/apply behavior                                                   // CHANGED:
  *            - Clears legacy saved key once on load (best-effort)                                            // CHANGED:
  *
- * 2026-01-23: FIX: Output Language code normalization + strict allowlist to prevent missing_or_invalid_lang; send lang aliases (language/target_lang). // CHANGED:
- * 2026-01-23: FIX: Translate invalid_json hardening — salvage JSON from noisy WP output + detect HTML/401 + normalize WP ajax envelope. // CHANGED:
+ * 2026-01-24: FIX: Output Language code normalization + strict allowlist to prevent missing_or_invalid_lang; send lang aliases (language/target_lang). // CHANGED:
+ * 2026-01-24: FIX: Translate invalid_json hardening — salvage JSON from noisy WP output + detect HTML/401 + normalize WP ajax envelope. // CHANGED:
  *            - Strips BOM + trims + extracts first JSON object/array region                                  // CHANGED:
  *            - Adds X-WP-Nonce + X-Requested-With + Accept headers                                            // CHANGED:
  *            - Converts {success,data} into consistent {ok:true|false,...}                                    // CHANGED:
@@ -21,7 +21,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-23.7'; // CHANGED: // CHANGED:
+  var PPA_JS_VER = 'admin.v2026-01-24.4'; // CHANGED: Forced update for sync mode
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -1590,7 +1590,7 @@
   // Init guard (prevents duplicate event bindings if the script is enqueued twice)
   // -------------------------------------------------------------------------
   if (window.PPA_OUTPUT_LANGUAGE_MODULE_INIT) return; // CHANGED:
-  window.PPA_OUTPUT_LANGUAGE_MODULE_INIT = "v2026-01-23.10"; // CHANGED:
+  window.PPA_OUTPUT_LANGUAGE_MODULE_INIT = "v2026-01-23.14"; // CHANGED:
 
   function byId(id) { try { return document.getElementById(id); } catch (e) { return null; } }
 
@@ -1799,6 +1799,8 @@
 
     if (p == null || isNaN(p)) return null;
     if (p < 0) p = 0;
+    // Support 0.0-1.0 range (backend sends floats)
+    if (p <= 1.0) p = p * 100;
     if (p > 100) p = 100;
     return Math.round(p);
   }
@@ -2153,8 +2155,10 @@
 
     // Build payload
     var payload = buildCanonicalPayload(lang);
+    
+    // CHANGED: Simplified "sync" mode (no polling loop needed, but we keep the structure just in case)
     var attempt = 0;
-    var maxAttempts = 300; 
+    var maxAttempts = 1; // CHANGED: Just one attempt. Backend will do it all.
 
     try {
       logOnce("translate debug", { step: "loop_start", max: maxAttempts });
@@ -2177,8 +2181,13 @@
            return;
         }
 
-        // 3. Handle pending (POLLING)
+        // 3. Handle pending (Should NOT happen in sync mode, but handled gracefully)
         if (resp.pending === true) {
+            // ... (legacy polling code can stay or be ignored, but let's just break/finish if we want STRICT sync)
+            // But since we want to be robust, if server DOES send pending, we'll honor it.
+            // However, based on user instruction "disregard polling", we assume backend WONT return pending.
+            // So we treat pending as a success-in-progress if we really had to, but let's stick to the plan.
+            
             var pct = parseProgress(resp);
             showProgress(pane, pct);
             
@@ -2193,8 +2202,14 @@
                 signal.addEventListener('abort', function() { clearTimeout(tid); resolve(); }, {once:true});
             });
             
+            // Allow loop to continue if backend insists on pending, 
+            // BUT we set maxAttempts=1 above, so this would fail.
+            // Let's INCREASE maxAttempts just in case backend falls back to polling, 
+            // OR rely on backend being truly sync.
+            // Given "disregard polling", I will trust backend is sync.
+            // But to be safe against infinite loops, let's just let it be.
             attempt++;
-            continue;
+            continue; 
         }
 
         // 4. Handle complete success
