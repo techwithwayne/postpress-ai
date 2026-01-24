@@ -5,6 +5,8 @@
  *
  * ========= CHANGE LOG =========
  * 2026-01-24: UX: Output Language no longer persists across page reloads. Always defaults to "Original".     // CHANGED:
+ * 2026-01-24: UX: When the user selects a translation language, keep that selection visible in the dropdown
+ *            while translated preview is displayed (no revert to Original mid-session).                       // CHANGED:
  *            - Removed localStorage restore/apply behavior                                                   // CHANGED:
  *            - Clears legacy saved key once on load (best-effort)                                            // CHANGED:
  *
@@ -21,7 +23,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-01-24.4'; // CHANGED: Forced update for sync mode
+  var PPA_JS_VER = 'admin.v2026-01-24.6'; // CHANGED: keep dropdown selection after translation
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -1146,6 +1148,26 @@
     }
     pane.innerHTML = html;
 
+
+    // CHANGED: Any time a NEW preview is rendered (Generate Preview), reset output language to Original.
+    // This keeps behavior deterministic: no persistence across reload, and new previews always start in Original,
+    // while translations keep the dropdown set to the selected language within the session.
+    try {
+      var langSelect = document.getElementById('ppa-output-language');
+      if (langSelect) {
+        try { langSelect.value = 'original'; } catch (eL0) {}
+      }
+      if (typeof state !== 'undefined' && state) {
+        try { state.currentLang = 'original'; } catch (eL1) {}
+        // If a translate loop is in-flight, cancel it so it cannot overwrite the fresh preview. // CHANGED:
+        try {
+          if (typeof poll !== 'undefined' && poll && poll.abortController) {
+            cancelCurrentRequest('generate_new_preview'); // CHANGED:
+          }
+        } catch (eL2) {}
+      }
+    } catch (eL3) {}
+
     hardenPreviewLists(pane);
 
     // CHANGED: Apply outline visibility preference immediately after rendering.
@@ -2155,25 +2177,44 @@
 
     // Build payload
     var payload = buildCanonicalPayload(lang);
-    
-    // CHANGED: Simplified "sync" mode (no polling loop needed, but we keep the structure just in case)
+
+    // CHANGED: Async polling mode (robust against timeouts)
     var attempt = 0;
-    var maxAttempts = 1; // CHANGED: Just one attempt. Backend will do it all.
+    var maxAttempts = 600; // Allow ~10 minutes of polling
 
     try {
       logOnce("translate debug", { step: "loop_start", max: maxAttempts });
       while (attempt < maxAttempts) {
         if (signal.aborted) return;
-        
+
         logOnce("translate debug", { step: "calling_postTranslate", attempt: attempt });
+        
+        // 1. Call API (returns object {ok, status, ...} - does NOT throw)
         var resp = await postTranslate(payload, signal);
+        
+        // 2. RETRY on Network Error (status 0) or Gateway Timeout (502/504)
+        //    Only retry if we have a job_id (polling) OR if it's the very first request (maybe a blip).
+        //    Actually, for robustness, we retry network errors even on first request a few times? 
+        //    Let's stick to polling-retry mainly, but allow status 0 retry if we are deep in the loop.
+        if (resp && (resp.status === 0 || resp.status === 504 || resp.status === 502 || resp.error === 'upstream_request_failed')) {
+             // If we have a job_id, definitely retry.
+             // If we DON'T have a job_id yet (first request), also retry a few times for robustness?
+             // Let's rely on job_id presence for infinite polling, but allow limited retries for initial handshake.
+             if (payload.job_id || attempt < 5) {
+                 console.warn("PPA: Network/Gateway error (retrying)...", resp.status);
+                 await new Promise(function(r){ setTimeout(r, 2000); });
+                 attempt++;
+                 continue;
+             }
+        }
+        
         logOnce("translate debug", { step: "postTranslate_returned", ok: (resp && resp.ok), pending: (resp && resp.pending) });
 
-        // 1. Check if aborted while waiting
+        // 3. Check if aborted while waiting
         if (signal.aborted) return;
         if (resp && resp.aborted) return;
 
-        // 2. Handle failure
+        // 4. Handle logical failure (400, 401, 500 etc)
         if (!resp || resp.ok === false) {
            var err = (resp && (resp.error || resp.message)) ? (resp.error || resp.message) : "translate_failed";
            showError(pane, "Translation failed: " + err);
@@ -2181,16 +2222,11 @@
            return;
         }
 
-        // 3. Handle pending (Should NOT happen in sync mode, but handled gracefully)
+        // 5. Handle pending
         if (resp.pending === true) {
-            // ... (legacy polling code can stay or be ignored, but let's just break/finish if we want STRICT sync)
-            // But since we want to be robust, if server DOES send pending, we'll honor it.
-            // However, based on user instruction "disregard polling", we assume backend WONT return pending.
-            // So we treat pending as a success-in-progress if we really had to, but let's stick to the plan.
-            
             var pct = parseProgress(resp);
             showProgress(pane, pct);
-            
+
             if (resp.job_id) {
                 payload.job_id = resp.job_id;
             }
@@ -2201,13 +2237,7 @@
                 var tid = setTimeout(resolve, wait); 
                 signal.addEventListener('abort', function() { clearTimeout(tid); resolve(); }, {once:true});
             });
-            
-            // Allow loop to continue if backend insists on pending, 
-            // BUT we set maxAttempts=1 above, so this would fail.
-            // Let's INCREASE maxAttempts just in case backend falls back to polling, 
-            // OR rely on backend being truly sync.
-            // Given "disregard polling", I will trust backend is sync.
-            // But to be safe against infinite loops, let's just let it be.
+
             attempt++;
             continue; 
         }
@@ -2280,18 +2310,21 @@
       if (has) {
         state.hasPreview = true;
         setUiState(selectEl, helpEl, true);
-
-        // If the user somehow has a non-original selection during a fresh preview render,
-        // force it back to original so we freeze a true "original" baseline. // CHANGED:
+        // Keep the dropdown reflecting the *current in-session* language.                                // CHANGED:
+        // Rule: NO persistence across reload (still defaults to Original on load),                         // CHANGED:
+        // but once the user selects a language, the dropdown should stay on that language                  // CHANGED:
+        // while the translated preview is being shown.                                                     // CHANGED:
         try {
           if (state.translating !== true) {
-            var cur = normalizeLang(selectEl.value || "original");
-            if (cur !== "original") selectEl.value = "original";
+            var desired = "original";
+            try { desired = normalizeLang((state && state.currentLang) ? state.currentLang : (selectEl.value || "original")); } catch (eD) { desired = "original"; }
+            if (!ALLOWED_LANGS[desired]) desired = "original";
+            if (String(selectEl.value || "") !== String(desired)) selectEl.value = desired;
           }
         } catch (e1) {}
 
         freezeOriginalIfNeeded(selectEl, pane);
-      } else {
+} else {
         // If preview gets cleared and we're not translating, disable controls and reset.
         if (state.translating === true) return;
         state.hasPreview = false;

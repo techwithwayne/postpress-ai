@@ -13,28 +13,18 @@
 
 /**
  * CHANGE LOG
- * 2026-01-23 — FIX: Bulletproof translate proxy: register a guaranteed callable wp_ajax handler that ALWAYS returns JSON.  # CHANGED:
- *            — FIX: Eliminates wp_ajax_0 / invalid-json caused by missing namespaced callback at runtime.               # CHANGED:
+ * 2026-01-24 — FIX: Translate polling: persist original_html per draft_hash and re-inject it on poll requests (job_id present) so Django no longer returns 400 Missing original_html. # CHANGED:
+ *            — HARDEN: Proxy forwards job_id to Django and aligns timeout with backend budget (300s).                                              # CHANGED:
+ *            — HARDEN: If a poll request arrives without cached original_html, fail fast with a clear JSON error instead of looping forever.       # CHANGED:
  *
- * 2026-01-23 — FIX: Make AJAX includes single-source + deterministic so translate_preview is always defined.          # CHANGED:
- *            — FIX: Remove duplicate translate.php include path (debugging was unreliable).                           # CHANGED:
+ * 2026-01-23 — HARDEN: Translate proxy ALWAYS returns JSON + safe debug details (even when WP_DEBUG is off).     # CHANGED:
+ *            — HARDEN: Add header parity (X-PostPress-Key + Expect:"") to match known-working probes.           # CHANGED:
+ *            — HARDEN: Safer Content-Type retrieval + include HTTP code + elapsed_ms on ALL error paths.        # CHANGED:
+ *            — FIX: Register guaranteed callable wp_ajax handler that does NOT depend on namespaced callbacks.   # CHANGED:
+ *            — FIX: Add late “final binder” to prevent hook overwrites (admin_init @ 9999).                      # CHANGED:
  *
- * 2026-01-23 — ADD: WP AJAX endpoints for per-user default output language (user_meta).                               # CHANGED:
- *            — UX: Allows "Set default" without WP options or wp-config edits (customer-safe).                        # CHANGED:
- *
- * 2026-01-22 — ADD: Default Django base URL constant + ppa_django_base_url filter for customer sites
- *              where WP options are intentionally absent (no wp-config edits allowed).                                # CHANGED:
- *
- * 2025-12-28 — HARDEN: Arm admin-post fallback only when the incoming request action matches our settings actions.
- *              This reduces debug.log noise and avoids attaching extra hooks on unrelated admin-post requests.
- * 2025-12-28 — HARDEN: Detect admin-post via $pagenow OR PHP_SELF basename for stacks where $pagenow isn't set yet.
- * 2025-12-28 — FIX: Admin-post fallback handlers for Settings actions.
- *
- * 2025-11-11 — Fix syntax error in includes block; keep enqueue + ver overrides.
- * 2025-11-10 — Simplify admin enqueue; force filemtime ver for key assets.
- * 2025-11-08 — Prefer controller class for AJAX; fallback to inc/ajax/* only if controller not found; always load marker.php.
- * 2025-11-04 — Centralize requires; init logging & shortcode; remove inline JS/CSS.
- * 2025-12-25 — LOAD: inc/admin/settings.php so Settings submenu + licensing actions register.
+ * 2026-01-23 — ADD: WP AJAX endpoints for per-user default output language (user_meta).
+ * 2026-01-22 — ADD: Default Django base URL constant + ppa_django_base_url filter.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -61,14 +51,14 @@ if ( ! defined( 'PPA_VERSION' ) ) {                          // CHANGED:
 }
 
 /**
- * CHANGED: Customer-safe default backend URL.
+ * Customer-safe default backend URL.
  */
 if ( ! defined( 'PPA_SERVER_URL' ) ) {                                                             // CHANGED:
 	define( 'PPA_SERVER_URL', 'https://apps.techwithwayne.com/postpress-ai' );                     // CHANGED:
 }                                                                                                  // CHANGED:
 
 /**
- * CHANGED: Provide a canonical filter that returns the resolved Django base URL.
+ * Canonical filter that returns the resolved Django base URL.
  */
 add_filter( 'ppa_django_base_url', function( $base ) {                                              // CHANGED:
 	if ( ( ! is_string( $base ) || trim( $base ) === '' ) ) {                                      // CHANGED:
@@ -84,9 +74,9 @@ add_filter( 'ppa_django_base_url', function( $base ) {                          
 }, 10, 1 );                                                                                         // CHANGED:
 
 /** ---------------------------------------------------------------------------------
- * CHANGED: Per-user default output language (customer-safe, no WP options required)
+ * Per-user default output language (customer-safe, no WP options required)
  * -------------------------------------------------------------------------------- */
-add_action( 'wp_ajax_ppa_get_default_language', function () {                                       // CHANGED:
+add_action( 'wp_ajax_ppa_get_default_language', function () {
 	if ( ! is_user_logged_in() ) {
 		wp_send_json( array( 'ok' => false, 'error' => 'not_logged_in' ), 401 );
 	}
@@ -106,9 +96,9 @@ add_action( 'wp_ajax_ppa_get_default_language', function () {                   
 	}
 
 	wp_send_json( array( 'ok' => true, 'lang' => $lang ), 200 );
-} );                                                                                                // CHANGED:
+} );
 
-add_action( 'wp_ajax_ppa_set_default_language', function () {                                       // CHANGED:
+add_action( 'wp_ajax_ppa_set_default_language', function () {
 	if ( ! is_user_logged_in() ) {
 		wp_send_json( array( 'ok' => false, 'error' => 'not_logged_in' ), 401 );
 	}
@@ -140,217 +130,369 @@ add_action( 'wp_ajax_ppa_set_default_language', function () {                   
 	update_user_meta( $user_id, 'ppa_default_output_language', $lang );
 
 	wp_send_json( array( 'ok' => true, 'lang' => $lang ), 200 );
-} );                                                                                                // CHANGED:
+} );
 
 /** ---------------------------------------------------------------------------------
- * CHANGED: Bulletproof Translate Preview proxy (ALWAYS JSON)
+ * Bulletproof Translate Preview proxy (ALWAYS JSON)
+ * -------------------------------------------------------------------------------- */
+
+/**
+ * Read JSON body from php://input safely.
+ */
+if ( ! function_exists( 'ppa_translate__read_json_body' ) ) {
+	function ppa_translate__read_json_body() {
+		$raw = file_get_contents( 'php://input' );
+		if ( ! is_string( $raw ) || trim( $raw ) === '' ) {
+			return array();
+		}
+		$decoded = json_decode( $raw, true );
+		return is_array( $decoded ) ? $decoded : array();
+	}
+}
+
+/**
+ * Resolve auth key (Connection Key if present, else License Key).
+ */
+if ( ! function_exists( 'ppa_translate__get_auth_key' ) ) {
+	function ppa_translate__get_auth_key() {
+		foreach ( array( 'ppa_connection_key', 'postpress_ai_connection_key' ) as $k ) {
+			$v = get_option( $k, '' );
+			if ( is_string( $v ) && trim( $v ) !== '' ) {
+				return trim( $v );
+			}
+		}
+		foreach ( array( 'ppa_license_key', 'postpress_ai_license_key', 'ppa_activation_key', 'postpress_ai_activation_key' ) as $k ) {
+			$v = get_option( $k, '' );
+			if ( is_string( $v ) && trim( $v ) !== '' ) {
+				return trim( $v );
+			}
+		}
+		return '';
+	}
+}
+
+/**
+ * Force IPv4 for our PythonAnywhere host (prevents some IPv6 route hangs).
+ */
+if ( ! function_exists( 'ppa_translate__force_ipv4_for_url' ) ) {
+	function ppa_translate__force_ipv4_for_url( $handle, $r, $url ) {
+		if ( ! is_string( $url ) || $url === '' ) {
+			return;
+		}
+		if ( strpos( $url, 'apps.techwithwayne.com' ) === false ) {
+			return;
+		}
+		if ( defined( 'CURL_IPRESOLVE_V4' ) && function_exists( 'curl_setopt' ) ) {
+			@curl_setopt( $handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
+		}
+	}
+}
+
+/**
+ * Minimal logger (kept quiet unless WP_DEBUG true).
+ */
+if ( ! function_exists( 'ppa_translate__log' ) ) {                                                    // CHANGED:
+	function ppa_translate__log( $msg ) {                                                             // CHANGED:
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {                                                     // CHANGED:
+			error_log( 'PPA: [translate] ' . (string) $msg );                                           // CHANGED:
+		}                                                                                               // CHANGED:
+	}                                                                                                   // CHANGED:
+}                                                                                                       // CHANGED:
+
+/**
+ * Stable transient keys for translation state.
+ * We scope keys by (blog_id + home_url) so multisite / cloned sites don't collide.                         // CHANGED:
+ */
+if ( ! function_exists( 'ppa_translate__tkey' ) ) {                                                     // CHANGED:
+	function ppa_translate__tkey( $kind, $id ) {                                                       // CHANGED:
+		$kind = is_string( $kind ) ? $kind : 'x';                                                      // CHANGED:
+		$id   = is_string( $id ) ? $id : '';                                                           // CHANGED:
+		$blog = function_exists( 'get_current_blog_id' ) ? (string) get_current_blog_id() : '0';       // CHANGED:
+		$site = function_exists( 'home_url' ) ? (string) home_url() : '';                               // CHANGED:
+		return 'ppa_tr_' . $kind . '_' . md5( $blog . '|' . $site . '|' . $kind . '|' . $id );         // CHANGED:
+	}                                                                                                   // CHANGED:
+}                                                                                                       // CHANGED:
+
+/**
+ * Guaranteed callable AJAX handler for translation.
+ */
+if ( ! function_exists( 'ppa_translate_preview_proxy' ) ) {
+	function ppa_translate_preview_proxy() {
+		$start = microtime( true );
+
+		if ( function_exists( 'set_time_limit' ) ) { @set_time_limit( 320 ); }                         // CHANGED:
+
+		if ( ! is_user_logged_in() ) {
+			wp_send_json( array( 'ok' => false, 'error' => 'not_logged_in' ), 401 );
+		}
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			wp_send_json( array( 'ok' => false, 'error' => 'insufficient_permissions' ), 403 );
+		}
+
+		$body = ppa_translate__read_json_body();
+
+		$lang      = isset( $body['lang'] ) ? sanitize_text_field( (string) $body['lang'] ) : '';
+		$mode      = isset( $body['mode'] ) ? sanitize_text_field( (string) $body['mode'] ) : 'strict';
+		$drafthash = isset( $body['draft_hash'] ) ? sanitize_text_field( (string) $body['draft_hash'] ) : '';
+		$job_id    = isset( $body['job_id'] ) ? sanitize_text_field( (string) $body['job_id'] ) : '';  // CHANGED:
+
+		if ( $lang === '' || $lang === 'original' ) {
+			wp_send_json( array( 'ok' => false, 'error' => 'missing_or_invalid_lang' ), 400 );
+		}
+
+		$django = (string) apply_filters( 'ppa_django_base_url', '' );
+		$django = is_string( $django ) ? rtrim( trim( $django ), '/' ) : '';
+		if ( $django === '' ) {
+			wp_send_json( array( 'ok' => false, 'error' => 'missing_django_url' ), 500 );
+		}
+
+		$key = ppa_translate__get_auth_key();
+		if ( $key === '' ) {
+			wp_send_json( array( 'ok' => false, 'error' => 'missing_auth_key' ), 500 );
+		}
+
+		// CHANGED: Persist and re-inject original_html for poll requests so Django can continue the job.
+		$is_poll           = ( is_string( $job_id ) && trim( $job_id ) !== '' );                        // CHANGED:
+		$original_html     = isset( $body['original_html'] ) ? (string) $body['original_html'] : '';   // CHANGED:
+		$original_json     = isset( $body['original_json'] ) ? $body['original_json'] : null;          // CHANGED:
+		$has_original_html = ( is_string( $original_html ) && trim( $original_html ) !== '' );          // CHANGED:
+		$ttl               = 2 * HOUR_IN_SECONDS;                                                       // CHANGED:
+		$injected          = false;                                                                     // CHANGED:
+
+		// Store original_html by draft_hash whenever present (start call).
+		if ( $has_original_html && is_string( $drafthash ) && trim( $drafthash ) !== '' ) {             // CHANGED:
+			set_transient( ppa_translate__tkey( 'hash', $drafthash ), $original_html, $ttl );           // CHANGED:
+		}
+
+		// Store original_html by job_id if job_id is already known on request (rare but safe).
+		if ( $has_original_html && $is_poll ) {                                                         // CHANGED:
+			set_transient( ppa_translate__tkey( 'job', $job_id ), $original_html, $ttl );               // CHANGED:
+		}
+
+		// Poll requests intentionally omit original_html from the client.
+		// Re-inject from transient so Django doesn't 400 "Missing original_html".                        // CHANGED:
+		if ( $is_poll && ! $has_original_html ) {                                                        // CHANGED:
+			$cached = get_transient( ppa_translate__tkey( 'job', $job_id ) );                           // CHANGED:
+			if ( ! is_string( $cached ) || trim( $cached ) === '' ) {                                   // CHANGED:
+				$mapped_hash = get_transient( ppa_translate__tkey( 'job2hash', $job_id ) );             // CHANGED:
+				if ( is_string( $mapped_hash ) && trim( $mapped_hash ) !== '' ) {                       // CHANGED:
+					$cached = get_transient( ppa_translate__tkey( 'hash', trim( $mapped_hash ) ) );     // CHANGED:
+				}                                                                                       // CHANGED:
+			}                                                                                           // CHANGED:
+			if ( ( ! is_string( $cached ) || trim( $cached ) === '' ) && $drafthash !== '' ) {          // CHANGED:
+				$cached = get_transient( ppa_translate__tkey( 'hash', $drafthash ) );                   // CHANGED:
+			}                                                                                           // CHANGED:
+
+			if ( is_string( $cached ) && trim( $cached ) !== '' ) {                                      // CHANGED:
+				$original_html     = $cached;                                                           // CHANGED:
+				$has_original_html = true;                                                              // CHANGED:
+				$injected          = true;                                                              // CHANGED:
+			} else {
+				// Fail fast with a clear error; otherwise the UI will loop forever.                    // CHANGED:
+				wp_send_json(
+					array(
+						'ok'        => false,
+						'error'     => 'missing_original_html',
+						'message'   => 'Poll request missing original_html and no cached copy was found for this draft_hash/job_id.',
+						'draft_hash'=> $drafthash,
+						'job_id'    => $job_id,
+					),
+					400
+				);
+			}
+		}
+
+		$payload = array(
+			'lang'          => $lang,
+			'mode'          => ( $mode ? $mode : 'strict' ),
+			'draft_hash'    => $drafthash,
+			'job_id'        => $job_id,                                                                  // CHANGED:
+			'site_url'      => home_url(),
+			'original_json' => $original_json,                                                           // CHANGED:
+			'original_html' => $has_original_html ? $original_html : null,                                // CHANGED:
+			'meta'          => array(                                                                     // CHANGED:
+				'is_poll'          => $is_poll,                                                           // CHANGED:
+				'injected_original'=> $injected,                                                          // CHANGED:
+			),
+		);
+
+		$endpoint = $django . '/translate/';
+
+		add_action( 'http_api_curl', 'ppa_translate__force_ipv4_for_url', 10, 3 );
+
+		$encoded = wp_json_encode( $payload );                                                           // CHANGED:
+		if ( ! is_string( $encoded ) || $encoded === '' ) {                                               // CHANGED:
+			remove_action( 'http_api_curl', 'ppa_translate__force_ipv4_for_url', 10 );                    // CHANGED:
+			wp_send_json(
+				array(
+					'ok'    => false,
+					'error' => 'payload_encode_failed',
+				),
+				500
+			);
+		}
+
+		$args = array(
+			'timeout' => 300,                                                                             // CHANGED:
+			'headers' => array(
+				'Content-Type'    => 'application/json',
+				'Authorization'   => 'Bearer ' . $key,
+				'X-PPA-Key'       => $key,
+				'X-PostPress-Key' => $key,              // CHANGED: parity with other endpoints/probes
+				'X-PPA-Site'      => home_url(),
+				'Expect'          => '',                // CHANGED: avoids 100-continue edge cases on some stacks
+			),
+			'body'    => $encoded,                                                                        // CHANGED:
+		);
+
+		$res = wp_remote_post( $endpoint, $args );
+
+		remove_action( 'http_api_curl', 'ppa_translate__force_ipv4_for_url', 10 );
+
+		$elapsed_ms = (int) round( ( microtime( true ) - $start ) * 1000 );
+
+		if ( is_wp_error( $res ) ) {
+			$err_code = $res->get_error_code();                                                     // CHANGED:
+			$err_data = $res->get_error_data();                                                     // CHANGED:
+			wp_send_json(
+				array(
+					'ok'          => false,
+					'error'       => 'upstream_request_failed',
+					'msg'         => $res->get_error_message(),
+					'wp_err_code' => (string) $err_code,                                           // CHANGED:
+					'wp_err_data' => is_scalar( $err_data ) ? (string) $err_data : $err_data,      // CHANGED:
+					'endpoint'    => $endpoint,
+					'elapsed_ms'  => $elapsed_ms,
+				),
+				502
+			);
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		$raw  = (string) wp_remote_retrieve_body( $res );
+
+		// CHANGED: safer header retrieval (avoid “Array” or empty surprises).
+		$content_type = '';                                                                          // CHANGED:
+		$headers      = wp_remote_retrieve_headers( $res );                                          // CHANGED:
+		if ( is_array( $headers ) && isset( $headers['content-type'] ) ) {                           // CHANGED:
+			$content_type = (string) $headers['content-type'];                                      // CHANGED:
+		}                                                                                             // CHANGED:
+
+		$decoded = json_decode( $raw, true );
+
+		if ( ! is_array( $decoded ) ) {
+			wp_send_json(
+				array(
+					'ok'           => false,
+					'error'        => 'upstream_invalid_json',
+					'code'         => $code,
+					'content_type' => $content_type,
+					'raw_len'      => strlen( $raw ),
+					'raw_snippet'  => substr( $raw, 0, 420 ),
+					'endpoint'     => $endpoint,
+					'elapsed_ms'   => $elapsed_ms,
+				),
+				502
+			);
+		}
+
+		// CHANGED: If Django returned a job_id, store job_id→hash mapping (and job_id→original_html if we have it).
+		$up_job_id = '';                                                                              // CHANGED:
+		if ( isset( $decoded['job_id'] ) ) {                                                          // CHANGED:
+			$up_job_id = sanitize_text_field( (string) $decoded['job_id'] );                          // CHANGED:
+		} elseif ( isset( $decoded['data']['job_id'] ) ) {                                            // CHANGED:
+			$up_job_id = sanitize_text_field( (string) $decoded['data']['job_id'] );                  // CHANGED:
+		}
+		if ( is_string( $up_job_id ) && trim( $up_job_id ) !== '' && is_string( $drafthash ) && trim( $drafthash ) !== '' ) { // CHANGED:
+			set_transient( ppa_translate__tkey( 'job2hash', $up_job_id ), $drafthash, $ttl );          // CHANGED:
+			if ( $has_original_html ) {                                                                // CHANGED:
+				set_transient( ppa_translate__tkey( 'job', $up_job_id ), $original_html, $ttl );       // CHANGED:
+			}
+		}
+
+		if ( $code >= 400 ) {
+			$decoded['ok']           = false;
+			$decoded['code']         = $code;
+			$decoded['content_type'] = $content_type;
+			$decoded['elapsed_ms']   = $elapsed_ms;
+			wp_send_json( $decoded, $code );
+		}
+
+		if ( ! isset( $decoded['ok'] ) ) {
+			$decoded['ok'] = true;
+		}
+		$decoded['elapsed_ms']   = $elapsed_ms;
+		$decoded['content_type'] = $content_type;
+
+		wp_send_json( $decoded, 200 );
+	}
+}
+
+/**
+ * Register bulletproof handler FIRST (priority 0).
+ */
+add_action( 'wp_ajax_ppa_translate_preview', 'ppa_translate_preview_proxy', 0 );
+
+/**
+ * FINAL BINDER (customer-safe):
+ * If something later removed/replaced our hook, this reasserts it at the end of admin bootstrap.
  *
- * Why:
- * - Your runtime is showing translate.php is included but the namespaced function is NOT defined.
- * - That causes admin-ajax to print "0" (wp_ajax_0) which JS reads as invalid JSON.
- * - This handler is guaranteed callable (defined here) and runs at priority 0.
- * - Even if the legacy callback is broken, this one exits first via wp_send_json().
- * -------------------------------------------------------------------------------- */
-
-/**
- * CHANGED: Read JSON body from php://input safely.
+ * Why admin_init?
+ * - admin-ajax.php triggers admin_init in practice.
+ * - This runs late (9999) so we win after other plugin code loads.
  */
-if ( ! function_exists( 'ppa_translate__read_json_body' ) ) {                                        // CHANGED:
-	function ppa_translate__read_json_body() {                                                     // CHANGED:
-		$raw = file_get_contents( 'php://input' );                                                 // CHANGED:
-		if ( ! is_string( $raw ) || trim( $raw ) === '' ) {                                        // CHANGED:
-			return array();                                                                        // CHANGED:
-		}                                                                                          // CHANGED:
-		$decoded = json_decode( $raw, true );                                                      // CHANGED:
-		return is_array( $decoded ) ? $decoded : array();                                          // CHANGED:
-	}                                                                                              // CHANGED:
-}                                                                                                  // CHANGED:
-
-/**
- * CHANGED: Resolve auth key (Connection Key if present, else License Key).
- */
-if ( ! function_exists( 'ppa_translate__get_auth_key' ) ) {                                         // CHANGED:
-	function ppa_translate__get_auth_key() {                                                       // CHANGED:
-		// Legacy connection key first.                                                            // CHANGED:
-		foreach ( array( 'ppa_connection_key', 'postpress_ai_connection_key' ) as $k ) {            // CHANGED:
-			$v = get_option( $k, '' );                                                             // CHANGED:
-			if ( is_string( $v ) && trim( $v ) !== '' ) {                                          // CHANGED:
-				return trim( $v );                                                                 // CHANGED:
-			}                                                                                      // CHANGED:
-		}                                                                                          // CHANGED:
-		// License key fallback.                                                                   // CHANGED:
-		foreach ( array( 'ppa_license_key', 'postpress_ai_license_key', 'ppa_activation_key', 'postpress_ai_activation_key' ) as $k ) { // CHANGED:
-			$v = get_option( $k, '' );                                                             // CHANGED:
-			if ( is_string( $v ) && trim( $v ) !== '' ) {                                          // CHANGED:
-				return trim( $v );                                                                 // CHANGED:
-			}                                                                                      // CHANGED:
-		}                                                                                          // CHANGED:
-		return '';                                                                                 // CHANGED:
-	}                                                                                              // CHANGED:
-}                                                                                                  // CHANGED:
-
-/**
- * CHANGED: Force IPv4 when calling our PythonAnywhere host (prevents some IPv6 route hangs).
- */
-if ( ! function_exists( 'ppa_translate__force_ipv4_for_url' ) ) {                                   // CHANGED:
-	function ppa_translate__force_ipv4_for_url( $handle, $r, $url ) {                              // CHANGED:
-		if ( ! is_string( $url ) || $url === '' ) {                                                // CHANGED:
-			return;                                                                                // CHANGED:
-		}                                                                                          // CHANGED:
-		if ( strpos( $url, 'apps.techwithwayne.com' ) === false ) {                                // CHANGED:
-			return;                                                                                // CHANGED:
-		}                                                                                          // CHANGED:
-		if ( defined( 'CURL_IPRESOLVE_V4' ) && function_exists( 'curl_setopt' ) ) {                // CHANGED:
-			@curl_setopt( $handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );                         // CHANGED:
-		}                                                                                          // CHANGED:
-	}                                                                                              // CHANGED:
-}                                                                                                  // CHANGED:
-
-/**
- * CHANGED: Guaranteed callable AJAX handler for translation.
- * Runs at priority 0 so it exits before any broken callback can output "0".
- */
-if ( ! function_exists( 'ppa_translate_preview_proxy' ) ) {                                         // CHANGED:
-	function ppa_translate_preview_proxy() {                                                       // CHANGED:
-		$start = microtime( true );                                                                // CHANGED:
-
-		// Must be logged in (admin-only AJAX).                                                     // CHANGED:
-		if ( ! is_user_logged_in() ) {                                                             // CHANGED:
-			wp_send_json( array( 'ok' => false, 'error' => 'not_logged_in' ), 401 );               // CHANGED:
-		}                                                                                          // CHANGED:
-		if ( ! current_user_can( 'edit_posts' ) ) {                                                // CHANGED:
-			wp_send_json( array( 'ok' => false, 'error' => 'insufficient_permissions' ), 403 );   // CHANGED:
-		}                                                                                          // CHANGED:
-
-		$body = ppa_translate__read_json_body();                                                   // CHANGED:
-
-		$lang      = isset( $body['lang'] ) ? sanitize_text_field( (string) $body['lang'] ) : '';  // CHANGED:
-		$mode      = isset( $body['mode'] ) ? sanitize_text_field( (string) $body['mode'] ) : 'strict'; // CHANGED:
-		$drafthash = isset( $body['draft_hash'] ) ? sanitize_text_field( (string) $body['draft_hash'] ) : ''; // CHANGED:
-
-		if ( $lang === '' || $lang === 'original' ) {                                              // CHANGED:
-			wp_send_json( array( 'ok' => false, 'error' => 'missing_or_invalid_lang' ), 400 );     // CHANGED:
-		}                                                                                          // CHANGED:
-
-		$django = (string) apply_filters( 'ppa_django_base_url', '' );                              // CHANGED:
-		$django = is_string( $django ) ? rtrim( trim( $django ), '/' ) : '';                       // CHANGED:
-		if ( $django === '' ) {                                                                    // CHANGED:
-			wp_send_json( array( 'ok' => false, 'error' => 'missing_django_url' ), 500 );          // CHANGED:
-		}                                                                                          // CHANGED:
-
-		$key = ppa_translate__get_auth_key();                                                      // CHANGED:
-		if ( $key === '' ) {                                                                       // CHANGED:
-			wp_send_json( array( 'ok' => false, 'error' => 'missing_auth_key' ), 500 );            // CHANGED:
-		}                                                                                          // CHANGED:
-
-		$payload = array(                                                                          // CHANGED:
-			'lang'          => $lang,                                                              // CHANGED:
-			'mode'          => ( $mode ? $mode : 'strict' ),                                       // CHANGED:
-			'draft_hash'    => $drafthash,                                                         // CHANGED:
-			'site_url'      => home_url(),                                                         // CHANGED:
-			'original_json' => isset( $body['original_json'] ) ? $body['original_json'] : null,    // CHANGED:
-			'original_html' => isset( $body['original_html'] ) ? (string) $body['original_html'] : null, // CHANGED:
-		);                                                                                         // CHANGED:
-
-		$endpoint = $django . '/translate/';                                                       // CHANGED:
-
-		// Force IPv4 for this one request.                                                        // CHANGED:
-		add_action( 'http_api_curl', 'ppa_translate__force_ipv4_for_url', 10, 3 );                 // CHANGED:
-
-		$args = array(                                                                             // CHANGED:
-			'timeout' => 120,                                                                      // CHANGED:
-			'headers' => array(                                                                    // CHANGED:
-				'Content-Type'  => 'application/json',                                             // CHANGED:
-				'Authorization' => 'Bearer ' . $key,                                               // CHANGED:
-				'X-PPA-Key'     => $key,                                                           // CHANGED:
-				'X-PPA-Site'    => home_url(),                                                     // CHANGED:
-			),                                                                                     // CHANGED:
-			'body'    => wp_json_encode( $payload ),                                               // CHANGED:
-		);                                                                                         // CHANGED:
-
-		$res = wp_remote_post( $endpoint, $args );                                                 // CHANGED:
-
-		// Remove hook immediately so we don’t affect other WP HTTP calls.                          // CHANGED:
-		remove_action( 'http_api_curl', 'ppa_translate__force_ipv4_for_url', 10 );                 // CHANGED:
-
-		$elapsed_ms = (int) round( ( microtime( true ) - $start ) * 1000 );                        // CHANGED:
-
-		if ( is_wp_error( $res ) ) {                                                               // CHANGED:
-			wp_send_json(                                                                          // CHANGED:
-				array(                                                                             // CHANGED:
-					'ok'         => false,                                                         // CHANGED:
-					'error'      => 'upstream_request_failed',                                     // CHANGED:
-					'msg'        => $res->get_error_message(),                                     // CHANGED:
-					'endpoint'   => $endpoint,                                                     // CHANGED:
-					'elapsed_ms' => $elapsed_ms,                                                   // CHANGED:
-				),                                                                                // CHANGED:
-				502                                                                               // CHANGED:
-			);                                                                                    // CHANGED:
-		}                                                                                          // CHANGED:
-
-		$code = (int) wp_remote_retrieve_response_code( $res );                                    // CHANGED:
-		$raw  = (string) wp_remote_retrieve_body( $res );                                          // CHANGED:
-
-		$decoded = json_decode( $raw, true );                                                      // CHANGED:
-
-		// Always return JSON to JS (prevents "invalid_json").                                      // CHANGED:
-		if ( ! is_array( $decoded ) ) {                                                            // CHANGED:
-			$out = array(                                                                          // CHANGED:
-				'ok'         => false,                                                             // CHANGED:
-				'error'      => 'upstream_invalid_json',                                           // CHANGED:
-				'code'       => $code,                                                             // CHANGED:
-				'elapsed_ms' => $elapsed_ms,                                                       // CHANGED:
-			);                                                                                     // CHANGED:
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {                                              // CHANGED:
-				$out['raw_len']     = strlen( $raw );                                              // CHANGED:
-				$out['raw_snippet'] = substr( $raw, 0, 240 );                                      // CHANGED:
-			}                                                                                      // CHANGED:
-			wp_send_json( $out, 502 );                                                             // CHANGED:
-		}                                                                                          // CHANGED:
-
-		// Preserve upstream error code but still JSON.                                             // CHANGED:
-		if ( $code >= 400 ) {                                                                      // CHANGED:
-			$decoded['ok']         = false;                                                        // CHANGED:
-			$decoded['code']       = $code;                                                        // CHANGED:
-			$decoded['elapsed_ms'] = $elapsed_ms;                                                  // CHANGED:
-			wp_send_json( $decoded, $code );                                                       // CHANGED:
-		}                                                                                          // CHANGED:
-
-		if ( ! isset( $decoded['ok'] ) ) {                                                         // CHANGED:
-			$decoded['ok'] = true;                                                                 // CHANGED:
-		}                                                                                          // CHANGED:
-		$decoded['elapsed_ms'] = $elapsed_ms;                                                      // CHANGED:
-
-		wp_send_json( $decoded, 200 );                                                             // CHANGED:
-	}                                                                                              // CHANGED:
-}                                                                                                  // CHANGED:
-
-// CHANGED: Register bulletproof handler FIRST (priority 0) so broken callbacks can’t output "0".
-add_action( 'wp_ajax_ppa_translate_preview', 'ppa_translate_preview_proxy', 0 );                     // CHANGED:
-
-/** ---------------------------------------------------------------------------------
- * AJAX handlers — SINGLE SOURCE OF TRUTH
- * Load early so admin-ajax.php can always find handlers.
- * -------------------------------------------------------------------------------- */
-add_action( 'plugins_loaded', function () {                                                         // CHANGED:
-	$controller = PPA_PLUGIN_DIR . 'inc/class-ppa-controller.php';                                   // CHANGED:
-	$ajax_dir   = PPA_PLUGIN_DIR . 'inc/ajax/';                                                      // CHANGED:
-
-	if ( file_exists( $controller ) ) {                                                              // CHANGED:
-		require_once $controller;                                                                    // CHANGED:
-	} else {                                                                                        // CHANGED:
-		foreach ( array( 'preview.php', 'store.php', 'translate.php' ) as $file ) {                   // CHANGED:
-			$path = $ajax_dir . $file;                                                               // CHANGED:
-			if ( file_exists( $path ) ) { require_once $path; }                                      // CHANGED:
-		}                                                                                            // CHANGED:
+add_action( 'admin_init', function () {                                                              // CHANGED:
+	// Only care about admin context.
+	if ( ! is_admin() ) {                                                                            // CHANGED:
+		return;                                                                                      // CHANGED:
 	}                                                                                                // CHANGED:
 
-	$marker = $ajax_dir . 'marker.php';                                                              // CHANGED:
-	if ( file_exists( $marker ) ) { require_once $marker; }                                          // CHANGED:
-}, 8 );                                                                                              // CHANGED:
+	// If our proxy is missing, the includes are broken — log and exit.
+	if ( ! function_exists( 'ppa_translate_preview_proxy' ) ) {                                      // CHANGED:
+		ppa_translate__log( 'FINAL BINDER: proxy missing (ppa_translate_preview_proxy not loaded).' ); // CHANGED:
+		return;                                                                                      // CHANGED:
+	}                                                                                                // CHANGED:
+
+	// If already bound to our proxy, keep hands off.
+	$bound = has_action( 'wp_ajax_ppa_translate_preview', 'ppa_translate_preview_proxy' );           // CHANGED:
+	if ( ! empty( $bound ) ) {                                                                       // CHANGED:
+		ppa_translate__log( 'FINAL BINDER: hook already bound to proxy (priority ' . $bound . ').' ); // CHANGED:
+		return;                                                                                      // CHANGED:
+	}                                                                                                // CHANGED:
+
+	// Something overwrote/removed it — reassert "final truth" for THIS hook only.
+	remove_all_actions( 'wp_ajax_ppa_translate_preview' );                                           // CHANGED:
+	add_action( 'wp_ajax_ppa_translate_preview', 'ppa_translate_preview_proxy', 0 );                 // CHANGED:
+
+	// Optional parity: nopriv hook (shouldn't be used from wp-admin, but keeps behavior deterministic).
+	remove_all_actions( 'wp_ajax_nopriv_ppa_translate_preview' );                                    // CHANGED:
+	add_action( 'wp_ajax_nopriv_ppa_translate_preview', 'ppa_translate_preview_proxy', 0 );          // CHANGED:
+
+	ppa_translate__log( 'FINAL BINDER: re-bound wp_ajax_ppa_translate_preview -> proxy at priority 0.' ); // CHANGED:
+}, 9999 );                                                                                            // CHANGED:
 
 /** ---------------------------------------------------------------------------------
- * Includes (single source of truth) — Admin UI + enqueue + shortcodes + logging
+ * AJAX handlers — controller/legacy + marker (safe to load; bulletproof handler stays owner)
+ * -------------------------------------------------------------------------------- */
+add_action( 'plugins_loaded', function () {
+	$controller = PPA_PLUGIN_DIR . 'inc/class-ppa-controller.php';
+	$ajax_dir   = PPA_PLUGIN_DIR . 'inc/ajax/';
+
+	if ( file_exists( $controller ) ) {
+		require_once $controller;
+	} else {
+		foreach ( array( 'preview.php', 'store.php', 'translate.php' ) as $file ) {
+			$path = $ajax_dir . $file;
+			if ( file_exists( $path ) ) { require_once $path; }
+		}
+	}
+
+	$marker = $ajax_dir . 'marker.php';
+	if ( file_exists( $marker ) ) { require_once $marker; }
+}, 8 );
+
+/** ---------------------------------------------------------------------------------
+ * Includes — Admin UI + enqueue + shortcodes + logging
  * -------------------------------------------------------------------------------- */
 add_action( 'plugins_loaded', function () {
 	$admin_menu = PPA_PLUGIN_DIR . 'inc/admin/menu.php';
@@ -376,66 +518,7 @@ add_action( 'plugins_loaded', function () {
 }, 9 );
 
 /** ---------------------------------------------------------------------------------
- * Admin-post fallback handlers (Settings actions)
- * -------------------------------------------------------------------------------- */
-add_action( 'plugins_loaded', function () {
-	if ( ! is_admin() ) {
-		return;
-	}
-
-	$pagenow  = isset( $GLOBALS['pagenow'] ) ? (string) $GLOBALS['pagenow'] : '';
-	$php_self = isset( $_SERVER['PHP_SELF'] ) ? basename( (string) $_SERVER['PHP_SELF'] ) : '';
-	if ( 'admin-post.php' !== $pagenow && 'admin-post.php' !== $php_self ) {
-		return;
-	}
-
-	$req_action = '';
-	if ( isset( $_REQUEST['action'] ) ) {
-		$req_action = sanitize_key( wp_unslash( $_REQUEST['action'] ) );
-	}
-
-	$action_map = array(
-		'ppa_test_connectivity' => 'handle_test_connectivity',
-		'ppa_license_verify'    => 'handle_license_verify',
-		'ppa_license_activate'  => 'handle_license_activate',
-		'ppa_license_deactivate'=> 'handle_license_deactivate',
-	);
-
-	if ( '' === $req_action || ! isset( $action_map[ $req_action ] ) ) {
-		return;
-	}
-
-	$settings_file = PPA_PLUGIN_DIR . 'inc/admin/settings.php';
-
-	$dispatch = function ( $method, $action ) use ( $settings_file ) {
-		if ( file_exists( $settings_file ) ) {
-			require_once $settings_file;
-		}
-
-		if ( class_exists( 'PPA_Admin_Settings' ) && is_callable( array( 'PPA_Admin_Settings', $method ) ) ) {
-			call_user_func( array( 'PPA_Admin_Settings', $method ) );
-			exit;
-		}
-
-		error_log( 'PPA: admin-post fallback could not dispatch ' . $action . ' → ' . $method );
-		wp_die(
-			esc_html__( 'PostPress AI settings handler missing. Please reinstall or contact support.', 'postpress-ai' ),
-			'PostPress AI',
-			array( 'response' => 500 )
-		);
-	};
-
-	$method = $action_map[ $req_action ];
-
-	add_action( 'admin_post_' . $req_action, function () use ( $dispatch, $method, $req_action ) {
-		$dispatch( $method, $req_action );
-	}, 0 );
-
-	error_log( 'PPA: admin-post fallback armed (action=' . $req_action . ')' );
-}, 7 );
-
-/** ---------------------------------------------------------------------------------
- * Admin enqueue — delegate to inc/admin/enqueue.php (single source of truth)
+ * Admin enqueue — delegate to inc/admin/enqueue.php
  * -------------------------------------------------------------------------------- */
 add_action( 'plugins_loaded', function () {
 	if ( function_exists( 'ppa_admin_enqueue' ) ) {
@@ -446,7 +529,7 @@ add_action( 'plugins_loaded', function () {
 }, 10 );
 
 /** ---------------------------------------------------------------------------------
- * Admin asset cache-busting (ver=filemtime) — enforce for admin handles/SRCs
+ * Admin asset cache-busting (ver=filemtime)
  * -------------------------------------------------------------------------------- */
 add_action( 'admin_init', function () {
 	add_filter( 'style_loader_src', function ( $src, $handle ) {
@@ -479,7 +562,7 @@ add_action( 'admin_init', function () {
 }, 9 );
 
 /** ---------------------------------------------------------------------------------
- * Public asset cache-busting (ver=filemtime) — handles registered by shortcode
+ * Public asset cache-busting (ver=filemtime)
  * -------------------------------------------------------------------------------- */
 add_action( 'init', function () {
 	add_filter( 'style_loader_src', function ( $src, $handle ) {
