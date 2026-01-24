@@ -13,6 +13,9 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key.
  *
  * ========= CHANGE LOG =========
+ * 2026-01-24: FIX: Plan/Usage parsing now supports license.v1 nested payloads: license.sites.* and license.tokens.*. # CHANGED:
+ * 2026-01-24: ADD: Render a Plan & Usage card on Settings using the parsed sites/tokens values (safe + admin-only).  # CHANGED:
+ *
  * 2026-01-21: FIX: Ensure there is NO submit_button() shim in this file (prevents redeclare fatal).            # CHANGED:
  * 2026-01-21: FIX: Ensure Settings NEVER renders at include-time (prevents headers already sent).            # CHANGED:
  * 2026-01-21: FIX: seed_last_license_transient_if_missing() now supports older no-arg calls (compat).        # CHANGED:
@@ -234,10 +237,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			// Strip control characters (invisible paste junk) + whitespace. Keep format permissive.
-			$tmp = preg_replace( '/[\x00-\x1F\x7F]/', '', $value );
+			$tmp   = preg_replace( '/[\x00-\x1F\x7F]/', '', $value );
 			$value = is_string( $tmp ) ? $tmp : $value;
 
-			$tmp = preg_replace( '/\s+/', '', $value );
+			$tmp   = preg_replace( '/\s+/', '', $value );
 			$value = is_string( $tmp ) ? $tmp : $value;
 
 			if ( strlen( $value ) > 200 ) {
@@ -474,7 +477,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				update_option( self::OPT_LICENSE_STATE, $state, false );
 			}
 
-			$home = untrailingslashit( home_url( '/' ) );
+			$home           = untrailingslashit( home_url( '/' ) );
 			$server_site_ok = true;
 			if ( is_array( $result ) && isset( $result['data']['activation']['site_url'] ) && is_string( $result['data']['activation']['site_url'] ) ) {
 				$server_site = untrailingslashit( trim( (string) $result['data']['activation']['site_url'] ) );
@@ -692,9 +695,9 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
-			$ts1 = (int) get_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0 );
-			$ts2 = (int) get_option( self::OPT_CONN_LAST_CHECKED, 0 );
-			$ts3 = (int) get_option( self::OPT_BANNER_LAST_AT, 0 );
+			$ts1     = (int) get_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0 );
+			$ts2     = (int) get_option( self::OPT_CONN_LAST_CHECKED, 0 );
+			$ts3     = (int) get_option( self::OPT_BANNER_LAST_AT, 0 );
 			$last_ts = max( 0, $ts1, $ts2, $ts3 );
 
 			$last_txt = '';
@@ -1067,7 +1070,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			);
 
 			if ( '' !== $err ) {
-				$seed['ok'] = false;
+				$seed['ok']    = false;
 				$seed['error'] = array(
 					'type' => 'local_state',
 					'code' => $err,
@@ -1079,24 +1082,51 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			return $seed;
 		}
 
-		/* NOTE:
-		 * The rest of your file (Plan/Usage extraction + rendering) stays exactly as you had it.
-		 * No behavioral changes beyond stopping fatals/headers issues.
-		 */
+		// === BEGIN: Plan/Usage helpers ===
 
-		// === BEGIN: Plan/Usage helpers (unchanged from your version) ===
-		private static function extract_plan_usage_from_last( $last ) {
+		private static function fmt_int( $n ) { // CHANGED:
+			if ( null === $n ) {
+				return '';
+			}
+			if ( ! is_numeric( $n ) ) {
+				return '';
+			}
+			return number_format_i18n( (int) $n );
+		}
+
+		private static function fmt_slug( $s ) { // CHANGED:
+			$s = is_string( $s ) ? trim( $s ) : '';
+			if ( '' === $s ) {
+				return __( '(unknown)', 'postpress-ai' );
+			}
+			return $s;
+		}
+
+		private static function extract_plan_usage_from_last( $last ) { // CHANGED:
 			$out = array(
-				'plan_slug'        => '',
-				'status'           => '',
-				'max_sites'        => 0,
-				'unlimited_sites'  => false,
-				'sites_used'       => null,
-				'activation_live'  => false,
-				'tokens_used'      => null,
-				'tokens_limit'     => null,
-				'account_url'      => '',
-				'upgrade_url'      => '',
+				'plan_slug'               => '',
+				'status'                  => '',
+				'max_sites'               => 0,
+				'unlimited_sites'         => false,
+
+				// Sites (new nested structure supported):
+				'sites_used'              => 0,
+				'sites_max'               => null,
+				'sites_unlimited'         => false,
+
+				'activation_live'         => false,
+
+				// Tokens (new nested structure supported):
+				'tokens_used'             => null,
+				'tokens_limit'            => null,
+				'tokens_remaining'        => null,
+				'tokens_purchased_balance'=> null,
+				'tokens_remaining_total'  => null,
+				'tokens_period_start'     => '',
+				'tokens_period_end'       => '',
+
+				'account_url'             => '',
+				'upgrade_url'             => '',
 			);
 
 			if ( ! is_array( $last ) ) {
@@ -1107,6 +1137,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$lic  = ( isset( $data['license'] ) && is_array( $data['license'] ) ) ? $data['license'] : array();
 			$act  = ( isset( $data['activation'] ) && is_array( $data['activation'] ) ) ? $data['activation'] : array();
 
+			// Basic plan fields.
 			if ( isset( $lic['plan_slug'] ) ) {
 				$out['plan_slug'] = is_string( $lic['plan_slug'] ) ? trim( $lic['plan_slug'] ) : (string) $lic['plan_slug'];
 			}
@@ -1120,23 +1151,41 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				$out['unlimited_sites'] = (bool) $lic['unlimited_sites'];
 			}
 
+			// Activation.
 			if ( array_key_exists( 'activated', $act ) ) {
 				$v = $act['activated'];
 				if ( is_bool( $v ) ) {
 					$out['activation_live'] = $v;
 				} elseif ( is_string( $v ) ) {
-					$vv = strtolower( trim( $v ) );
+					$vv                   = strtolower( trim( $v ) );
 					$out['activation_live'] = in_array( $vv, array( '1', 'true', 'yes', 'on', 'active', 'activated' ), true );
 				}
 			}
 
+			/**
+			 * SITES (license.v1 supports: data.license.sites.used / max / unlimited)
+			 */
 			$sites_used = null;
-			if ( isset( $lic['active_sites'] ) && is_array( $lic['active_sites'] ) ) {
+			if ( isset( $lic['sites'] ) && is_array( $lic['sites'] ) ) { // CHANGED:
+				if ( isset( $lic['sites']['used'] ) && is_numeric( $lic['sites']['used'] ) ) { // CHANGED:
+					$sites_used = (int) $lic['sites']['used']; // CHANGED:
+				}
+				if ( isset( $lic['sites']['max'] ) && is_numeric( $lic['sites']['max'] ) ) { // CHANGED:
+					$out['sites_max'] = (int) $lic['sites']['max']; // CHANGED:
+				}
+				if ( isset( $lic['sites']['unlimited'] ) ) { // CHANGED:
+					$out['sites_unlimited'] = (bool) $lic['sites']['unlimited']; // CHANGED:
+				}
+			}
+
+			// Back-compat site counting.
+			if ( null === $sites_used && isset( $lic['active_sites'] ) && is_array( $lic['active_sites'] ) ) {
 				$sites_used = count( $lic['active_sites'] );
 			}
 			if ( null === $sites_used && isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) {
 				$sites_used = count( $data['active_sites'] );
 			}
+
 			$numeric_keys = array( 'sites_used', 'site_count', 'used_sites', 'active_site_count' );
 			if ( null === $sites_used ) {
 				foreach ( $numeric_keys as $k ) {
@@ -1155,6 +1204,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
+			// If live activation but used count is missing/zero, treat as at least 1.
 			if ( $out['activation_live'] ) {
 				if ( null === $sites_used || $sites_used < 1 ) {
 					$sites_used = 1;
@@ -1166,29 +1216,80 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 			$out['sites_used'] = (int) $sites_used;
 
-			$tok_used_keys  = array( 'tokens_used', 'token_used', 'used_tokens' );
-			$tok_limit_keys = array( 'tokens_limit', 'token_limit', 'max_tokens' );
-			foreach ( $tok_used_keys as $k ) {
-				if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {
-					$out['tokens_used'] = (int) $data[ $k ];
-					break;
-				}
-				if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {
-					$out['tokens_used'] = (int) $lic[ $k ];
-					break;
-				}
+			// Prefer nested sites.max/unlimited when present; otherwise fall back to top-level fields.
+			if ( null !== $out['sites_max'] && $out['sites_max'] > 0 ) { // CHANGED:
+				$out['max_sites'] = (int) $out['sites_max']; // CHANGED:
+			} else {
+				$out['sites_max'] = ( $out['max_sites'] > 0 ) ? (int) $out['max_sites'] : null; // CHANGED:
 			}
-			foreach ( $tok_limit_keys as $k ) {
-				if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {
-					$out['tokens_limit'] = (int) $data[ $k ];
-					break;
+			if ( $out['sites_unlimited'] ) { // CHANGED:
+				$out['unlimited_sites'] = true; // CHANGED:
+			} else {
+				$out['sites_unlimited'] = (bool) $out['unlimited_sites']; // CHANGED:
+			}
+
+			/**
+			 * TOKENS (license.v1 supports: data.license.tokens.monthly_limit / monthly_used / monthly_remaining / remaining_total / period.*)
+			 */
+			if ( isset( $lic['tokens'] ) && is_array( $lic['tokens'] ) ) { // CHANGED:
+				$t = $lic['tokens']; // CHANGED:
+
+				if ( isset( $t['monthly_used'] ) && is_numeric( $t['monthly_used'] ) ) { // CHANGED:
+					$out['tokens_used'] = (int) $t['monthly_used']; // CHANGED:
 				}
-				if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {
-					$out['tokens_limit'] = (int) $lic[ $k ];
-					break;
+				if ( isset( $t['monthly_limit'] ) && is_numeric( $t['monthly_limit'] ) ) { // CHANGED:
+					$out['tokens_limit'] = (int) $t['monthly_limit']; // CHANGED:
+				}
+				if ( isset( $t['monthly_remaining'] ) && is_numeric( $t['monthly_remaining'] ) ) { // CHANGED:
+					$out['tokens_remaining'] = (int) $t['monthly_remaining']; // CHANGED:
+				}
+				if ( isset( $t['purchased_balance'] ) && is_numeric( $t['purchased_balance'] ) ) { // CHANGED:
+					$out['tokens_purchased_balance'] = (int) $t['purchased_balance']; // CHANGED:
+				}
+				if ( isset( $t['remaining_total'] ) && is_numeric( $t['remaining_total'] ) ) { // CHANGED:
+					$out['tokens_remaining_total'] = (int) $t['remaining_total']; // CHANGED:
+				}
+
+				if ( isset( $t['period'] ) && is_array( $t['period'] ) ) { // CHANGED:
+					if ( isset( $t['period']['start'] ) && is_string( $t['period']['start'] ) ) { // CHANGED:
+						$out['tokens_period_start'] = trim( $t['period']['start'] ); // CHANGED:
+					}
+					if ( isset( $t['period']['end'] ) && is_string( $t['period']['end'] ) ) { // CHANGED:
+						$out['tokens_period_end'] = trim( $t['period']['end'] ); // CHANGED:
+					}
 				}
 			}
 
+			// Back-compat token keys if some older response used flat numeric keys.
+			$tok_used_keys  = array( 'tokens_used', 'token_used', 'used_tokens' );
+			$tok_limit_keys = array( 'tokens_limit', 'token_limit', 'max_tokens' );
+
+			if ( null === $out['tokens_used'] ) {
+				foreach ( $tok_used_keys as $k ) {
+					if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {
+						$out['tokens_used'] = (int) $data[ $k ];
+						break;
+					}
+					if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {
+						$out['tokens_used'] = (int) $lic[ $k ];
+						break;
+					}
+				}
+			}
+			if ( null === $out['tokens_limit'] ) {
+				foreach ( $tok_limit_keys as $k ) {
+					if ( isset( $data[ $k ] ) && is_numeric( $data[ $k ] ) ) {
+						$out['tokens_limit'] = (int) $data[ $k ];
+						break;
+					}
+					if ( isset( $lic[ $k ] ) && is_numeric( $lic[ $k ] ) ) {
+						$out['tokens_limit'] = (int) $lic[ $k ];
+						break;
+					}
+				}
+			}
+
+			// Links (optional).
 			if ( isset( $data['links'] ) && is_array( $data['links'] ) ) {
 				if ( isset( $data['links']['account'] ) ) {
 					$out['account_url'] = self::safe_http_url( $data['links']['account'] );
@@ -1201,13 +1302,141 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			return $out;
 		}
 
-		private static function render_plan_usage_card( $last ) {
-			// (UNCHANGED) — your full function body continues here exactly as-is in your file.
-			// Keeping it untouched to respect your locked UI behavior.
-			// NOTE: For brevity in this response, keep the remainder of the file the same as your pasted version.
-			// IMPORTANT: When you paste this onto the server, replace the entire file with this block,
-			// and keep everything after this point exactly as in your current file.
+		private static function render_plan_usage_card( $last ) { // CHANGED:
+			$info = self::extract_plan_usage_from_last( $last ); // CHANGED:
+
+			$plan_slug = self::fmt_slug( $info['plan_slug'] );
+			$status    = is_string( $info['status'] ) ? trim( $info['status'] ) : '';
+			$status    = ( '' !== $status ) ? $status : __( '(unknown)', 'postpress-ai' );
+
+			$sites_used      = (int) $info['sites_used'];
+			$sites_max       = $info['sites_max'];
+			$sites_unlimited = (bool) $info['sites_unlimited'];
+
+			$tokens_used            = $info['tokens_used'];
+			$tokens_limit           = $info['tokens_limit'];
+			$tokens_remaining       = $info['tokens_remaining'];
+			$tokens_remaining_total = $info['tokens_remaining_total'];
+			$tokens_period_start    = is_string( $info['tokens_period_start'] ) ? trim( $info['tokens_period_start'] ) : '';
+			$tokens_period_end      = is_string( $info['tokens_period_end'] ) ? trim( $info['tokens_period_end'] ) : '';
+
+			$sites_line = '';
+			if ( $sites_unlimited ) {
+				$sites_line = sprintf(
+					/* translators: %s = used sites */
+					__( '%s used (Unlimited)', 'postpress-ai' ),
+					self::fmt_int( $sites_used )
+				);
+			} elseif ( null !== $sites_max && (int) $sites_max > 0 ) {
+				$sites_line = sprintf(
+					/* translators: 1: used sites 2: max sites */
+					__( '%1$s of %2$s used', 'postpress-ai' ),
+					self::fmt_int( $sites_used ),
+					self::fmt_int( (int) $sites_max )
+				);
+			} else {
+				$sites_line = sprintf(
+					/* translators: %s = used sites */
+					__( '%s used', 'postpress-ai' ),
+					self::fmt_int( $sites_used )
+				);
+			}
+
+			$token_line_main = __( 'Not available yet — click “Check License”.', 'postpress-ai' );
+			if ( null !== $tokens_limit && is_numeric( $tokens_limit ) && (int) $tokens_limit > 0 ) {
+				$token_line_main = sprintf(
+					/* translators: 1: used 2: limit */
+					__( '%1$s of %2$s used this month', 'postpress-ai' ),
+					self::fmt_int( $tokens_used ),
+					self::fmt_int( $tokens_limit )
+				);
+				if ( null !== $tokens_remaining && is_numeric( $tokens_remaining ) ) {
+					$token_line_main .= ' — ' . sprintf(
+						/* translators: %s = remaining tokens */
+						__( '%s remaining', 'postpress-ai' ),
+						self::fmt_int( $tokens_remaining )
+					);
+				}
+			}
+
+			$token_line_extra = '';
+			if ( null !== $tokens_remaining_total && is_numeric( $tokens_remaining_total ) ) {
+				$token_line_extra = sprintf(
+					/* translators: %s = total remaining tokens */
+					__( 'Total remaining: %s', 'postpress-ai' ),
+					self::fmt_int( $tokens_remaining_total )
+				);
+			}
+
+			$period_line = '';
+			if ( '' !== $tokens_period_start && '' !== $tokens_period_end ) {
+				$period_line = sprintf(
+					/* translators: 1: period start 2: period end */
+					__( 'Period: %1$s → %2$s', 'postpress-ai' ),
+					esc_html( $tokens_period_start ),
+					esc_html( $tokens_period_end )
+				);
+			}
+
+			?>
+			<div class="ppa-card ppa-card--plan"> <!-- # CHANGED: -->
+				<h2 class="title"><?php esc_html_e( 'Plan & Usage', 'postpress-ai' ); ?></h2>
+				<p class="ppa-help">
+					<?php esc_html_e( 'These numbers come from your last license check. Click “Check License” to refresh.', 'postpress-ai' ); ?>
+				</p>
+
+				<table class="widefat striped" style="max-width: 820px;">
+					<tbody>
+						<tr>
+							<th style="width: 220px;"><?php esc_html_e( 'Plan', 'postpress-ai' ); ?></th>
+							<td><?php echo esc_html( $plan_slug ); ?></td>
+						</tr>
+						<tr>
+							<th><?php esc_html_e( 'License Status', 'postpress-ai' ); ?></th>
+							<td><?php echo esc_html( $status ); ?></td>
+						</tr>
+						<tr>
+							<th><?php esc_html_e( 'Sites', 'postpress-ai' ); ?></th>
+							<td><?php echo esc_html( $sites_line ); ?></td>
+						</tr>
+						<tr>
+							<th><?php esc_html_e( 'Tokens', 'postpress-ai' ); ?></th>
+							<td>
+								<?php echo esc_html( $token_line_main ); ?>
+								<?php if ( '' !== $token_line_extra ) : ?>
+									<br><span class="description"><?php echo esc_html( $token_line_extra ); ?></span>
+								<?php endif; ?>
+								<?php if ( '' !== $period_line ) : ?>
+									<br><span class="description"><?php echo esc_html( $period_line ); ?></span>
+								<?php endif; ?>
+							</td>
+						</tr>
+						<?php if ( '' !== $info['account_url'] || '' !== $info['upgrade_url'] ) : ?>
+							<tr>
+								<th><?php esc_html_e( 'Links', 'postpress-ai' ); ?></th>
+								<td>
+									<?php if ( '' !== $info['account_url'] ) : ?>
+										<a href="<?php echo esc_url( $info['account_url'] ); ?>" target="_blank" rel="noopener noreferrer">
+											<?php esc_html_e( 'Account', 'postpress-ai' ); ?>
+										</a>
+									<?php endif; ?>
+									<?php if ( '' !== $info['upgrade_url'] ) : ?>
+										<?php if ( '' !== $info['account_url'] ) : ?>
+											&nbsp;•&nbsp;
+										<?php endif; ?>
+										<a href="<?php echo esc_url( $info['upgrade_url'] ); ?>" target="_blank" rel="noopener noreferrer">
+											<?php esc_html_e( 'Upgrade', 'postpress-ai' ); ?>
+										</a>
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endif; ?>
+					</tbody>
+				</table>
+			</div>
+			<?php
 		}
+
 		// === END: Plan/Usage helpers ===
 
 		private static function redirect_with_test_result( $status, $message ) {
@@ -1410,10 +1639,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					</form>
 				</div>
 
-				<?php
-				// IMPORTANT: Keep your existing Plan & Usage card renderer exactly as it already exists in your file.
-				// (This file edit is strictly about fatals/headers.)
-				?>
+				<?php self::render_plan_usage_card( $last ); // CHANGED: ?>
 
 			</div>
 			<?php
