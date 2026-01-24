@@ -1590,7 +1590,7 @@
   // Init guard (prevents duplicate event bindings if the script is enqueued twice)
   // -------------------------------------------------------------------------
   if (window.PPA_OUTPUT_LANGUAGE_MODULE_INIT) return; // CHANGED:
-  window.PPA_OUTPUT_LANGUAGE_MODULE_INIT = "v2026-01-23.9"; // CHANGED:
+  window.PPA_OUTPUT_LANGUAGE_MODULE_INIT = "v2026-01-23.10"; // CHANGED:
 
   function byId(id) { try { return document.getElementById(id); } catch (e) { return null; } }
 
@@ -1846,14 +1846,34 @@
     }
 
     async function doFetch(headers, body) {
+      // Safety timeout (45s) to prevent indefinite hangs if server stalls
+      var ctrl = new AbortController();
+      var tid = setTimeout(function() { 
+          try { ctrl.abort(); } catch(e){} 
+      }, 45000);
+
+      // Chain parent signal if provided
+      if (signal) {
+          if (signal.aborted) {
+              clearTimeout(tid);
+              return { ok: false, aborted: true };
+          }
+          signal.addEventListener('abort', function() {
+              clearTimeout(tid);
+              try { ctrl.abort(); } catch(e){}
+          }, { once: true });
+      }
+
       try {
         var res = await fetch(url, {
           method: "POST",
           credentials: "same-origin",
           headers: headers,
           body: body,
-          signal: signal // CHANGED:
+          signal: ctrl.signal // Use our timed controller
         });
+        clearTimeout(tid); // Clear timeout on response start
+
         var txt = await res.text();
         var json = safeJsonParse(txt);
         if (!json) {
@@ -1881,6 +1901,7 @@
         }
         return json;
       } catch (err) {
+        clearTimeout(tid);
         if (err.name === 'AbortError') return { ok: false, aborted: true };
         return { ok: false, error: "network_error", message: String(err) };
       }
@@ -2136,10 +2157,13 @@
     var maxAttempts = 300; 
 
     try {
+      logOnce("translate debug", { step: "loop_start", max: maxAttempts });
       while (attempt < maxAttempts) {
         if (signal.aborted) return;
         
+        logOnce("translate debug", { step: "calling_postTranslate", attempt: attempt });
         var resp = await postTranslate(payload, signal);
+        logOnce("translate debug", { step: "postTranslate_returned", ok: (resp && resp.ok), pending: (resp && resp.pending) });
 
         // 1. Check if aborted while waiting
         if (signal.aborted) return;
