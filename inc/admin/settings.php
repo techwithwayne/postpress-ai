@@ -13,6 +13,9 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key.
  *
  * ========= CHANGE LOG =========
+ * 2026-01-25: HARDEN: Seed ppa_license_last_result for any wp-admin user (even before a license key is saved) to prevent editor/composer warnings; treat "no key" as unknown activation state. # CHANGED:
+ *
+ * 2026-01-24: HARDEN: Always seed ppa_license_last_result transient on admin load when missing (prevents “not set” warnings). # CHANGED:
  * 2026-01-24: FIX: Plan/Usage parsing now supports license.v1 nested payloads: license.sites.* and license.tokens.*. # CHANGED:
  * 2026-01-24: ADD: Render a Plan & Usage card on Settings using the parsed sites/tokens values (safe + admin-only).  # CHANGED:
  * 2026-01-24: HARDEN: Activation state now requires site-match; stale "active" is cleared + requires Check License.   # CHANGED:
@@ -113,10 +116,14 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			// Settings API registration.
 			add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
 
+			// CHANGED: Bullet-proof seeding of the last license transient so other admin screens never see "not set".
+			add_action( 'admin_init', array( __CLASS__, 'maybe_seed_last_license_transient' ), 20 ); // CHANGED:
+
 			// If this file loads after admin_init (e.g. via admin_menu), admin_init already ran.
 			// Register settings immediately so options.php will accept option_page=ppa_settings.
 			if ( did_action( 'admin_init' ) ) {
 				self::register_settings();
+				self::maybe_seed_last_license_transient(); // CHANGED:
 			}
 
 			// Test Connection handler (admin-post).
@@ -127,6 +134,31 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			add_action( 'admin_post_ppa_license_activate', array( __CLASS__, 'handle_license_activate' ) );
 			add_action( 'admin_post_ppa_license_deactivate', array( __CLASS__, 'handle_license_deactivate' ) );
 		}
+
+		/**
+		 * CHANGED: Ensure ppa_license_last_result transient exists as a safe local snapshot.
+		 *
+		 * Why:
+		 * - Some screens (and/or controller enforcement) may read the transient before Settings is visited.
+		 * - We want a bullet-proof default so nothing emits "transient not set" warnings/noise.
+		 * - This does NOT call Django. It only snapshots existing local options into the transient.
+		 */
+		public static function maybe_seed_last_license_transient() { // CHANGED:
+			if ( ! is_admin() ) { // CHANGED:
+				return; // CHANGED:
+			} // CHANGED:
+			// CHANGED: Do NOT require manage_options here.
+			// Seeding is safe (no network calls, no secrets). This prevents editor/composer wp-admin screens
+			// from hitting "transient not set" codepaths. # CHANGED:
+
+			$existing = get_transient( self::TRANSIENT_LAST_LIC ); // CHANGED:
+			if ( is_array( $existing ) ) { // CHANGED:
+				return; // CHANGED:
+			} // CHANGED:
+
+			// CHANGED: Seed a local snapshot transient (no network calls). Safe even before a license key is saved.
+			self::seed_last_license_transient_if_missing( null ); // CHANGED:
+		} // CHANGED:
 
 		/**
 		 * Register options and fields for the settings screen.
@@ -327,6 +359,12 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		}                                                                                                                  // CHANGED:
 
 		private static function derive_activation_state( $last ) {
+			// CHANGED: If there is no saved license key, treat activation as unknown (not inactive).
+			$lic = self::get_license_key();                                                                                // CHANGED:
+			if ( '' === $lic ) {                                                                                           // CHANGED:
+				return 'unknown';                                                                                          // CHANGED:
+			}                                                                                                               // CHANGED:
+
 			// Strongest signal: we explicitly stored that THIS site is active.
 			if ( self::is_active_on_this_site_option() ) {                                                                  // CHANGED:
 				return 'active';                                                                                           // CHANGED:
@@ -1149,7 +1187,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				);
 			}
 
-			set_transient( self::TRANSIENT_LAST_LIC, $seed, 5 * MINUTE_IN_SECONDS );
+			// CHANGED: Use the same TTL as real server results for consistency.
+			set_transient( self::TRANSIENT_LAST_LIC, $seed, self::LAST_LIC_TTL_SECONDS ); // CHANGED:
 			return $seed;
 		}
 
