@@ -15,6 +15,8 @@
  * ========= CHANGE LOG =========
  * 2026-01-24: FIX: Plan/Usage parsing now supports license.v1 nested payloads: license.sites.* and license.tokens.*. # CHANGED:
  * 2026-01-24: ADD: Render a Plan & Usage card on Settings using the parsed sites/tokens values (safe + admin-only).  # CHANGED:
+ * 2026-01-24: HARDEN: Activation state now requires site-match; stale "active" is cleared + requires Check License.   # CHANGED:
+ * 2026-01-24: ADD: License action requests now send Authorization + X-PPA-Site headers for parity + site binding.     # CHANGED:
  *
  * 2026-01-21: FIX: Ensure there is NO submit_button() shim in this file (prevents redeclare fatal).            # CHANGED:
  * 2026-01-21: FIX: Ensure Settings NEVER renders at include-time (prevents headers already sent).            # CHANGED:
@@ -302,23 +304,50 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			return ( '' !== $stored && $stored === $home );
 		}
 
+		/**
+		 * Detect if a server result is clearly bound to a DIFFERENT site than this WP install.
+		 * If so, we treat this as NOT active on this site (bullet-proof default).
+		 *
+		 * @param mixed $result
+		 * @return bool
+		 */
+		private static function is_site_mismatch_result( $result ) {                                                        // CHANGED:
+			if ( ! is_array( $result ) ) {                                                                                 // CHANGED:
+				return false;                                                                                              // CHANGED:
+			}                                                                                                              // CHANGED:
+			if ( ! isset( $result['data']['activation']['site_url'] ) || ! is_string( $result['data']['activation']['site_url'] ) ) { // CHANGED:
+				return false;                                                                                              // CHANGED:
+			}                                                                                                              // CHANGED:
+			$server_site = untrailingslashit( trim( (string) $result['data']['activation']['site_url'] ) );                // CHANGED:
+			if ( '' === $server_site ) {                                                                                   // CHANGED:
+				return false;                                                                                              // CHANGED:
+			}                                                                                                              // CHANGED:
+			$home = untrailingslashit( home_url( '/' ) );                                                                   // CHANGED:
+			return ( $server_site !== $home );                                                                              // CHANGED:
+		}                                                                                                                  // CHANGED:
+
 		private static function derive_activation_state( $last ) {
-			if ( self::is_active_on_this_site_option() ) {
-				return 'active';
+			// Strongest signal: we explicitly stored that THIS site is active.
+			if ( self::is_active_on_this_site_option() ) {                                                                  // CHANGED:
+				return 'active';                                                                                           // CHANGED:
 			}
 
+			// Next best: last result (site-aware parsing below).
+			$server_state = self::derive_activation_state_from_result_only( $last );                                        // CHANGED:
+			if ( 'unknown' !== $server_state ) {                                                                           // CHANGED:
+				return $server_state;                                                                                      // CHANGED:
+			}
+
+			// Persisted state is only a fallback. We DO NOT treat "active" as active-on-this-site unless OPT_ACTIVE_SITE matches.
 			$persisted = get_option( self::OPT_LICENSE_STATE, 'unknown' );
 			$persisted = is_string( $persisted ) ? strtolower( trim( $persisted ) ) : 'unknown';
-			if ( in_array( $persisted, array( 'active', 'inactive' ), true ) ) {
-				return $persisted;
+
+			if ( 'inactive' === $persisted ) {                                                                             // CHANGED:
+				return 'inactive';                                                                                         // CHANGED:
 			}
 
-			$server_state = self::derive_activation_state_from_result_only( $last );
-			if ( 'unknown' !== $server_state ) {
-				return $server_state;
-			}
-
-			return 'unknown';
+			// If persisted says "active" but we don't have an active_site match, treat as unknown and require Check License.
+			return 'unknown';                                                                                              // CHANGED:
 		}
 
 		private static function derive_activation_state_from_result_only( $result ) {
@@ -327,9 +356,21 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			$data = isset( $result['data'] ) && is_array( $result['data'] ) ? $result['data'] : array();
+			$home = untrailingslashit( home_url( '/' ) );                                                                   // CHANGED:
 
+			// If server explicitly reports activation state, trust it (but require site match if provided).
 			if ( isset( $data['activation'] ) && is_array( $data['activation'] ) && array_key_exists( 'activated', $data['activation'] ) ) {
-				$v = $data['activation']['activated'];
+				$act = $data['activation'];                                                                                // CHANGED:
+
+				$act_site = '';                                                                                            // CHANGED:
+				if ( isset( $act['site_url'] ) && is_string( $act['site_url'] ) ) {                                        // CHANGED:
+					$act_site = untrailingslashit( trim( (string) $act['site_url'] ) );                                   // CHANGED:
+				}                                                                                                          // CHANGED:
+				if ( '' !== $act_site && $act_site !== $home ) {                                                           // CHANGED:
+					return 'inactive';                                                                                     // CHANGED:
+				}                                                                                                          // CHANGED:
+
+				$v = $act['activated'];
 				if ( is_bool( $v ) ) {
 					return $v ? 'active' : 'inactive';
 				}
@@ -344,7 +385,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
-			$candidates = array( 'active', 'is_active', 'site_active', 'activated', 'status', 'activation_status' );
+			// Older/alternate shapes (avoid ambiguous keys like "status" — that can be LICENSE status, not activation).
+			$candidates = array( 'active', 'is_active', 'site_active', 'activated', 'activation_status' );                  // CHANGED:
 			foreach ( $candidates as $k ) {
 				if ( array_key_exists( $k, $data ) ) {
 					$v = $data[ $k ];
@@ -353,10 +395,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					}
 					if ( is_string( $v ) ) {
 						$vv = strtolower( trim( $v ) );
-						if ( in_array( $vv, array( 'active', 'activated', 'on', 'enabled' ), true ) ) {
+						if ( in_array( $vv, array( 'active', 'activated', 'on', 'enabled', 'true', '1', 'yes' ), true ) ) {
 							return 'active';
 						}
-						if ( in_array( $vv, array( 'inactive', 'deactivated', 'off', 'disabled' ), true ) ) {
+						if ( in_array( $vv, array( 'inactive', 'deactivated', 'off', 'disabled', 'false', '0', 'no' ), true ) ) {
 							return 'inactive';
 						}
 					}
@@ -364,7 +406,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			if ( isset( $data['active_sites'] ) && is_array( $data['active_sites'] ) ) {
-				$home = untrailingslashit( home_url( '/' ) );
 				foreach ( $data['active_sites'] as $site ) {
 					if ( is_string( $site ) && untrailingslashit( $site ) === $home ) {
 						return 'active';
@@ -419,12 +460,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$home = untrailingslashit( home_url( '/' ) );
 
-			if ( isset( $act['site_url'] ) && is_string( $act['site_url'] ) && '' !== trim( $act['site_url'] ) ) {
-				$server_site = untrailingslashit( trim( (string) $act['site_url'] ) );
-				if ( '' !== $server_site && $server_site !== $home ) {
-					return;
-				}
-			}
+			// Bullet-proof: if server says activation belongs to a different site, clear local active marker + force inactive.
+			if ( isset( $act['site_url'] ) && is_string( $act['site_url'] ) && '' !== trim( $act['site_url'] ) ) {        // CHANGED:
+				$server_site = untrailingslashit( trim( (string) $act['site_url'] ) );                                    // CHANGED:
+				if ( '' !== $server_site && $server_site !== $home ) {                                                     // CHANGED:
+					delete_option( self::OPT_ACTIVE_SITE );                                                                // CHANGED:
+					update_option( self::OPT_LICENSE_STATE, 'inactive', false );                                           // CHANGED:
+					update_option( self::OPT_LICENSE_LAST_ERROR_CODE, 'site_mismatch', false );                           // CHANGED:
+					update_option( self::OPT_LICENSE_LAST_CHECKED_AT, time(), false );                                    // CHANGED:
+					return;                                                                                                // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
 
 			$cur_err = get_option( self::OPT_LICENSE_LAST_ERROR_CODE, '' );
 			$cur_err = is_string( $cur_err ) ? $cur_err : '';
@@ -486,6 +532,14 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				}
 			}
 
+			// Bullet-proof: if server indicates a different site, treat as NOT active here.
+			if ( $ok && ! $server_site_ok ) {                                                                              // CHANGED:
+				update_option( self::OPT_LICENSE_LAST_ERROR_CODE, 'site_mismatch', false );                                 // CHANGED:
+				update_option( self::OPT_LICENSE_STATE, 'inactive', false );                                                // CHANGED:
+				delete_option( self::OPT_ACTIVE_SITE );                                                                     // CHANGED:
+				return;                                                                                                     // CHANGED:
+			}                                                                                                               // CHANGED:
+
 			if ( $ok && 'verify' === $action ) {
 				if ( 'active' === $state && $server_site_ok ) {
 					update_option( self::OPT_ACTIVE_SITE, home_url( '/' ), false );
@@ -503,7 +557,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			}
 
 			if ( ! $ok ) {
-				$revoke_codes = array( 'not_activated', 'invalid_license', 'expired', 'revoked', 'license_not_found' );
+				$revoke_codes = array( 'not_activated', 'invalid_license', 'expired', 'revoked', 'license_not_found', 'site_mismatch' ); // CHANGED:
 				if ( in_array( $err, $revoke_codes, true ) ) {
 					delete_option( self::OPT_ACTIVE_SITE );
 					update_option( self::OPT_LICENSE_STATE, 'inactive', false );
@@ -864,11 +918,15 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$endpoint = trailingslashit( $base ) . 'license/' . $action . '/';
 
+			$site = esc_url_raw( home_url( '/' ) );                                                                          // CHANGED:
+
 			$headers = array(
 				'Accept'           => 'application/json; charset=utf-8',
 				'Content-Type'     => 'application/json; charset=utf-8',
 				'User-Agent'       => 'PostPressAI-WordPress/' . ( defined( 'PPA_VERSION' ) ? PPA_VERSION : 'dev' ),
 				'X-PPA-Key'        => $key,
+				'Authorization'    => 'Bearer ' . $key,                                                                      // CHANGED:
+				'X-PPA-Site'       => $site,                                                                                // CHANGED:
 				'X-PPA-View'       => 'settings_license',
 				'X-Requested-With' => 'XMLHttpRequest',
 			);
@@ -888,8 +946,20 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			);
 
 			$result = self::normalize_django_response( $response );
-			self::cache_last_license_result( $result );
 
+			// Bullet-proof: if server response is bound to a different site, force a local error snapshot.
+			if ( self::is_site_mismatch_result( $result ) ) {                                                               // CHANGED:
+				self::log( 'license_action site_mismatch: action=' . $action );                                             // CHANGED:
+				$result['ok']    = false;                                                                                  // CHANGED:
+				$result['error'] = array(                                                                                  // CHANGED:
+					'type' => 'activation',                                                                                // CHANGED:
+					'code' => 'site_mismatch',                                                                              // CHANGED:
+					'hint' => 'This license is activated for a different site. Deactivate it there, then run Check License here.', // CHANGED:
+				);                                                                                                          // CHANGED:
+				$result['_wp_site_mismatch'] = true;                                                                        // CHANGED:
+			}                                                                                                               // CHANGED:
+
+			self::cache_last_license_result( $result );
 			self::persist_license_state_from_action( $action, $result );
 
 			$http = ( is_array( $result ) && isset( $result['_http_status'] ) ) ? (int) $result['_http_status'] : 0;
@@ -953,6 +1023,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		}
 
 		private static function notice_from_license_result( $label, $result ) {
+			// Clear, explicit message for the "site mismatch" safety case.
+			if ( is_array( $result ) && isset( $result['error']['code'] ) && 'site_mismatch' === (string) $result['error']['code'] ) { // CHANGED:
+				return __( 'This license is activated for a different site. Deactivate it there, then click “Check License” here.', 'postpress-ai' ); // CHANGED:
+			}                                                                                                              // CHANGED:
+
 			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
 				if ( 'Verify' === $label ) {
 					return __( 'License looks good.', 'postpress-ai' );
@@ -1041,12 +1116,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$stored_active = get_option( self::OPT_ACTIVE_SITE, '' );
 			$stored_active = is_string( $stored_active ) ? untrailingslashit( trim( $stored_active ) ) : '';
 
-			$activated = false;
-			if ( '' !== $stored_active && $stored_active === $home ) {
-				$activated = true;
-			} elseif ( 'active' === $state ) {
-				$activated = true;
-			}
+			// Bullet-proof: only consider "activated" true if the stored active site matches THIS home URL.
+			$activated = ( '' !== $stored_active && $stored_active === $home );                                             // CHANGED:
 
 			$masked = self::mask_secret( (string) get_option( self::OPT_LICENSE_KEY, '' ) );
 
