@@ -7,6 +7,9 @@
  * /wp-content/plugins/postpress-ai/inc/class-ppa-controller.php
  *
  * CHANGE LOG
+ * 2026-01-25 • ADD: wp_ajax_ppa_account_status → Django /license/verify/ bridge for Account screen (plan/sites/tokens/links). // CHANGED:
+ *            • LOCKED: WP → admin-ajax → PHP → Django only. No Stripe. No CORS/auth contract changes.                       // CHANGED:
+ *
  * 2026-01-24 • FIX: Strip divider-only lines like '---' and '...' from AI output before rendering/saving.     // CHANGED:
  *            Applies to preview/generate/store + saved WP post content.                                       // CHANGED:
  *
@@ -37,6 +40,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			add_action( 'wp_ajax_ppa_store',          array( __CLASS__, 'ajax_store' ) );
 			add_action( 'wp_ajax_ppa_debug_headers',  array( __CLASS__, 'ajax_debug_headers' ) );
 			add_action( 'wp_ajax_ppa_generate',       array( __CLASS__, 'ajax_generate' ) );
+			add_action( 'wp_ajax_ppa_account_status', array( __CLASS__, 'ajax_account_status' ) ); // CHANGED:
 		}
 
 		private static function error_payload( $error_code, $http_status, $meta_extra = array() ) {
@@ -748,6 +752,67 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 
 			wp_send_json_success( $json, $code );
 		}
+
+		public static function ajax_account_status() { // CHANGED:
+			self::$endpoint = 'account_status'; // CHANGED:
+
+			// Same capability gate as the Composer: editors/authors can see plan/usage.                                   // CHANGED:
+			if ( ! current_user_can( 'edit_posts' ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 ); // CHANGED:
+			}
+
+			self::must_post();              // CHANGED:
+			self::verify_nonce_or_forbid(); // CHANGED:
+
+			// LOCKED: do NOT accept arbitrary license keys from the browser. Use stored activation key only.              // CHANGED:
+			$license_key = self::require_activation_key_or_403(); // CHANGED:
+
+			// Site URL for Option A license auth (Django normalizes; we send home_url).                                    // CHANGED:
+			$site_url = function_exists( 'home_url' ) ? home_url() : ( isset( $_SERVER['HTTP_HOST'] ) ? ( 'https://' . $_SERVER['HTTP_HOST'] ) : '' ); // CHANGED:
+			$site_url = esc_url_raw( (string) $site_url ); // CHANGED:
+
+			$base = self::django_base(); // CHANGED:
+
+			// Django license verify endpoint (under /postpress-ai).                                                        // CHANGED:
+			$django_url = $base . '/license/verify/'; // CHANGED:
+
+			// Always send license_key + site_url in the BODY for Option A (no shared key required).                        // CHANGED:
+			$body_arr = array( // CHANGED:
+				'license_key' => (string) $license_key, // CHANGED:
+				'site_url'    => (string) $site_url,    // CHANGED:
+			); // CHANGED:
+
+			$raw = wp_json_encode( $body_arr ); // CHANGED:
+			if ( ! is_string( $raw ) || '' === $raw ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'invalid_payload', 500, array( 'reason' => 'json_encode_failed' ) ), 500 ); // CHANGED:
+			}
+
+			$response = wp_remote_post( $django_url, self::build_args( $raw ) ); // CHANGED:
+
+			if ( is_wp_error( $response ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'request_failed', 500, array( 'detail' => $response->get_error_message() ) ), 500 ); // CHANGED:
+			}
+
+			$code      = (int) wp_remote_retrieve_response_code( $response ); // CHANGED:
+			$resp_body = (string) wp_remote_retrieve_body( $response ); // CHANGED:
+
+			$json = json_decode( $resp_body, true ); // CHANGED:
+			if ( json_last_error() !== JSON_ERROR_NONE ) { // CHANGED:
+				// If Django returns HTML/text, pass raw back (and preserve >=400 semantics).                               // CHANGED:
+				if ( $code >= 400 ) { // CHANGED:
+					wp_send_json_error( array( 'raw' => $resp_body ), $code ); // CHANGED:
+				}
+				wp_send_json_success( array( 'raw' => $resp_body ), $code ); // CHANGED:
+			}
+
+			// No AI content fields expected here; do NOT sanitize. Keep contract as-is.                                     // CHANGED:
+
+			if ( $code >= 400 ) { // CHANGED:
+				wp_send_json_error( $json, $code ); // CHANGED:
+			}
+
+			wp_send_json_success( $json, $code ); // CHANGED:
+		} // CHANGED:
 
 		public static function ajax_debug_headers() {
 			self::$endpoint = 'debug_headers';
