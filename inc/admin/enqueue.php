@@ -3,6 +3,8 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
+ * 2026-01-25: FIX: Account screen now localizes PPAAccount (ajaxUrl + nonce + action) for admin-account.js. // CHANGED:
+ *
  * 2026-01-21: FIX: Define $page_param safely (prevents Undefined variable warning).                         // CHANGED:
  * 2026-01-21: FIX: Enforce per-screen CSS isolation across ALL PPA pages (Composer/Settings/Account/Test). // CHANGED:
  * 2026-01-21: FIX: Composer now loads ONLY assets/css/admin-composer.css (gospel), not admin.css.          // CHANGED:
@@ -298,6 +300,19 @@ if (!function_exists('ppa_admin_enqueue')) {
             // Account JS (only on Account)
             if (file_exists($admin_account_js_file)) {                                                       // CHANGED:
                 wp_register_script('ppa-admin-account', $admin_account_js_url, array('jquery'), $admin_account_js_ver, true); // CHANGED:
+
+                // Provide the minimal config that admin-account.js needs: ajaxUrl + nonce + action.         // CHANGED:
+                // This keeps the Account screen self-contained (no dependency on window.PPA or ppaAdmin).   // CHANGED:
+                $account_cfg = array(                                                                        // CHANGED:
+                    'ajaxUrl' => admin_url('admin-ajax.php'),                                                 // CHANGED:
+                    'nonce'   => wp_create_nonce('ppa-admin'),                                                // CHANGED:
+                    'action'  => 'ppa_account_status',                                                        // CHANGED:
+                    'site'    => esc_url_raw(home_url('/')),                                                  // CHANGED:
+                    'page'    => $page_param,                                                                 // CHANGED:
+                    'jsVer'   => $admin_account_js_ver,                                                       // CHANGED:
+                );                                                                                            // CHANGED:
+                wp_localize_script('ppa-admin-account', 'PPAAccount', $account_cfg);                           // CHANGED:
+
                 wp_enqueue_script('ppa-admin-account');                                                      // CHANGED:
             }                                                                                                // CHANGED:
             return;                                                                                           // CHANGED:
