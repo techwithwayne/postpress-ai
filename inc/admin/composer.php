@@ -4,8 +4,9 @@
  * Path: inc/admin/composer.php
  *
  * ========= CHANGE LOG =========
- * 2026-01-24 — FIX: Remove invalid HTML comments inside the Word Count <input> tag (was rendering attributes as text). // CHANGED:
- *            — ADD: Word Count defaults wired cleanly (default 800, min 300, max 1200) with user-visible helper.       // CHANGED:
+ * 2026-01-24 — FIX: Make Word Count <input> tag bullet-proof by keeping it as a single, uninterrupted tag line (prevents accidental comment/markup injection that can render attributes as text). // CHANGED:
+ *            — FIX: Remove trailing HTML comment marker from helper line (keep markup clean).                                               // CHANGED:
+ *            — KEEP: Word Count defaults (default 800, min 300, max 1200) with user-visible helper.                                        // CHANGED:
  *
  * 2026-01-22 — UI: Expand Genre + Tone dropdown options (markup only; no CSS changes).                 // CHANGED:
  *            — Copy: Helper note now references Genre + Tone (still one unified block).               // CHANGED:
@@ -170,28 +171,18 @@ $ppa_tone_options = array( // CHANGED:
 				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count (Preview)', 'postpress-ai' ); ?></label>
 
 				<?php
-				// IMPORTANT: Do NOT place HTML comments inside the <input ...> tag. It breaks parsing and prints attributes as text. // CHANGED:
+				// CHANGED: Keep this <input> as one uninterrupted tag line.
+				// Why: the prior breakage pattern was “comment/markup ended up inside the tag”, causing attributes to render as visible text.
+				// Keeping it single-line prevents accidental inline comment insertion between attributes.
 				?>
 
-				<input
-					type="number"
-					id="ppa-word-count"
-					min="300"
-					max="1200"
-					step="50"
-					inputmode="numeric"
-					value="800"
-					placeholder="800"
-					data-default="800"
-					data-min="300"
-					data-max="1200"
-				/>
+				<input type="number" id="ppa-word-count" min="300" max="1200" step="50" inputmode="numeric" value="800" placeholder="800" data-default="800" data-min="300" data-max="1200" /><?php // CHANGED: ?>
 			</div>
 		</div>
 
 		<?php /* One unified helper block spanning under the 3 dropdown/inputs */ ?>
 		<p class="ppa-inline-help ppa-inline-help--span">
-			<?php echo esc_html__( 'Auto chooses the best-fit genre + tone from your subject + audience. Word count default: 800 (minimum: 300, max: 1,200).', 'postpress-ai' ); ?> <!-- CHANGED: -->
+			<?php echo esc_html__( 'Auto chooses the best-fit genre + tone from your subject + audience. Word count default: 800 (minimum: 300, max: 1,200).', 'postpress-ai' ); ?><?php // CHANGED: ?>
 		</p>
 
 		<div class="ppa-form-group">
