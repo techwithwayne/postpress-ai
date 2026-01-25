@@ -3,7 +3,7 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
- * 2026-01-25: FIX: Localize PPAAccount config on Account screen (ajaxUrl + nonce + action + site).           // CHANGED:
+ * 2026-01-25: FIX: Localize Account screen config (window.PPAAccount) so admin-account.js can run.          // CHANGED:
  *
  * 2026-01-21: FIX: Define $page_param safely (prevents Undefined variable warning).                         // CHANGED:
  * 2026-01-21: FIX: Enforce per-screen CSS isolation across ALL PPA pages (Composer/Settings/Account/Test). // CHANGED:
@@ -300,19 +300,23 @@ if (!function_exists('ppa_admin_enqueue')) {
             // Account JS (only on Account)
             if (file_exists($admin_account_js_file)) {                                                       // CHANGED:
                 wp_register_script('ppa-admin-account', $admin_account_js_url, array('jquery'), $admin_account_js_ver, true); // CHANGED:
-
-                // Provide the required runtime config (window.PPAAccount) so admin-account.js can run.      // CHANGED:
-                $account_cfg = array(                                                                         // CHANGED:
-                    'ajaxUrl' => admin_url('admin-ajax.php'),                                                 // CHANGED:
-                    'nonce'   => wp_create_nonce('ppa-admin'),                                                // CHANGED:
-                    'action'  => 'ppa_account_status',                                                        // CHANGED:
-                    'site'    => esc_url_raw(home_url('/')),                                                  // CHANGED:
-                    'page'    => $page_param,                                                                 // CHANGED:
-                    'ver'     => $admin_account_js_ver,                                                       // CHANGED:
-                );                                                                                            // CHANGED:
-                wp_localize_script('ppa-admin-account', 'PPAAccount', $account_cfg);                           // CHANGED:
-
                 wp_enqueue_script('ppa-admin-account');                                                      // CHANGED:
+
+                // Provide the exact config admin-account.js expects.                                         // CHANGED:
+                $site = function_exists('home_url') ? home_url('/') : '';                                    // CHANGED:
+                if (function_exists('set_url_scheme')) {                                                     // CHANGED:
+                    $site = set_url_scheme($site, 'https');                                                  // CHANGED:
+                }                                                                                             // CHANGED:
+
+                $acct_cfg = array(                                                                           // CHANGED:
+                    'ajaxUrl' => admin_url('admin-ajax.php'),                                                // CHANGED:
+                    'nonce'   => wp_create_nonce('ppa-admin'),                                               // CHANGED:
+                    'action'  => 'ppa_account_status',                                                       // CHANGED:
+                    'site'    => esc_url_raw((string) $site),                                                // CHANGED:
+                    'jsVer'   => (string) $admin_account_js_ver,                                             // CHANGED:
+                );                                                                                            // CHANGED:
+
+                wp_localize_script('ppa-admin-account', 'PPAAccount', $acct_cfg);                            // CHANGED:
             }                                                                                                // CHANGED:
             return;                                                                                           // CHANGED:
         }                                                                                                     // CHANGED:
