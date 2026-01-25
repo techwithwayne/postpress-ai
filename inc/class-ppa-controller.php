@@ -7,6 +7,13 @@
  * /wp-content/plugins/postpress-ai/inc/class-ppa-controller.php
  *
  * CHANGE LOG
+ * 2026-01-24 • FIX: License gate now returns HTTP 200 + success:true with Django-shaped ok:false payload so Composer UI doesn't go blank. // CHANGED:
+ *            • HARDEN: Site match ignores scheme + www (host/path fingerprint) to prevent false “not activated” blocks.                    // CHANGED:
+ *
+ * 2026-01-24 • ADD: Enforce site activation state for Composer generation/store actions using persisted options only. // CHANGED:
+ *            Blocks ppa_generate + ppa_store when inactive/unknown with friendly message (no fatals, no secrets).     // CHANGED:
+ *            Allows debug_headers and admin screens to load so user can fix via Settings.                             // CHANGED:
+ *
  * 2026-01-22 • FIX: ajax_store() now creates/updates a LOCAL WordPress post (draft/publish) from Django result,  // CHANGED:
  *            and returns post_id + edit_link + permalink so the Composer can open the saved draft.              // CHANGED:
  *            No contract/CORS/auth changes. Minimal, useful behavior only.                                     // CHANGED:
@@ -96,6 +103,286 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			}
 			return array( 'raw' => $raw, 'json' => $assoc );
 		}
+
+		// -------------------------------
+		// License activation enforcement (persisted options only)
+		// -------------------------------
+
+		private static function norm_site_url( $url ) {                                                                    // CHANGED:
+			$u = trim( (string) $url );                                                                                    // CHANGED:
+			if ( '' === $u ) {                                                                                             // CHANGED:
+				return '';                                                                                                 // CHANGED:
+			}                                                                                                              // CHANGED:
+			$u = esc_url_raw( $u );                                                                                        // CHANGED:
+			return trailingslashit( (string) $u );                                                                         // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function url_fingerprint( $url ) {                                                                 // CHANGED:
+			$u = trim( (string) $url );                                                                                    // CHANGED:
+			if ( '' === $u ) {                                                                                             // CHANGED:
+				return array( 'host' => '', 'path' => '/' );                                                               // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			// Ensure scheme so parsing is stable (prevents false mismatches).                                              // CHANGED:
+			if ( ! preg_match( '#^https?://#i', $u ) && false !== strpos( $u, '.' ) ) {                                    // CHANGED:
+				$u = 'https://' . ltrim( $u, '/' );                                                                        // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			$parsed = function_exists( 'wp_parse_url' ) ? wp_parse_url( $u ) : parse_url( $u );                             // CHANGED:
+			if ( ! is_array( $parsed ) ) {                                                                                 // CHANGED:
+				return array( 'host' => '', 'path' => '/' );                                                               // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			$host = isset( $parsed['host'] ) ? strtolower( (string) $parsed['host'] ) : '';                                // CHANGED:
+			$host = preg_replace( '#^www\.#i', '', $host );                                                                // CHANGED:
+
+			$path = isset( $parsed['path'] ) ? (string) $parsed['path'] : '/';                                             // CHANGED:
+			if ( '' === $path ) {                                                                                          // CHANGED:
+				$path = '/';                                                                                               // CHANGED:
+			}                                                                                                              // CHANGED:
+			$path = '/' . ltrim( $path, '/' );                                                                             // CHANGED:
+			$path = rtrim( $path, '/' ) . '/';                                                                             // CHANGED:
+
+			return array( 'host' => $host, 'path' => $path );                                                              // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function same_site( $a, $b ) {                                                                      // CHANGED:
+			$fa = self::url_fingerprint( $a );                                                                             // CHANGED:
+			$fb = self::url_fingerprint( $b );                                                                             // CHANGED:
+			return ( '' !== $fa['host'] && $fa['host'] === $fb['host'] && $fa['path'] === $fb['path'] );                  // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function current_site_home_slash() {                                                               // CHANGED:
+			$home = function_exists( 'home_url' ) ? (string) home_url( '/' ) : '';                                         // CHANGED:
+			if ( '' === $home && isset( $_SERVER['HTTP_HOST'] ) ) {                                                       // CHANGED:
+				$home = 'https://' . (string) $_SERVER['HTTP_HOST'] . '/';                                                // CHANGED:
+			}                                                                                                              // CHANGED:
+			return self::norm_site_url( $home );                                                                           // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function read_license_state_option() {                                                             // CHANGED:
+			$state = get_option( 'ppa_license_state', null );                                                              // CHANGED:
+			if ( is_array( $state ) ) {                                                                                    // CHANGED:
+				return $state;                                                                                             // CHANGED:
+			}                                                                                                              // CHANGED:
+			if ( is_string( $state ) ) {                                                                                   // CHANGED:
+				$raw = trim( (string) $state );                                                                            // CHANGED:
+				if ( '' === $raw ) {                                                                                       // CHANGED:
+					return null;                                                                                           // CHANGED:
+				}                                                                                                          // CHANGED:
+				$decoded = json_decode( $raw, true );                                                                      // CHANGED:
+				if ( JSON_ERROR_NONE === json_last_error() && is_array( $decoded ) ) {                                     // CHANGED:
+					return $decoded;                                                                                       // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+			return null;                                                                                                   // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function extract_status_from_state( $st ) {                                                        // CHANGED:
+			if ( ! is_array( $st ) ) {                                                                                     // CHANGED:
+				return '';                                                                                                 // CHANGED:
+			}                                                                                                              // CHANGED:
+			// Common shapes: {status}, {license:{status}}, {result:{status}}, {data:{status}}                              // CHANGED:
+			$paths = array(
+				array( 'status' ),
+				array( 'license', 'status' ),
+				array( 'result', 'status' ),
+				array( 'data', 'status' ),
+			);                                                                                                             // CHANGED:
+			foreach ( $paths as $p ) {                                                                                     // CHANGED:
+				$cur = $st;                                                                                                // CHANGED:
+				$ok  = true;                                                                                               // CHANGED:
+				foreach ( $p as $k ) {                                                                                     // CHANGED:
+					if ( is_array( $cur ) && array_key_exists( $k, $cur ) ) {                                               // CHANGED:
+						$cur = $cur[ $k ];                                                                                 // CHANGED:
+					} else {                                                                                                // CHANGED:
+						$ok = false;                                                                                       // CHANGED:
+						break;                                                                                             // CHANGED:
+					}                                                                                                      // CHANGED:
+				}                                                                                                          // CHANGED:
+				if ( $ok && is_string( $cur ) ) {                                                                          // CHANGED:
+					return strtolower( trim( (string) $cur ) );                                                            // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+			return '';                                                                                                     // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function extract_site_candidates_from_state( $st ) {                                               // CHANGED:
+			$candidates = array();                                                                                         // CHANGED:
+			if ( ! is_array( $st ) ) {                                                                                     // CHANGED:
+				return $candidates;                                                                                        // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			$direct_keys = array( 'active_site', 'activated_site', 'site', 'site_url', 'activation_site', 'activated_on' ); // CHANGED:
+			foreach ( $direct_keys as $k ) {                                                                               // CHANGED:
+				if ( isset( $st[ $k ] ) && is_string( $st[ $k ] ) ) {                                                      // CHANGED:
+					$candidates[] = (string) $st[ $k ];                                                                    // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			if ( isset( $st['activation'] ) && is_array( $st['activation'] ) && ! empty( $st['activation']['site_url'] ) ) { // CHANGED:
+				$candidates[] = (string) $st['activation']['site_url'];                                                    // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			if ( isset( $st['sites'] ) && is_array( $st['sites'] ) ) {                                                     // CHANGED:
+				foreach ( $st['sites'] as $row ) {                                                                         // CHANGED:
+					if ( is_string( $row ) ) {                                                                             // CHANGED:
+						$candidates[] = (string) $row;                                                                     // CHANGED:
+					} elseif ( is_array( $row ) ) {                                                                        // CHANGED:
+						if ( ! empty( $row['site_url'] ) && is_string( $row['site_url'] ) ) {                              // CHANGED:
+							$candidates[] = (string) $row['site_url'];                                                     // CHANGED:
+						} elseif ( ! empty( $row['site'] ) && is_string( $row['site'] ) ) {                                // CHANGED:
+							$candidates[] = (string) $row['site'];                                                         // CHANGED:
+						}                                                                                                  // CHANGED:
+					}                                                                                                      // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			if ( isset( $st['license'] ) && is_array( $st['license'] ) && isset( $st['license']['sites'] ) && is_array( $st['license']['sites'] ) ) { // CHANGED:
+				foreach ( $st['license']['sites'] as $row ) {                                                              // CHANGED:
+					if ( is_string( $row ) ) {                                                                             // CHANGED:
+						$candidates[] = (string) $row;                                                                     // CHANGED:
+					} elseif ( is_array( $row ) ) {                                                                        // CHANGED:
+						if ( ! empty( $row['site_url'] ) && is_string( $row['site_url'] ) ) {                              // CHANGED:
+							$candidates[] = (string) $row['site_url'];                                                     // CHANGED:
+						}                                                                                                  // CHANGED:
+					}                                                                                                      // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			$out = array();                                                                                                // CHANGED:
+			foreach ( $candidates as $c ) {                                                                                // CHANGED:
+				$n = self::norm_site_url( $c );                                                                            // CHANGED:
+				if ( '' !== $n ) {                                                                                         // CHANGED:
+					$out[ $n ] = true;                                                                                     // CHANGED:
+				}                                                                                                          // CHANGED:
+			}                                                                                                              // CHANGED:
+			return array_keys( $out );                                                                                     // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		/**
+		 * Returns array:
+		 * - state: active|inactive|unknown
+		 * - reason: short machine reason
+		 * - message: friendly message safe for UI
+		 */
+		private static function activation_decision() {                                                                   // CHANGED:
+			$home = self::current_site_home_slash();                                                                       // CHANGED:
+
+			$opt_active = self::norm_site_url( (string) get_option( 'ppa_license_active_site', '' ) );                      // CHANGED:
+			if ( '' !== $opt_active ) {                                                                                   // CHANGED:
+				if ( self::same_site( $home, $opt_active ) ) {                                                            // CHANGED:
+					return array(
+						'state'   => 'active',
+						'reason'  => 'active_site_option_match',
+						'message' => 'License is activated for this site.',
+					);                                                                                                     // CHANGED:
+				}
+				return array(
+					'state'   => 'inactive',
+					'reason'  => 'active_site_option_mismatch',
+					'message' => 'This license is activated on a different site. Go to PostPress AI → Settings and click Activate for this site.',
+				);                                                                                                         // CHANGED:
+			}
+
+			$st = self::read_license_state_option();                                                                       // CHANGED:
+			if ( ! is_array( $st ) ) {                                                                                     // CHANGED:
+				return array(
+					'state'   => 'unknown',
+					'reason'  => 'license_state_missing',
+					'message' => 'License status is unknown on this site. Go to PostPress AI → Settings and click Check License.',
+				);                                                                                                         // CHANGED:
+			}
+
+			if ( isset( $st['type'], $st['code'] ) && 'activation' === (string) $st['type'] && 'not_activated' === (string) $st['code'] ) { // CHANGED:
+				return array(
+					'state'   => 'inactive',
+					'reason'  => 'state_reports_not_activated',
+					'message' => 'This site is not activated for this license. Go to PostPress AI → Settings and click Activate.',
+				);                                                                                                         // CHANGED:
+			}
+
+			$status = self::extract_status_from_state( $st );                                                              // CHANGED:
+			if ( '' !== $status && 'active' !== $status ) {                                                                // CHANGED:
+				return array(
+					'state'   => 'inactive',
+					'reason'  => 'license_not_active',
+					'message' => 'Your license is not active. Go to PostPress AI → Settings and click Check License.',
+				);                                                                                                         // CHANGED:
+			}
+
+			$cands = self::extract_site_candidates_from_state( $st );                                                      // CHANGED:
+			if ( 'active' === $status ) {                                                                                  // CHANGED:
+				if ( ! empty( $cands ) ) {                                                                                 // CHANGED:
+					foreach ( $cands as $c ) {                                                                             // CHANGED:
+						if ( self::same_site( $home, $c ) ) {                                                              // CHANGED:
+							return array(
+								'state'   => 'active',
+								'reason'  => 'license_state_site_match',
+								'message' => 'License is activated for this site.',
+							);                                                                                             // CHANGED:
+						}                                                                                                  // CHANGED:
+					}                                                                                                      // CHANGED:
+					return array(
+						'state'   => 'inactive',
+						'reason'  => 'license_state_site_mismatch',
+						'message' => 'This site is not activated for this license. Go to PostPress AI → Settings and click Activate.',
+					);                                                                                                     // CHANGED:
+				}
+
+				return array(
+					'state'   => 'unknown',
+					'reason'  => 'active_without_site_binding',
+					'message' => 'License looks active, but activation for this site is not confirmed. Go to PostPress AI → Settings and click Check License.',
+				);                                                                                                         // CHANGED:
+			}
+
+			return array(
+				'state'   => 'unknown',
+				'reason'  => 'status_missing',
+				'message' => 'License status is unknown on this site. Go to PostPress AI → Settings and click Check License.',
+			);                                                                                                             // CHANGED:
+		}                                                                                                                  // CHANGED:
+
+		private static function enforce_activation_or_block( $purpose ) {                                                  // CHANGED:
+			$decision = self::activation_decision();                                                                       // CHANGED:
+			if ( ! is_array( $decision ) ) {                                                                               // CHANGED:
+				$decision = array(
+					'state'   => 'unknown',
+					'reason'  => 'decision_invalid',
+					'message' => 'License status is unknown. Please click Check License in Settings.',
+				);                                                                                                         // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			if ( isset( $decision['state'] ) && 'active' === (string) $decision['state'] ) {                               // CHANGED:
+				return;                                                                                                    // CHANGED:
+			}                                                                                                              // CHANGED:
+
+			$state  = isset( $decision['state'] ) ? (string) $decision['state'] : 'unknown';                               // CHANGED:
+			$reason = isset( $decision['reason'] ) ? (string) $decision['reason'] : 'unknown';                             // CHANGED:
+			$msg    = isset( $decision['message'] ) ? (string) $decision['message'] : 'License status is unknown. Please click Check License in Settings.'; // CHANGED:
+
+			// Log only blocks/failures. No secrets.                                                                        // CHANGED:
+			error_log( 'PPA: license gate blocked purpose=' . (string) $purpose . ' state=' . $state . ' reason=' . $reason ); // CHANGED:
+
+			// CRITICAL: return 200 + success:true so Composer UI doesn't go blank.                                         // CHANGED:
+			// Shape matches Django activation error style: {ok:false,type:"activation",code:"not_activated"/"unknown",message:"..."} // CHANGED:
+			$payload = array(                                                                                              // CHANGED:
+				'ok'      => false,                                                                                        // CHANGED:
+				'type'    => 'activation',                                                                                // CHANGED:
+				'code'    => ( 'inactive' === $state ) ? 'not_activated' : 'unknown',                                      // CHANGED:
+				'message' => $msg,                                                                                         // CHANGED:
+				'meta'    => array(                                                                                        // CHANGED:
+					'source'   => 'wp_proxy',                                                                              // CHANGED:
+					'endpoint' => self::$endpoint,                                                                         // CHANGED:
+					'gate'     => 'activation_required',                                                                   // CHANGED:
+					'state'    => $state,                                                                                  // CHANGED:
+					'reason'   => $reason,                                                                                 // CHANGED:
+				),
+			);
+
+			wp_send_json_success( $payload, 200 );                                                                          // CHANGED:
+		}                                                                                                                  // CHANGED:
 
 		// -------------------------------
 		// Django base URL (safe)
@@ -439,6 +726,8 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			self::must_post();
 			self::verify_nonce_or_forbid();
 
+			// NOTE: preview endpoint not currently used by Composer (Composer uses ppa_generate), so we do not gate here.   // CHANGED:
+
 			$payload = self::read_json_body();
 			$base    = self::django_base();
 
@@ -476,6 +765,8 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			}
 			self::must_post();
 			self::verify_nonce_or_forbid();
+
+			self::enforce_activation_or_block( 'store' );                                                                  // CHANGED:
 
 			$payload = self::read_json_body();
 			$base    = self::django_base();
@@ -541,6 +832,8 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			self::must_post();
 			self::verify_nonce_or_forbid();
 
+			self::enforce_activation_or_block( 'generate' );                                                               // CHANGED:
+
 			$payload = self::read_json_body();
 			$base    = self::django_base();
 
@@ -578,6 +871,8 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 
 			self::must_post();
 			self::verify_nonce_or_forbid();
+
+			// Debug endpoint must remain accessible even when not activated (helps support + connectivity checks).          // CHANGED:
 
 			$payload = self::read_json_body();
 			$base    = self::django_base();
