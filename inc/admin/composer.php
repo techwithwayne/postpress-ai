@@ -4,6 +4,9 @@
  * Path: inc/admin/composer.php
  *
  * ========= CHANGE LOG =========
+ * 2026-01-24 — FIX: Remove invalid HTML comments inside the Word Count <input> tag (was rendering attributes as text). // CHANGED:
+ *            — ADD: Word Count defaults wired cleanly (default 800, min 300, max 1200) with user-visible helper.       // CHANGED:
+ *
  * 2026-01-22 — UI: Expand Genre + Tone dropdown options (markup only; no CSS changes).                 // CHANGED:
  *            — Copy: Helper note now references Genre + Tone (still one unified block).               // CHANGED:
  *
@@ -52,56 +55,56 @@ if ( function_exists( 'set_url_scheme' ) ) { // CHANGED:
 // CHANGED: Centralized option lists (markup-only; does NOT affect CSS).
 // Values are stable machine slugs; labels are translated display strings. // CHANGED:
 $ppa_genre_options = array( // CHANGED:
-	''             => __( 'Auto', 'postpress-ai' ), // CHANGED:
-	'howto'        => __( 'How-to', 'postpress-ai' ), // CHANGED:
-	'listicle'     => __( 'Listicle', 'postpress-ai' ), // CHANGED:
-	'news'         => __( 'News', 'postpress-ai' ), // CHANGED:
-	'review'       => __( 'Review', 'postpress-ai' ), // CHANGED:
-	'background'   => __( 'Background', 'postpress-ai' ), // CHANGED:
-	'opinion'      => __( 'Opinion', 'postpress-ai' ), // CHANGED:
-	'comparison'   => __( 'Comparison', 'postpress-ai' ), // CHANGED:
-	'case_study'   => __( 'Case Study', 'postpress-ai' ), // CHANGED:
-	'faq'          => __( 'FAQ', 'postpress-ai' ), // CHANGED:
-	'tutorial'     => __( 'Tutorial', 'postpress-ai' ), // CHANGED:
-	'guide'        => __( 'Guide', 'postpress-ai' ), // CHANGED:
-	'checklist'    => __( 'Checklist', 'postpress-ai' ), // CHANGED:
-	'troubleshoot' => __( 'Troubleshooting', 'postpress-ai' ), // CHANGED:
-	'announcement' => __( 'Announcement', 'postpress-ai' ), // CHANGED:
+	''               => __( 'Auto', 'postpress-ai' ), // CHANGED:
+	'howto'          => __( 'How-to', 'postpress-ai' ), // CHANGED:
+	'listicle'       => __( 'Listicle', 'postpress-ai' ), // CHANGED:
+	'news'           => __( 'News', 'postpress-ai' ), // CHANGED:
+	'review'         => __( 'Review', 'postpress-ai' ), // CHANGED:
+	'background'     => __( 'Background', 'postpress-ai' ), // CHANGED:
+	'opinion'        => __( 'Opinion', 'postpress-ai' ), // CHANGED:
+	'comparison'     => __( 'Comparison', 'postpress-ai' ), // CHANGED:
+	'case_study'     => __( 'Case Study', 'postpress-ai' ), // CHANGED:
+	'faq'            => __( 'FAQ', 'postpress-ai' ), // CHANGED:
+	'tutorial'       => __( 'Tutorial', 'postpress-ai' ), // CHANGED:
+	'guide'          => __( 'Guide', 'postpress-ai' ), // CHANGED:
+	'checklist'      => __( 'Checklist', 'postpress-ai' ), // CHANGED:
+	'troubleshoot'   => __( 'Troubleshooting', 'postpress-ai' ), // CHANGED:
+	'announcement'   => __( 'Announcement', 'postpress-ai' ), // CHANGED:
 	'product_update' => __( 'Product Update', 'postpress-ai' ), // CHANGED:
-	'newsletter'   => __( 'Email Newsletter', 'postpress-ai' ), // CHANGED:
-	'landing_page' => __( 'Landing Page Copy', 'postpress-ai' ), // CHANGED:
-	'social_post'  => __( 'Social Post', 'postpress-ai' ), // CHANGED:
-	'video_script' => __( 'Video Script', 'postpress-ai' ), // CHANGED:
-	'podcast_outline' => __( 'Podcast Outline', 'postpress-ai' ), // CHANGED:
+	'newsletter'     => __( 'Email Newsletter', 'postpress-ai' ), // CHANGED:
+	'landing_page'   => __( 'Landing Page Copy', 'postpress-ai' ), // CHANGED:
+	'social_post'    => __( 'Social Post', 'postpress-ai' ), // CHANGED:
+	'video_script'   => __( 'Video Script', 'postpress-ai' ), // CHANGED:
+	'podcast_outline'=> __( 'Podcast Outline', 'postpress-ai' ), // CHANGED:
 ); // CHANGED:
 
 $ppa_tone_options = array( // CHANGED:
-	''              => __( 'Auto', 'postpress-ai' ), // CHANGED:
-	'casual'        => __( 'Casual', 'postpress-ai' ), // CHANGED:
-	'friendly'      => __( 'Friendly', 'postpress-ai' ), // CHANGED:
-	'professional'  => __( 'Professional', 'postpress-ai' ), // CHANGED:
-	'technical'     => __( 'Technical', 'postpress-ai' ), // CHANGED:
-	'confident'     => __( 'Confident', 'postpress-ai' ), // CHANGED:
-	'calm'          => __( 'Calm', 'postpress-ai' ), // CHANGED:
-	'clear'         => __( 'Clear', 'postpress-ai' ), // CHANGED:
-	'direct'        => __( 'Direct', 'postpress-ai' ), // CHANGED:
-	'conversational'=> __( 'Conversational', 'postpress-ai' ), // CHANGED:
-	'helpful'       => __( 'Helpful', 'postpress-ai' ), // CHANGED:
-	'empathetic'    => __( 'Empathetic', 'postpress-ai' ), // CHANGED:
-	'encouraging'   => __( 'Encouraging', 'postpress-ai' ), // CHANGED:
-	'authoritative' => __( 'Authoritative', 'postpress-ai' ), // CHANGED:
-	'educational'   => __( 'Educational', 'postpress-ai' ), // CHANGED:
-	'persuasive'    => __( 'Persuasive', 'postpress-ai' ), // CHANGED:
-	'storytelling'  => __( 'Storytelling', 'postpress-ai' ), // CHANGED:
-	'inspirational' => __( 'Inspirational', 'postpress-ai' ), // CHANGED:
-	'humorous'      => __( 'Humorous', 'postpress-ai' ), // CHANGED:
-	'urgent'        => __( 'Urgent', 'postpress-ai' ), // CHANGED:
-	'cautious'      => __( 'Cautious', 'postpress-ai' ), // CHANGED:
-	'luxury'        => __( 'Luxury', 'postpress-ai' ), // CHANGED:
-	'minimal'       => __( 'Minimal', 'postpress-ai' ), // CHANGED:
-	'bold'          => __( 'Bold', 'postpress-ai' ), // CHANGED:
-	'warm'          => __( 'Warm', 'postpress-ai' ), // CHANGED:
-	'neutral'       => __( 'Neutral', 'postpress-ai' ), // CHANGED:
+	''               => __( 'Auto', 'postpress-ai' ), // CHANGED:
+	'casual'         => __( 'Casual', 'postpress-ai' ), // CHANGED:
+	'friendly'       => __( 'Friendly', 'postpress-ai' ), // CHANGED:
+	'professional'   => __( 'Professional', 'postpress-ai' ), // CHANGED:
+	'technical'      => __( 'Technical', 'postpress-ai' ), // CHANGED:
+	'confident'      => __( 'Confident', 'postpress-ai' ), // CHANGED:
+	'calm'           => __( 'Calm', 'postpress-ai' ), // CHANGED:
+	'clear'          => __( 'Clear', 'postpress-ai' ), // CHANGED:
+	'direct'         => __( 'Direct', 'postpress-ai' ), // CHANGED:
+	'conversational' => __( 'Conversational', 'postpress-ai' ), // CHANGED:
+	'helpful'        => __( 'Helpful', 'postpress-ai' ), // CHANGED:
+	'empathetic'     => __( 'Empathetic', 'postpress-ai' ), // CHANGED:
+	'encouraging'    => __( 'Encouraging', 'postpress-ai' ), // CHANGED:
+	'authoritative'  => __( 'Authoritative', 'postpress-ai' ), // CHANGED:
+	'educational'    => __( 'Educational', 'postpress-ai' ), // CHANGED:
+	'persuasive'     => __( 'Persuasive', 'postpress-ai' ), // CHANGED:
+	'storytelling'   => __( 'Storytelling', 'postpress-ai' ), // CHANGED:
+	'inspirational'  => __( 'Inspirational', 'postpress-ai' ), // CHANGED:
+	'humorous'       => __( 'Humorous', 'postpress-ai' ), // CHANGED:
+	'urgent'         => __( 'Urgent', 'postpress-ai' ), // CHANGED:
+	'cautious'       => __( 'Cautious', 'postpress-ai' ), // CHANGED:
+	'luxury'         => __( 'Luxury', 'postpress-ai' ), // CHANGED:
+	'minimal'        => __( 'Minimal', 'postpress-ai' ), // CHANGED:
+	'bold'           => __( 'Bold', 'postpress-ai' ), // CHANGED:
+	'warm'           => __( 'Warm', 'postpress-ai' ), // CHANGED:
+	'neutral'        => __( 'Neutral', 'postpress-ai' ), // CHANGED:
 ); // CHANGED:
 
 ?>
@@ -148,30 +151,47 @@ $ppa_tone_options = array( // CHANGED:
 			<div class="ppa-form-group">
 				<label for="ppa-genre"><?php echo esc_html__( 'Genre', 'postpress-ai' ); ?></label>
 				<select id="ppa-genre">
-					<?php foreach ( $ppa_genre_options as $val => $label ) : ?> <!-- CHANGED: -->
-						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option> <!-- CHANGED: -->
-					<?php endforeach; ?> <!-- CHANGED: -->
+					<?php foreach ( $ppa_genre_options as $val => $label ) : ?>
+						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
 				</select>
 			</div>
 
 			<div class="ppa-form-group">
 				<label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
 				<select id="ppa-tone">
-					<?php foreach ( $ppa_tone_options as $val => $label ) : ?> <!-- CHANGED: -->
-						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option> <!-- CHANGED: -->
-					<?php endforeach; ?> <!-- CHANGED: -->
+					<?php foreach ( $ppa_tone_options as $val => $label ) : ?>
+						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
 				</select>
 			</div>
 
 			<div class="ppa-form-group">
-				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count', 'postpress-ai' ); ?></label>
-				<input type="number" id="ppa-word-count" min="300" step="100" placeholder="<?php echo esc_attr__( 'e.g. 1200', 'postpress-ai' ); ?>">
+				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count (Preview)', 'postpress-ai' ); ?></label>
+
+				<?php
+				// IMPORTANT: Do NOT place HTML comments inside the <input ...> tag. It breaks parsing and prints attributes as text. // CHANGED:
+				?>
+
+				<input
+					type="number"
+					id="ppa-word-count"
+					min="300"
+					max="1200"
+					step="50"
+					inputmode="numeric"
+					value="800"
+					placeholder="800"
+					data-default="800"
+					data-min="300"
+					data-max="1200"
+				/>
 			</div>
 		</div>
 
 		<?php /* One unified helper block spanning under the 3 dropdown/inputs */ ?>
 		<p class="ppa-inline-help ppa-inline-help--span">
-			<?php echo esc_html__( 'Auto sends "auto" so PostPress AI chooses a best-fit genre and tone based on your subject + audience.', 'postpress-ai' ); ?> <!-- CHANGED: -->
+			<?php echo esc_html__( 'Auto chooses the best-fit genre + tone from your subject + audience. Word count default: 800 (minimum: 300, max: 1,200).', 'postpress-ai' ); ?> <!-- CHANGED: -->
 		</p>
 
 		<div class="ppa-form-group">
@@ -230,40 +250,40 @@ $ppa_tone_options = array( // CHANGED:
 	</div>
 
 	<div class="ppa-preview-panel" aria-label="<?php echo esc_attr__( 'Preview panel', 'postpress-ai' ); ?>">
-                <div class="ppa-preview-header">
-        <h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
+		<div class="ppa-preview-header">
+			<h1><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></h1>
 
-        <!-- Header tools (NEW layout): language inline, LEFT of outline -->
-        <div class="ppa-preview-tools" style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <!-- Output Language (NEW) -->
-                <label class="ppa-output-language" for="ppa-output-language" style="display:inline-flex;align-items:center;gap:8px;">
-                        <span style="font-size:12px;opacity:.9;">
-                                <?php echo esc_html__( 'Language', 'postpress-ai' ); ?>
-                        </span>
+			<!-- Header tools (NEW layout): language inline, LEFT of outline -->
+			<div class="ppa-preview-tools" style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;">
+				<!-- Output Language (NEW) -->
+				<label class="ppa-output-language" for="ppa-output-language" style="display:inline-flex;align-items:center;gap:8px;">
+					<span style="font-size:12px;opacity:.9;">
+						<?php echo esc_html__( 'Language', 'postpress-ai' ); ?>
+					</span>
 
-                        <select id="ppa-output-language" name="ppa_output_language" disabled
-                                style="width:170px;max-width:170px;">
-                                <option value="original" selected><?php echo esc_html__( 'Original', 'postpress-ai' ); ?></option>
-                                <!-- Options populated by assets/js/admin.js in Step 2 -->
-                        </select>
-                </label>
+					<select id="ppa-output-language" name="ppa_output_language" disabled
+							style="width:170px;max-width:170px;">
+						<option value="original" selected><?php echo esc_html__( 'Original', 'postpress-ai' ); ?></option>
+						<!-- Options populated by assets/js/admin.js in Step 2 -->
+					</select>
+				</label>
 
-                <label class="ppa-outline-toggle" for="ppa-show-outline" style="display:inline-flex;align-items:center;gap:8px;">
-                        <input type="checkbox" id="ppa-show-outline" />
-                        <span><?php echo esc_html__( 'Show Outline', 'postpress-ai' ); ?></span>
-                </label>
-        </div>
+				<label class="ppa-outline-toggle" for="ppa-show-outline" style="display:inline-flex;align-items:center;gap:8px;">
+					<input type="checkbox" id="ppa-show-outline" />
+					<span><?php echo esc_html__( 'Show Outline', 'postpress-ai' ); ?></span>
+				</label>
+			</div>
 
-        <!-- Helper text stays, but does NOT steal header width -->
-        <span id="ppa-output-language-help" class="ppa-output-language-help"
-              style="display:block;width:100%;margin-top:6px;opacity:.8;font-size:12px;">
-                <?php echo esc_html__( 'Generate Preview first.', 'postpress-ai' ); ?>
-        </span>
-</div>
+			<!-- Helper text stays, but does NOT steal header width -->
+			<span id="ppa-output-language-help" class="ppa-output-language-help"
+				  style="display:block;width:100%;margin-top:6px;opacity:.8;font-size:12px;">
+				<?php echo esc_html__( 'Generate Preview first.', 'postpress-ai' ); ?>
+			</span>
+		</div>
 
-                <div id="ppa-preview-pane" aria-live="polite">
-                        <em><?php echo esc_html__( '(Preview will appear here once generated.)', 'postpress-ai' ); ?></em>
-                </div>
-        </div>
+		<div id="ppa-preview-pane" aria-live="polite">
+			<em><?php echo esc_html__( '(Preview will appear here once generated.)', 'postpress-ai' ); ?></em>
+		</div>
+	</div>
 
 </div>
