@@ -71,7 +71,31 @@ add_filter( 'ppa_django_base_url', function( $base ) {                          
 		return '';                                                                                  // CHANGED:
 	}                                                                                               // CHANGED:
 	return rtrim( trim( (string) $base ), '/' );                                                    // CHANGED:
-}, 10, 1 );                                                                                         // CHANGED:
+}, 10, 1 );
+
+/** ---------------------------------------------------------------------------------
+ * Core AJAX Controller (Preview/Generate/Store/Account)
+ * --------------------------------------------------------------------------------
+ * IMPORTANT:
+ * - Registers wp_ajax_* hooks (including ppa_account_status).
+ * - Guarded so it runs exactly once (prevents duplicate hooks).
+ */
+add_action( 'plugins_loaded', function () {
+        static $did = false;
+        if ( $did ) { return; }
+        $did = true;
+
+        $path = PPA_PLUGIN_DIR . 'inc/class-ppa-controller.php';
+        if ( file_exists( $path ) ) {
+                require_once $path;
+        }
+
+        if ( class_exists( 'PPA_Controller' ) && is_callable( array( 'PPA_Controller', 'init' ) ) ) {
+                PPA_Controller::init();
+        }
+}, 20 );
+
+                                                                                         // CHANGED:
 
 /** ---------------------------------------------------------------------------------
  * Per-user default output language (customer-safe, no WP options required)
