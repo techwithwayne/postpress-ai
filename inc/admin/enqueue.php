@@ -3,6 +3,8 @@
  * PostPress AI — Admin Enqueue
  *
  * ========= CHANGE LOG =========
+ * 2026-01-27: FIX: Enqueue WP Media Library (wp.media) on Composer screen only (enables Featured Image picker). // CHANGED:
+ *
  * 2026-01-25: FIX: Localize Account screen config (window.PPAAccount) so admin-account.js can run.          // CHANGED:
  *
  * 2026-01-21: FIX: Define $page_param safely (prevents Undefined variable warning).                         // CHANGED:
@@ -334,6 +336,11 @@ if (!function_exists('ppa_admin_enqueue')) {
             // Composer MUST use gospel CSS file ONLY.
             wp_register_style('ppa-admin-composer-css', $admin_composer_css_url, array(), $admin_composer_css_ver, 'all'); // CHANGED:
             wp_enqueue_style('ppa-admin-composer-css');                                                      // CHANGED:
+
+            // CHANGED: Featured Image picker uses wp.media. This must be enqueued or wp.media will be undefined.
+            // IMPORTANT: Composer screen only (keeps per-screen isolation intact).
+            wp_enqueue_media();                                                                              // CHANGED:
+
             // Continue into JS stack below
         }                                                                                                     // CHANGED:
 
