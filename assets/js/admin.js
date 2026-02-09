@@ -1,33 +1,19 @@
-// /home/u3007-tenkoaygp3je/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/js/admin.js
+/* global window, document, jQuery */
 /**
  * PostPress AI — Admin JS
  * Path: assets/js/admin.js
  *
  * ========= CHANGE LOG =========
- * 2025-11-09.1: Fix optional-chaining + .trim() bug on preview probe; bump JS ver.           // CHANGED:
- * 2025-11-08.5: Fix ajax URL key to match enqueue (window.PPA.ajaxUrl); keep legacy fallback.
- * 2025-11-08.4: Align with window.PPA config + publish link parity.
- *   - Read ajax/nonce from window.PPA (fallbacks kept).
- *   - Send both X-PPA-Nonce and X-WP-Nonce if nonce present.
- *   - Publish success mirrors Draft: render View/Edit links when available.
- *   - pickViewLink() also considers data.link and data.result.link.
- * 2025-11-08.3: Robust save path:
- *   - Nonce fallback: data-ppa-nonce → ppaAdmin.nonce → #ppa-nonce.
- *   - Empty-content fix: use Preview pane HTML when editor is blank; auto-fill.
- *   - Early guard on empty submit (no title, no content, no preview HTML).
- *   - Wrap-aware fields: pickId()/pickEditLink() read data.* and data.result.*.
- * 2025-11-08: Add "View Draft" link (prefer view/permalink; fallback to edit; both when present).
- * 2025-11-06: Add "Edit Draft" link to success notice.
- * 2025-11-05: UX polish + resilience
- * 2025-11-03: Auto-fill (Title/Excerpt/Slug) after Preview.
- * 2025-10-30: “Save to Draft” wiring.
- * 2025-10-19: Provider tracing; async guards & notices.
+ * 2025-12-25.2: FIX ppa_store 400: send JSON-body transport for ppa_store (same as ppa_generate) so PHP proxy reads valid JSON from php://input and forwards object-root to Django. This resolves Django “Root must be an object” and unblocks Save Draft redirects. // CHANGED:
+ * 2025-12-25.1: FIX Save Draft (Store): ensure local WP draft is created by sending status + target_sites in store payload; redirect to edit_link (or fallback edit URL) after successful store. Also fix status dropdown incorrectly overwriting payload.mode; improve edit_link/id extraction from nested response shapes. // CHANGED:
+ * 2025-12-22.1: Preview outline cleanup… // CHANGED:
+ * 2025-12-27.1: FIX nonce lookup order: prefer window.PPA.nonce first for admin AJAX (ppa_usage_snapshot, etc.). No other behavior changes. // CHANGED:
  */
 
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2025-11-09.1'; // CHANGED
+  var PPA_JS_VER = 'admin.v2025-12-25.2'; // CHANGED:
 
   // Abort if composer root is missing (defensive)
   var root = document.getElementById('ppa-composer');
@@ -39,15 +25,32 @@
   // Ensure toolbar message acts as a live region (A11y)
   (function ensureLiveRegion(){
     var msg = document.getElementById('ppa-toolbar-msg');
-    if (msg) {
-      if (!msg.getAttribute('role')) msg.setAttribute('role', 'status');
-      if (!msg.getAttribute('aria-live')) msg.setAttribute('aria-live', 'polite');
-    }
+    if (!msg) return;
+    try {
+      msg.setAttribute('role', 'status');
+      msg.setAttribute('aria-live', 'polite');
+      msg.setAttribute('aria-atomic', 'true');
+    } catch (e) {}
   })();
 
-  // Make preview pane focusable for screen readers
+  // ---- Preview Pane Resolver (Composer) ------------------------------------
+  var __ppaPreviewPane = null;
+
+  function getPreviewPane() {
+    if (__ppaPreviewPane && __ppaPreviewPane.nodeType === 1) return __ppaPreviewPane;
+    var pane = null;
+    try { pane = root.querySelector('#ppa-preview-pane'); } catch (e) { pane = null; }
+    if (!pane) pane = document.getElementById('ppa-preview-pane');
+    if (!pane) {
+      try { pane = root.querySelector('[data-ppa-preview-pane]') || root.querySelector('.ppa-preview-pane'); }
+      catch (e2) { pane = null; }
+    }
+    __ppaPreviewPane = pane || null;
+    return __ppaPreviewPane;
+  }
+
   (function ensurePreviewPaneFocusable(){
-    var pane = document.getElementById('ppa-preview-pane');
+    var pane = getPreviewPane();
     if (pane && !pane.hasAttribute('tabindex')) pane.setAttribute('tabindex', '-1');
   })();
 
@@ -56,160 +59,295 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel) || []); }
 
-  function getAjaxUrl() {                                                     // CHANGED (kept)
-    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;          // primary (matches enqueue)
-    if (window.PPA && window.PPA.ajax) return window.PPA.ajax;                // legacy support
+  function getAjaxUrl() {
+    if (window.PPA && window.PPA.ajaxUrl) return window.PPA.ajaxUrl;
+    if (window.PPA && window.PPA.ajax) return window.PPA.ajax; // legacy
     if (window.ppaAdmin && window.ppaAdmin.ajaxurl) return window.ppaAdmin.ajaxurl;
     if (window.ajaxurl) return window.ajaxurl;
     return '/wp-admin/admin-ajax.php';
   }
 
-  // Expanded nonce fallback: data-attr → PPA.nonce → ppaAdmin.nonce → #ppa-nonce
   function getNonce() {
-    var r = document.getElementById('ppa-composer');
-    if (r) {
-      var dn = r.getAttribute('data-ppa-nonce');
-      if (dn) return String(dn).trim();
-    }
-    if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce).trim();
-    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce).trim();
+    // NEW ORDER (LOCKED): window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
+    if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce); // CHANGED:
+    if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce); // CHANGED:
     var el = $('#ppa-nonce');
-    if (el) return String(el.value || '').trim();
+    if (el && el.value) return String(el.value);
+    var data = $('[data-ppa-nonce]');
+    if (data) return String(data.getAttribute('data-ppa-nonce') || '');
     return '';
   }
 
-  function jsonTryParse(text) {
-    try { return JSON.parse(text); } catch (e) {
-      console.info('PPA: JSON parse failed, returning raw text');
-      return { raw: String(text || '') };
+  function toFormBody(obj) {
+    var parts = [];
+    Object.keys(obj || {}).forEach(function (k) {
+      parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(obj[k] == null ? '' : obj[k])));
+    });
+    return parts.join('&');
+  }
+
+  function normalizePayloadObject(payload) {
+    if (payload === undefined || payload === null) return {};
+    if (typeof payload === 'string') {
+      var s = String(payload || '').trim();
+      if (!s) return {};
+      try {
+        var parsed = JSON.parse(s);
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch (e2) {}
+        }
+        if (parsed && typeof parsed === 'object') return parsed;
+        return { value: parsed };
+      } catch (e1) {
+        return { raw: s };
+      }
     }
+    if (typeof payload !== 'object') return { value: payload };
+    return payload;
   }
 
-  function setPreview(html) {
-    var pane = $('#ppa-preview-pane');
-    if (!pane) return;
-    pane.innerHTML = html;
-    try { pane.focus(); } catch (e) {}
-  }
+  function apiPost(action, payload) {
+    var ajaxUrl = getAjaxUrl();
+    var payloadObj = normalizePayloadObject(payload);
 
-  // Extract `provider` from an HTML comment like: <!-- provider: local-fallback -->
-  function extractProviderFromHtml(html) {
-    if (typeof html !== 'string') return '';
-    var m = html.match(/<!--\s*provider:\s*([a-z0-9._-]+)\s*-->/i);
-    return m ? m[1] : '';
-  }
+    // Transport rules (critical):
+    // - ppa_generate MUST be JSON body (proven fix).
+    // - ppa_store MUST ALSO be JSON body because PHP proxy reads php://input expecting JSON,
+    //   and forwards that raw string to Django. Form-encoded breaks Django object-root.  // CHANGED:
+    var act = String(action || '');
+    var useJsonBody = (act === 'ppa_generate' || act === 'ppa_store'); // CHANGED:
 
-  // --- Rich text helpers (Classic/TinyMCE/Gutenberg-compatible) -------------
+    // Build endpoint robustly (supports ajaxUrl already containing a '?').
+    var endpoint = ajaxUrl + (ajaxUrl.indexOf('?') === -1 ? '?' : '&') + 'action=' + encodeURIComponent(act);
 
-  function getTinyMCEContentById(id) {
-    try {
-      if (!window.tinyMCE || !tinyMCE.get) return '';
-      var ed = tinyMCE.get(id);
-      return ed && !ed.isHidden() ? String(ed.getContent() || '') : '';
-    } catch (e) { return ''; }
-  }
-
-  function getEditorContent() {
-    var txt = $('#ppa-content');
-    if (txt && String(txt.value || '').trim()) return String(txt.value || '').trim();
-
-    var mce = getTinyMCEContentById('content');
-    if (mce) return mce;
-
-    var raw = $('#content');
-    if (raw && String(raw.value || '').trim()) return String(raw.value || '').trim();
-
-    return '';
-  }
-
-  // ---- Payload builders ----------------------------------------------------
-
-  function buildPreviewPayload() {
-    var subject = $('#ppa-subject');
-    var brief = $('#ppa-brief');
-    var genre = $('#ppa-genre');
-    var tone = $('#ppa-tone');
-    var wc = $('#ppa-word-count');
-    return {
-      subject: subject ? subject.value : '',
-      brief: brief ? brief.value : '',
-      genre: genre ? genre.value : '',
-      tone: tone ? tone.value : '',
-      word_count: wc ? Number(wc.value || 0) : 0,
-      _js_ver: PPA_JS_VER
+    var headers = {
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-PPA-View': (window.ppaAdmin && window.ppaAdmin.view) ? String(window.ppaAdmin.view) : 'composer'
     };
+
+    var nonce = getNonce();
+    if (nonce) headers['X-WP-Nonce'] = nonce;
+
+    var body;
+    if (useJsonBody) { // CHANGED:
+      headers['Content-Type'] = 'application/json; charset=UTF-8'; // CHANGED:
+      body = JSON.stringify(payloadObj || {}); // CHANGED:
+    } else {
+      headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+      body = toFormBody({ action: act, payload: JSON.stringify(payloadObj || {}) });
+    }
+
+    try {
+      window.PPA_LAST_REQUEST = {
+        action: act,
+        transport: (useJsonBody ? 'json-body' : 'form-payload-json'), // CHANGED:
+        js_ver: PPA_JS_VER
+      };
+    } catch (e0) {}
+
+    return fetch(endpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headers,
+      body: body
+    }).then(function (resp) {
+      return resp.text().then(function (txt) {
+        var parsed = null;
+        try { parsed = JSON.parse(txt); } catch (e) {}
+        return {
+          ok: resp.ok,
+          status: resp.status,
+          bodyText: txt,
+          body: (parsed != null ? parsed : txt)
+        };
+      });
+    }).catch(function (err) {
+      return { ok: false, status: 0, error: err };
+    });
+  }
+
+  function escHtml(s){
+    return String(s || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function escAttr(s){
+    return String(s || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function ppaCleanTitle(raw) {
+    if (!raw) return '';
+    var t = String(raw).trim();
+    t = t.replace(/[.?!…]+$/g, '').trim();
+    return t;
+  }
+
+  function sanitizeSlug(s) {
+    var v = String(s || '').trim().toLowerCase();
+    v = v.replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'').replace(/\-+/g,'-').replace(/^\-+|\-+$/g,'');
+    return v;
   }
 
   function readCsvValues(el) {
     if (!el) return [];
-    var raw = String(el.value || '').trim();
-    if (!raw) return [];
-    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    var v = '';
+    if (typeof el.value === 'string') v = el.value;
+    else v = String(el.textContent || '');
+    v = v.trim();
+    if (!v) return [];
+    v = v.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var parts = v.split(/[\n,]/);
+    return parts.map(function(p){ return String(p || '').trim(); }).filter(Boolean);
   }
 
-  function textFromFirstMatch(html, selector) {
-    try {
-      var tmp = document.createElement('div');
-      tmp.innerHTML = html || '';
-      var el = tmp.querySelector(selector);
-      if (!el) return '';
-      return (el.textContent || '').trim();
-    } catch (e) { return ''; }
-  }
-  function extractTitleFromHtml(html) {
-    return textFromFirstMatch(html, 'h1') || textFromFirstMatch(html, 'h2') || textFromFirstMatch(html, 'h3') || '';
-  }
-  function extractExcerptFromHtml(html) {
-    var p = textFromFirstMatch(html, 'p');
-    if (!p) return '';
-    return p.replace(/\s+/g, ' ').trim().slice(0, 300);
-  }
-  function sanitizeSlug(s) {
+  function toHtmlFromText(txt) {
+    var s = String(txt || '').trim();
     if (!s) return '';
-    var t = String(s).toLowerCase();
-    t = t.replace(/<[^>]*>/g, '');
-    t = t.normalize ? t.normalize('NFKD') : t;
-    t = t.replace(/[^\w\s-]+/g, '');
-    t = t.replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
-    return t;
+    s = escHtml(s);
+    var parts = s.split(/\n\s*\n/).map(function (p) {
+      p = String(p || '').trim();
+      if (!p) return '';
+      return '<p>' + p.replace(/\n/g,'<br>') + '</p>';
+    }).filter(Boolean);
+    return parts.join('');
   }
 
-  function buildStorePayload(target) {
-    var title   = $('#ppa-title')   || $('#title');
-    var excerpt = $('#ppa-excerpt') || $('#excerpt');
-    var slug    = $('#ppa-slug')    || $('#post_name');
+  function markdownToHtml(md) {
+    var txt = String(md || '').trim();
+    if (!txt) return '';
+    txt = escHtml(txt).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-    var tagsEl   = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
-    var catsEl   = $('#ppa-categories') || $('#post_category');
-    var statusEl = $('#ppa-status');
+    txt = txt.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>');
+    txt = txt.replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>');
+    txt = txt.replace(/^####\s+(.*)$/gm, '<h4>$1</h4>');
+    txt = txt.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+    txt = txt.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
+    txt = txt.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+
+    txt = txt.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    txt = txt.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    txt = txt.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    txt = txt.replace(/^\-\s+(.*)$/gm, '<li>$1</li>');
+    txt = txt.replace(/(<li>.*<\/li>\n?)+/g, function (block) {
+      return '<ul>' + block.replace(/\n/g, '') + '</ul>';
+    });
+
+    var htmlParts = [];
+    var blocks = txt.split(/\n\s*\n/);
+    blocks.forEach(function (b) {
+      var p = String(b || '').trim();
+      if (!p) return;
+      if (p.indexOf('<h') === 0 || p.indexOf('<ul>') === 0) {
+        htmlParts.push(p);
+      } else {
+        htmlParts.push('<p>' + p.replace(/\n/g,'<br>') + '</p>');
+      }
+    });
+
+    if (!htmlParts.length) {
+      return toHtmlFromText(txt);
+    }
+    return htmlParts.join('');
+  }
+
+  function buildPreviewPayload() {
+    var subject = $('#ppa-subject');
+    var brief   = $('#ppa-brief');
+    var genre   = $('#ppa-genre');
+    var tone    = $('#ppa-tone');
+    var wc      = $('#ppa-word-count');
+    var audience = $('#ppa-audience');
 
     var payload = {
-      title:   title   ? String(title.value || '')   : '',
-      content: getEditorContent(),
-      excerpt: excerpt ? String(excerpt.value || '') : '',
-      slug:    slug    ? String(slug.value || '')    : '',
-      tags: (function () {
-        if (tagsEl && tagsEl.tagName === 'SELECT') {
-          return $all('option:checked', tagsEl).map(function (o) { return o.value; });
-        }
-        return readCsvValues(tagsEl);
-      })(),
-      categories: (function () {
-        if (catsEl && catsEl.tagName === 'SELECT') {
-          return $all('option:checked', catsEl).map(function (o) { return o.value; });
-        }
-        return readCsvValues(catsEl);
-      })(),
-      status: statusEl ? String(statusEl.value || '') : '',
-      target_sites: [String(target || 'draft')],
-      source: 'admin',
-      ver: '1',
+      subject: subject ? String(subject.value || '').trim() : '',
+      title:   subject ? String(subject.value || '').trim() : '',
+      brief:   brief   ? String(brief.value   || '').trim() : '',
+      content: brief   ? String(brief.value   || '').trim() : '',
+      text:    brief   ? String(brief.value   || '').trim() : '',
+      html:    '',
+      genre:   genre ? String(genre.value || '').trim() : '',
+      tone:    tone  ? String(tone.value  || '').trim() : '',
+      word_count: wc ? String(wc.value || '').trim() : '',
+      audience: audience ? String(audience.value || '').trim() : '',
+      keywords: readCsvValues($('#ppa-keywords')),
       _js_ver: PPA_JS_VER
     };
 
-    // If editor is empty, use Preview HTML and auto-fill
+    var tagsEl = $('#ppa-tags') || $('#new-tag-post_tag') || $('#tax-input-post_tag');
+    var catsEl = $('#ppa-categories') || $('#post_category');
+    if (tagsEl) {
+      payload.tags = (function(){
+        if (tagsEl.tagName === 'SELECT') {
+          return $all('option:checked', tagsEl).map(function (o) { return o.value; });
+        } return readCsvValues(tagsEl);
+      })();
+    }
+    if (catsEl) {
+      payload.categories = (function(){
+        if (catsEl.tagName === 'SELECT') {
+          return $all('option:checked', catsEl).map(function (o) { return o.value; });
+        } return readCsvValues(catsEl);
+      })();
+    }
+
+    var focusEl = $('#yoast_wpseo_focuskw_text_input');
+    var metaEl  = $('#yoast_wpseo_metadesc');
+    payload.meta = {
+      focus_keyphrase: focusEl ? String(focusEl.value || '').trim() : '',
+      meta_description: metaEl ? String(metaEl.value  || '').trim() : ''
+    };
+
+    return payload;
+  }
+
+  function extractTitleFromHtml(html) {
+    var h = String(html || '');
+    var m = h.match(/<h[12][^>]*>(.*?)<\/h[12]>/i);
+    if (!m) return '';
+    return String(m[1] || '').replace(/<[^>]+>/g,'').trim();
+  }
+
+  function extractExcerptFromHtml(html) {
+    var h = String(html || '');
+    var m = h.match(/<p[^>]*>(.*?)<\/p>/i);
+    if (!m) return '';
+    return String(m[1] || '').replace(/<[^>]+>/g,'').trim();
+  }
+
+  function buildStorePayload(mode) {
+    var title   = $('#ppa-title')   || $('#title');
+    var excerpt = $('#ppa-excerpt') || $('#excerpt');
+    var slug    = $('#ppa-slug')    || $('#post_name');
+    var content = $('#ppa-content') || $('#content');
+
+    var safeMode = String(mode || 'draft').trim().toLowerCase();
+    if (!safeMode) safeMode = 'draft';
+
+    var payload = {
+      mode: safeMode,
+      status: safeMode,
+      target_sites: [ safeMode ],
+      title:   title ? String(title.value || '').trim() : '',
+      excerpt: excerpt ? String(excerpt.value || '').trim() : '',
+      slug:    slug ? String(slug.value || '').trim() : '',
+      content: content ? String(content.value || '').trim() : '',
+      _js_ver: PPA_JS_VER
+    };
+
+    var postId = $('#post_ID');
+    if (postId && postId.value) payload.post_id = String(postId.value);
+
+    var statusEl = $('#ppa-status');
+    var statusVal = statusEl ? String(statusEl.value || '').trim().toLowerCase() : '';
+    if (statusVal) {
+      payload.status = statusVal;
+      payload.target_sites = [ statusVal ];
+    }
+
     if (!payload.content || !String(payload.content).trim()) {
-      var pane = document.getElementById('ppa-preview-pane');
+      var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
       if (html) {
         payload.content = html;
@@ -219,67 +357,113 @@
       }
     }
 
-    // Merge preview meta for traceability
-    var prev = buildPreviewPayload();
-    for (var k in prev) {
-      if (Object.prototype.hasOwnProperty.call(prev, k) && !Object.prototype.hasOwnProperty.call(payload, k)) {
-        payload[k] = prev[k];
-      }
-    }
+    var focusEl2 = $('#yoast_wpseo_focuskw_text_input');
+    var metaEl2  = $('#yoast_wpseo_metadesc');
+    payload.meta = {
+      focus_keyphrase: focusEl2 ? String(focusEl2.value || '').trim() : '',
+      meta_description: metaEl2 ? String(metaEl2.value  || '').trim() : ''
+    };
+
     return payload;
   }
 
-  // ---- Toolbar Notices & Busy State ---------------------------------------
+  function hasTitleOrSubject() {
+    var subjectEl = $('#ppa-subject');
+    var titleEl   = $('#ppa-title') || $('#title');
 
-  var btnPreview = $('#ppa-preview');
-  var btnDraft   = $('#ppa-draft');
-  var btnPublish = $('#ppa-publish');
+    var subject = subjectEl ? String(subjectEl.value || '').trim() : '';
+    var title   = titleEl ? String(titleEl.value || '').trim() : '';
 
-  function noticeContainer() { return $('#ppa-toolbar-msg') || null; }
+    return !!(subject || title);
+  }
+
+  var btnPreview  = document.getElementById('ppa-preview');
+  var btnDraft    = document.getElementById('ppa-draft');
+  var btnPublish  = document.getElementById('ppa-publish');
+  var btnGenerate = document.getElementById('ppa-generate');
+
+  (function adaptGenerateAsPreview(){
+    if (btnPreview) {
+      try { btnPreview.style.display = 'none'; } catch (e) {}
+    }
+    if (btnGenerate) {
+      try { btnGenerate.textContent = 'Generate Preview'; } catch (e) {}
+    }
+  })();
+
+  function noticeContainer() {
+    var el = document.getElementById('ppa-toolbar-msg');
+    if (el) return el;
+
+    var host = null;
+    if (btnGenerate && btnGenerate.parentNode) host = btnGenerate.parentNode;
+    else if (btnPreview && btnPreview.parentNode) host = btnPreview.parentNode;
+    else if (btnDraft && btnDraft.parentNode) host = btnDraft.parentNode;
+    else if (btnPublish && btnPublish.parentNode) host = btnPublish.parentNode;
+    if (!host) return null;
+
+    el = document.createElement('div');
+    el.id = 'ppa-toolbar-msg';
+    el.className = 'ppa-notice';
+    try {
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.setAttribute('aria-atomic', 'true');
+    } catch (e2) {}
+    host.insertBefore(el, host.firstChild);
+    return el;
+  }
 
   function renderNotice(type, message) {
     var el = noticeContainer();
-    var text = String(message == null ? '' : message);
     if (!el) {
-      if (type === 'error' || type === 'warn') { alert(text); } // eslint-disable-line no-alert
-      else { console.info('PPA:', type + ':', text); }
+      if (type === 'error' || type === 'warn') { try { window.alert(String(message || '')); } catch (e) {} }
       return;
     }
-    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;
-    el.className = clsBase + ' ' + clsType;
-    el.textContent = text;
+    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
+    el.textContent = String(message == null ? '' : message);
   }
 
-  function renderNoticeTimed(type, message, ms) { renderNotice(type, message); if (ms && ms > 0) setTimeout(clearNotice, ms); }
+  function renderNoticeTimed(type, message, ms) {
+    renderNotice(type, message);
+    var dur = parseInt(ms, 10);
+    if (!dur || dur < 250) dur = 2500;
+    window.setTimeout(function () { clearNotice(); }, dur);
+  }
 
   function renderNoticeHtml(type, html) {
     var el = noticeContainer();
-    if (!el) { console.info('PPA:', type + ':', html); return; }
-    var clsBase = 'ppa-notice', clsType = 'ppa-notice-' + type;
-    el.className = clsBase + ' ' + clsType;
-    el.innerHTML = String(html || '');
+    if (!el) return;
+    el.className = 'ppa-notice ppa-notice-' + String(type || 'info');
+    el.innerHTML = String(html == null ? '' : html);
   }
 
-  function renderNoticeTimedHtml(type, html, ms) { renderNoticeHtml(type, html); if (ms && ms > 0) setTimeout(clearNotice, ms); }
+  function renderNoticeTimedHtml(type, html, ms) {
+    renderNoticeHtml(type, html);
+    var dur = parseInt(ms, 10);
+    if (!dur || dur < 250) dur = 2500;
+    window.setTimeout(function () { clearNotice(); }, dur);
+  }
 
   function clearNotice() {
     var el = noticeContainer();
-    if (el) { el.className = 'ppa-notice'; el.textContent = ''; }
+    if (!el) return;
+    el.className = 'ppa-notice';
+    el.textContent = '';
   }
 
   function setButtonsDisabled(disabled) {
-    [btnPreview, btnDraft, btnPublish].forEach(function (b) {
-      if (!b) return;
-      b.disabled = !!disabled;
-      if (disabled) b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
-    });
+    var dis = !!disabled;
+    if (btnPreview)  btnPreview.disabled = dis;
+    if (btnDraft)    btnDraft.disabled = dis;
+    if (btnPublish)  btnPublish.disabled = dis;
+    if (btnGenerate) btnGenerate.disabled = dis;
   }
 
-  // Lightweight extra debounce to avoid double-trigger before withBusy runs
   function clickGuard(btn) {
     if (!btn) return false;
     var ts = Number(btn.getAttribute('data-ppa-ts') || 0);
-    var now = Date.now();
+    var now = (Date.now ? Date.now() : (new Date()).getTime());
     if (now - ts < 350) return true;
     btn.setAttribute('data-ppa-ts', String(now));
     return false;
@@ -289,303 +473,346 @@
     setButtonsDisabled(true);
     clearNotice();
     var tag = label || 'request';
-    console.info('PPA: busy start →', tag);
+    try { console.info('PPA: busy start →', tag); } catch (e0) {}
+
     try {
       var p = promiseFactory();
       return Promise.resolve(p)
         .catch(function (err) {
-          console.info('PPA: busy error on', tag, err);
+          try { console.info('PPA: busy error on', tag, err); } catch (e1) {}
           renderNotice('error', 'There was an error while processing your request.');
           throw err;
         })
         .finally(function () {
           setButtonsDisabled(false);
-          console.info('PPA: busy end ←', tag);
+          try { console.info('PPA: busy end ←', tag); } catch (e2) {}
         });
-    } catch (e) {
+    } catch (e3) {
       setButtonsDisabled(false);
-      console.info('PPA: busy sync error on', tag, e);
+      try { console.info('PPA: busy sync error on', tag, e3); } catch (e4) {}
       renderNotice('error', 'There was an error while preparing your request.');
-      throw e;
+      throw e3;
     }
   }
 
-  // ---- Network -------------------------------------------------------------
-
-  function apiPost(action, data) {
-    var url = getAjaxUrl();
-    var nonce = getNonce();
-
-    var qs = url.indexOf('?') === -1 ? '?' : '&';
-    var endpoint = url + qs + 'action=' + encodeURIComponent(action);
-
-    var headers = { 'Content-Type': 'application/json' };
-    if (nonce) {
-      headers['X-PPA-Nonce'] = nonce;
-      headers['X-WP-Nonce']  = nonce;
-    }
-
-    console.info('PPA: POST', action, '→', endpoint);
-    return fetch(endpoint, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(data || {}),
-      credentials: 'same-origin'
-    })
-      .then(function (res) {
-        var ct = (res.headers.get('content-type') || '').toLowerCase();
-        return res.text().then(function (text) {
-          var body = ct.indexOf('application/json') !== -1 ? jsonTryParse(text) : jsonTryParse(text);
-          return { ok: res.ok, status: res.status, body: body, raw: text, contentType: ct, headers: res.headers };
-        });
-      })
-      .catch(function (err) {
-        console.info('PPA: fetch error', err);
-        return { ok: false, status: 0, body: { error: String(err) }, raw: '', contentType: '', headers: new Headers() };
-      });
+  function ensurePreviewPaneVisible() {
+    var pane = getPreviewPane();
+    if (!pane) return;
+    try {
+      if (pane.style && pane.style.display === 'none') pane.style.display = '';
+      pane.removeAttribute('hidden');
+      pane.classList.remove('ppa-hidden');
+    } catch (e) {}
   }
 
-  // ---- Response Shape Helpers ---------------------------------------------
+  function hardenPreviewLists(pane) {
+    if (!pane || pane.nodeType !== 1) return;
+    var scope = pane;
 
-  function pickHtmlFromResponseBody(body) {
-    if (!body || typeof body !== 'object') return '';
-    if (typeof body.html === 'string') return body.html;
-    if (body.result && typeof body.result.html === 'string') return body.result.html;
-    if (body.data && typeof body.data.html === 'string') return body.data.html;
-    if (typeof body.content === 'string') return body.content;
-    if (typeof body.preview === 'string') return body.preview;
-    if (typeof body.raw === 'string') return body.raw;
-    return '';
+    var lists = [];
+    try { lists = Array.prototype.slice.call(scope.querySelectorAll('ul, ol') || []); } catch (e1) { lists = []; }
+    for (var i = 0; i < lists.length; i++) {
+      var list = lists[i];
+      if (!list || list.nodeType !== 1) continue;
+      try {
+        list.style.listStylePosition = 'outside';
+        list.style.paddingLeft = '1.25em';
+        list.style.marginLeft = '0.75em';
+        list.style.maxWidth = '100%';
+        list.style.boxSizing = 'border-box';
+        if (String(list.tagName || '').toUpperCase() === 'UL') list.style.listStyleType = 'disc';
+        if (String(list.tagName || '').toUpperCase() === 'OL') list.style.listStyleType = 'decimal';
+      } catch (e2) {}
+    }
+
+    var items = [];
+    try { items = Array.prototype.slice.call(scope.querySelectorAll('li') || []); } catch (e3) { items = []; }
+    for (var j = 0; j < items.length; j++) {
+      var li = items[j];
+      if (!li || li.nodeType !== 1) continue;
+      try {
+        li.style.display = 'list-item';
+        li.style.overflowWrap = 'anywhere';
+        li.style.wordBreak = 'break-word';
+        li.style.maxWidth = '100%';
+        li.style.boxSizing = 'border-box';
+      } catch (e4) {}
+    }
+  }
+
+  function buildPreviewHtml(result) {
+    var title = '';
+    var outline = '';
+    var bodyMd = '';
+    var meta = null;
+
+    if (result && typeof result === 'object') {
+      title = String(result.title || '').trim();
+      outline = String(result.outline || '');
+      bodyMd = String(result.body_markdown || result.body || '');
+      meta = result.meta || result.seo || null;
+    }
+
+    var html = '';
+    html += '<div class="ppa-preview">';
+    if (title) html += '<h2>' + escHtml(title) + '</h2>';
+    if (outline) {
+      html += '<h3>Outline</h3>';
+      html += '<div class="ppa-outline">' + markdownToHtml(outline) + '</div>';
+    }
+    if (bodyMd) {
+      html += '<h3>Body</h3>';
+      html += '<div class="ppa-body">' + markdownToHtml(bodyMd) + '</div>';
+    }
+    if (meta && typeof meta === 'object') {
+      html += '<h3>Meta</h3>';
+      html += '<ul class="ppa-meta">';
+      if (meta.focus_keyphrase) html += '<li><strong>Focus keyphrase:</strong> ' + escHtml(meta.focus_keyphrase) + '</li>';
+      if (meta.meta_description) html += '<li><strong>Meta description:</strong> ' + escHtml(meta.meta_description) + '</li>';
+      if (meta.slug) html += '<li><strong>Slug:</strong> ' + escHtml(meta.slug) + '</li>';
+      html += '</ul>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderPreview(result, provider) {
+    ensurePreviewPaneVisible();
+    var pane = getPreviewPane();
+    if (!pane) {
+      renderNoticeTimed('error', 'Preview pane not found on this screen.', 3500);
+      return;
+    }
+    if (provider) {
+      try { pane.setAttribute('data-ppa-provider', String(provider)); } catch (e) {}
+    }
+
+    var html = '';
+    if (result && typeof result === 'object' && result.html) {
+      html = String(result.html);
+    } else {
+      html = buildPreviewHtml(result);
+    }
+    pane.innerHTML = html;
+
+    hardenPreviewLists(pane);
+
+    try { pane.focus(); } catch (e2) {}
+  }
+
+  function unwrapWpAjax(body) {
+    if (!body || typeof body !== 'object') return { hasEnvelope: false, success: null, data: body };
+    if (Object.prototype.hasOwnProperty.call(body, 'success') && Object.prototype.hasOwnProperty.call(body, 'data')) {
+      return { hasEnvelope: true, success: body.success === true, data: body.data };
+    }
+    return { hasEnvelope: false, success: null, data: body };
+  }
+
+  function pickDjangoResultShape(unwrappedData) {
+    if (!unwrappedData || typeof unwrappedData !== 'object') return unwrappedData;
+    if (unwrappedData.result && typeof unwrappedData.result === 'object') return unwrappedData.result;
+    if (Object.prototype.hasOwnProperty.call(unwrappedData, 'title') ||
+        Object.prototype.hasOwnProperty.call(unwrappedData, 'outline') ||
+        Object.prototype.hasOwnProperty.call(unwrappedData, 'body_markdown')) return unwrappedData;
+    return unwrappedData;
+  }
+
+  function applyGenerateResult(result) {
+    if (!result || typeof result !== 'object') return { titleFilled: false, excerptFilled: false, slugFilled: false };
+
+    var title = ppaCleanTitle(result.title || '');
+    var bodyMd = String(result.body_markdown || result.body || '');
+    var meta = result.meta || result.seo || {};
+
+    var filled = { titleFilled: false, excerptFilled: false, slugFilled: false };
+
+    var titleEl = $('#ppa-title') || $('#title');
+    if (titleEl && title && !String(titleEl.value || '').trim()) {
+      titleEl.value = title;
+      filled.titleFilled = true;
+    }
+
+    var contentEl = $('#ppa-content') || $('#content');
+    if (contentEl && (!String(contentEl.value || '').trim()) && bodyMd) {
+      contentEl.value = markdownToHtml(bodyMd);
+    }
+
+    var excerptEl = $('#ppa-excerpt') || $('#excerpt');
+    if (excerptEl && meta && meta.meta_description && !String(excerptEl.value || '').trim()) {
+      excerptEl.value = String(meta.meta_description);
+      filled.excerptFilled = true;
+    }
+
+    var slugEl = $('#ppa-slug') || $('#post_name');
+    if (slugEl && (!String(slugEl.value || '').trim())) {
+      var s = '';
+      if (meta && meta.slug) s = String(meta.slug);
+      if (!s && title) s = sanitizeSlug(title);
+      if (s) {
+        slugEl.value = s;
+        filled.slugFilled = true;
+      }
+    }
+
+    var focusEl3 = $('#yoast_wpseo_focuskw_text_input');
+    var metaEl3  = $('#yoast_wpseo_metadesc');
+    if (focusEl3 && meta && meta.focus_keyphrase && !String(focusEl3.value || '').trim()) {
+      focusEl3.value = String(meta.focus_keyphrase);
+    }
+    if (metaEl3 && meta && meta.meta_description && !String(metaEl3.value || '').trim()) {
+      metaEl3.value = String(meta.meta_description);
+    }
+
+    return filled;
   }
 
   function pickMessage(body) {
-    if (!body || typeof body !== 'object') return '';
-    if (typeof body.message === 'string') return body.message;
-    if (body.result && typeof body.result.message === 'string') return body.result.message;
-    if (body.data && typeof body.data.message === 'string') return body.data.message; // wrap-aware
-    if (body.data && body.data.result && typeof body.data.result.message === 'string') return body.data.result.message; // wrap-aware
+    if (!body) return '';
+    if (typeof body === 'string') return body;
+    if (typeof body === 'object') {
+      if (body.message) return String(body.message);
+      if (body.error) return String(body.error);
+      if (body.data && body.data.message) return String(body.data.message);
+    }
     return '';
   }
 
   function pickId(body) {
-    if (!body || typeof body !== 'object') return '';
-    if (typeof body.id === 'string' || typeof body.id === 'number') return String(body.id);
-    if (body.result && (typeof body.result.id === 'string' || typeof body.result.id === 'number')) return String(body.result.id);
-    if (body.data && (typeof body.data.id === 'string' || typeof body.data.id === 'number')) return String(body.data.id);                    // wrap-aware
-    if (body.data && body.data.result && (typeof body.data.result.id === 'string' || typeof body.data.result.id === 'number'))               // wrap-aware
-      return String(body.data.result.id);                                                                                                     // wrap-aware
+    try {
+      if (body && typeof body === 'object') {
+        if (body.id) return body.id;
+        if (body.post_id) return body.post_id;
+
+        if (body.data && body.data.id) return body.data.id;
+        if (body.data && body.data.post_id) return body.data.post_id;
+
+        if (body.data && body.data.result && body.data.result.id) return body.data.result.id;
+        if (body.result && body.result.id) return body.result.id;
+      }
+    } catch (e) {}
     return '';
   }
 
   function pickEditLink(body) {
-    if (!body || typeof body !== 'object') return '';
-    var v = '';
-    if (typeof body.edit_link === 'string') v = body.edit_link;
-    else if (body.result && typeof body.result.edit_link === 'string') v = body.result.edit_link;
-    else if (body.data && typeof body.data.edit_link === 'string') v = body.data.edit_link;                     // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.edit_link === 'string')                    // wrap-aware
-      v = body.data.result.edit_link;                                                                            // wrap-aware
-    return String(v || '');
+    try {
+      if (body && typeof body === 'object') {
+        if (body.edit_link) return body.edit_link;
+        if (body.data && body.data.edit_link) return body.data.edit_link;
+
+        if (body.data && body.data.result && body.data.result.edit_link) return body.data.result.edit_link;
+        if (body.result && body.result.edit_link) return body.result.edit_link;
+      }
+    } catch (e) {}
+    return '';
   }
 
   function pickViewLink(body) {
-    if (!body || typeof body !== 'object') return '';
-    var cand = '';
-    if (typeof body.view_link === 'string') cand = body.view_link;
-    else if (typeof body.permalink === 'string') cand = body.permalink;
-    else if (typeof body.link === 'string') cand = body.link;
-    else if (body.result && typeof body.result.view_link === 'string') cand = body.result.view_link;
-    else if (body.result && typeof body.result.permalink === 'string') cand = body.result.permalink;
-    else if (body.result && typeof body.result.link === 'string') cand = body.result.link;
-    else if (body.data && typeof body.data.permalink === 'string') cand = body.data.permalink;                   // wrap-aware
-    else if (body.data && typeof body.data.link === 'string') cand = body.data.link;                             // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.permalink === 'string') cand = body.data.result.permalink; // wrap-aware
-    else if (body.data && body.data.result && typeof body.data.result.link === 'string') cand = body.data.result.link;           // wrap-aware
-    return String(cand || '');
-  }
+    try {
+      if (body && typeof body === 'object') {
+        if (body.view_link) return body.view_link;
+        if (body.permalink) return body.permalink;
 
-  function pickStructuredError(body) {
-    if (!body || typeof body !== 'object') return null;
-    if (body.error && typeof body.error === 'object') return body.error;
-    if (body.data && body.data.error && typeof body.data.error === 'object') return body.data.error;
-    return null;
-  }
+        if (body.data && body.data.view_link) return body.data.view_link;
+        if (body.data && body.data.permalink) return body.data.permalink;
 
-  // ---- Auto-fill helpers (Title/Excerpt/Slug) ------------------------------
-
-  function getElTitle() { return $('#ppa-title') || $('#title'); }
-  function getElExcerpt() { return $('#ppa-excerpt') || $('#excerpt'); }
-  function getElSlug() { return $('#ppa-slug') || $('#post_name'); }
-
-  function setIfEmpty(el, val) {
-    if (!el) return;
-    var cur = String(el.value || '').trim();
-    if (!cur && val) el.value = String(val);
-  }
-
-  function autoFillAfterPreview(body, html) {
-    function pickField(src, key) {
-      if (!src || typeof src !== 'object') return '';
-      if (typeof src[key] === 'string') return src[key];
-      if (src.result && typeof src.result[key] === 'string') return src.result[key];
-      if (src.data && typeof src.data[key] === 'string') return src.data[key];                    // wrap-aware
-      if (src.data && src.data.result && typeof src.data.result[key] === 'string') return src.data.result[key]; // wrap-aware
-      return '';
-    }
-
-    var title = pickField(body, 'title');
-    var excerpt = pickField(body, 'excerpt');
-    var slug = pickField(body, 'slug');
-
-    if (!title) title = extractTitleFromHtml(html);
-    if (!excerpt) excerpt = extractExcerptFromHtml(html);
-    if (!slug && title) slug = sanitizeSlug(title);
-
-    setIfEmpty(getElTitle(), title);
-    setIfEmpty(getElExcerpt(), excerpt);
-    setIfEmpty(getElSlug(), slug);
-
-    console.info('PPA: autofill candidates →', { title: !!title, excerpt: !!excerpt, slug: !!slug });
-  }
-
-  // ---- Simple escaper for attribute values (URL) ---------------------------
-  function escAttr(s){
-    return String(s || '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-  }
-
-  // ---- Events --------------------------------------------------------------
-
-  function handleRateLimit(res, which) {
-    if (!res || res.status !== 429) return false;
-    var retry = 0;
-    var err = pickStructuredError(res.body);
-    if (err && err.details && typeof err.details.retry_after === 'number') {
-      retry = Math.max(0, Math.ceil(err.details.retry_after));
-    }
-    var btn = which === 'preview' ? btnPreview : which === 'draft' ? btnDraft : btnPublish;
-    if (btn) btn.disabled = true;
-    var sec = retry || 10;
-    var t = setInterval(function(){
-      renderNotice('warn', 'Rate-limited. Try again in ' + sec + 's.');
-      if (--sec <= 0) {
-        clearInterval(t);
-        if (btn) btn.disabled = false;
-        clearNotice();
+        if (body.data && body.data.result && body.data.result.permalink) return body.data.result.permalink;
+        if (body.result && body.result.permalink) return body.result.permalink;
       }
-    }, 1000);
-    return true;
+    } catch (e) {}
+    return '';
   }
 
-  if (btnPreview) {
-    btnPreview.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      if (clickGuard(btnPreview)) return;
-      console.info('PPA: Preview clicked');
-
-      withBusy(function () {
-        var payload = buildPreviewPayload();
-        return apiPost('ppa_preview', payload).then(function (res) {
-          if (handleRateLimit(res, 'preview')) return;
-
-          var html = pickHtmlFromResponseBody(res.body);
-          var serr = pickStructuredError(res.body);
-
-          var provider = extractProviderFromHtml(html);
-          console.info('PPA: provider=' + (provider || '(unknown)'));
-
-          if (serr && !res.ok) {
-            var msg = serr.message || 'Request failed.';
-            renderNotice('error', '[' + (serr.type || 'error') + '] ' + msg);
-            return;
-          }
-
-          if (html) {
-            setPreview(html);
-            clearNotice();
-            autoFillAfterPreview(res.body, html);
-            return;
-          }
-
-          setPreview('<p><em>Preview did not return HTML content. Check logs.</em></p>');
-          renderNotice('warn', 'Preview completed, but no HTML was returned.');
-          console.info('PPA: preview response lacked HTML', res);
-        });
-      }, 'preview');
-    });
+  function buildWpEditUrlFromId(id) {
+    var pid = parseInt(String(id || ''), 10);
+    if (!pid || pid < 1) return '';
+    return '/wp-admin/post.php?post=' + String(pid) + '&action=edit';
   }
 
+  function stopEvent(ev) {
+    if (!ev) return;
+    try { if (typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e1) {}
+    try { if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch (e2) {}
+    try { if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation(); } catch (e3) {}
+  }
+
+  function clickGuard(btn) {
+    if (!btn) return false;
+    var ts = Number(btn.getAttribute('data-ppa-ts') || 0);
+    var now = (Date.now ? Date.now() : (new Date()).getTime());
+    if (now - ts < 350) return true;
+    btn.setAttribute('data-ppa-ts', String(now));
+    return false;
+  }
+
+  // Wire buttons
   if (btnDraft) {
     btnDraft.addEventListener('click', function (ev) {
-      ev.preventDefault();
+      stopEvent(ev);
       if (clickGuard(btnDraft)) return;
-      console.info('PPA: Save Draft clicked');
+      console.info('PPA: Draft clicked');
 
-      // Early guard to prevent empty submissions with no preview
-      var probe = buildStorePayload('draft');
-      var paneEl = document.getElementById('ppa-preview-pane');                                     // CHANGED:
-      var hasPreviewHtml = !!(paneEl && String(paneEl.innerHTML || '').trim());                    // CHANGED:
-      if (!probe.title && !probe.content && !hasPreviewHtml) {
-        renderNotice('warn', 'Add a title or run Preview before saving a draft.');
+      if (!hasTitleOrSubject()) {
+        renderNotice('warn', 'Add a subject or title before saving.');
         return;
       }
 
       withBusy(function () {
-        var payload = probe; // use built probe (already has preview fallback)
+        var payload = buildStorePayload('draft');
         return apiPost('ppa_store', payload).then(function (res) {
-          if (handleRateLimit(res, 'draft')) return;
-          var serr = pickStructuredError(res.body);
-          var msg = (serr && serr.message) || pickMessage(res.body) || 'Draft request sent.';
-          var pid = pickId(res.body);
-          var edit = pickEditLink(res.body);  // wrap-aware
-          var view = pickViewLink(res.body);  // wrap-aware
-          if (!res.ok) {
-            renderNotice('error', 'Draft failed (' + res.status + '): ' + msg);
+          var wp = unwrapWpAjax(res.body);
+          var data = wp.hasEnvelope ? wp.data : res.body;
+          var msg = pickMessage(res.body) || 'Draft request sent.';
+
+          if (!res.ok || (wp.hasEnvelope && !wp.success)) {
+            renderNotice('error', 'Save draft failed (' + res.status + '): ' + msg);
             console.info('PPA: draft failed', res);
             return;
           }
 
-          if (view || edit) {
-            var pieces = [];
-            if (view) pieces.push('<a href="' + escAttr(view) + '" target="_blank" rel="noopener">View Draft</a>');
-            if (edit) pieces.push('<a href="' + escAttr(edit) + '" target="_blank" rel="noopener">Edit Draft</a>');
-            var linkHtml = pieces.join(' &middot; ');
-            var okHtml = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + ' — ' + linkHtml;
-            renderNoticeTimedHtml('success', okHtml, 8000);
-          } else {
-            var okMsg = 'Draft saved.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
-            renderNoticeTimed('success', okMsg, 4000);
-          }
-          console.info('PPA: draft success', res);
+          var edit = pickEditLink(res.body) || (data && data.edit_link ? data.edit_link : '');
+          var pid  = pickId(res.body) || (data && (data.id || data.post_id) ? (data.id || data.post_id) : '');
+          var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
+
+          renderNoticeTimed('success', 'Draft saved. Opening it now…', 2500);
+          console.info('PPA: draft ok', data);
+
+          window.setTimeout(function () {
+            var url = edit || fallbackEdit;
+            if (url) {
+              try { window.location.href = String(url); } catch (e1) {}
+            } else {
+              renderNoticeTimed('success', 'Draft saved, but no edit link was returned.', 5000);
+              console.info('PPA: draft ok but missing edit link/id', res);
+            }
+          }, 450);
         });
-      }, 'draft');
-    });
+      }, 'store');
+    }, true);
   }
 
   if (btnPublish) {
     btnPublish.addEventListener('click', function (ev) {
-      ev.preventDefault();
+      stopEvent(ev);
       if (clickGuard(btnPublish)) return;
       console.info('PPA: Publish clicked');
 
-      /* eslint-disable no-alert */
-      if (!window.confirm('Are you sure you want to publish this content now?')) {
-        console.info('PPA: publish canceled by user');
+      if (!hasTitleOrSubject()) {
+        renderNotice('warn', 'Add a subject or title before publishing.');
         return;
       }
-      /* eslint-enable no-alert */
 
       withBusy(function () {
         var payload = buildStorePayload('publish');
         return apiPost('ppa_store', payload).then(function (res) {
-          if (handleRateLimit(res, 'publish')) return;
-          var serr = pickStructuredError(res.body);
+          var wp = unwrapWpAjax(res.body);
+          var data = wp.hasEnvelope ? wp.data : res.body;
+          var serr = (data && data.error) ? data.error : null;
           var msg = (serr && serr.message) || pickMessage(res.body) || 'Publish request sent.';
           var pid = pickId(res.body);
           var edit = pickEditLink(res.body);
           var view = pickViewLink(res.body);
-          if (!res.ok) {
+
+          if (!res.ok || (wp.hasEnvelope && !wp.success)) {
             renderNotice('error', 'Publish failed (' + res.status + '): ' + msg);
             console.info('PPA: publish failed', res);
             return;
@@ -597,14 +824,77 @@
             var html = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + ' — ' + parts.join(' &middot; ');
             renderNoticeTimedHtml('success', html, 8000);
           } else {
-            var okMsg = 'Published successfully.' + (pid ? ' ID: ' + pid : '') + (msg ? ' — ' + msg : '');
-            renderNoticeTimed('success', okMsg, 4000);
+            renderNoticeTimed('success', 'Published successfully.', 5000);
           }
-          console.info('PPA: publish success', res);
+          console.info('PPA: publish ok', data);
         });
-      }, 'publish');
-    });
+      }, 'store');
+    }, true);
   }
 
+  if (btnGenerate) {
+    btnGenerate.addEventListener('click', function (ev) {
+      stopEvent(ev);
+      if (clickGuard(btnGenerate)) return;
+      console.info('PPA: Generate clicked');
+
+      var probe = buildPreviewPayload();
+      if (!String(probe.title || '').trim() &&
+          !String(probe.text || '').trim() &&
+          !String(probe.content || '').trim()) {
+        renderNotice('warn', 'Add a subject or a brief before generating.');
+        return;
+      }
+
+      withBusy(function () {
+        var payload = probe;
+
+        return apiPost('ppa_generate', payload).then(function (res) {
+          var wp = unwrapWpAjax(res.body);
+          var overallOk = res.ok;
+          if (wp.hasEnvelope) overallOk = overallOk && (wp.success === true);
+
+          var data = wp.hasEnvelope ? wp.data : res.body;
+          var django = pickDjangoResultShape(data);
+
+          try { window.PPA_LAST_GENERATE = { ok: overallOk, status: res.status, body: res.body, data: data, djangoResult: django }; } catch (e) {}
+
+          if (!overallOk) {
+            renderNotice('error', 'Generate failed (' + res.status + '): ' + (pickMessage(res.body) || 'Unknown error'));
+            console.info('PPA: generate failed', res);
+            return;
+          }
+
+          var provider = (data && data.provider) ? data.provider : (django && django.provider ? django.provider : '');
+          renderPreview(django, provider);
+
+          var filled = applyGenerateResult(django);
+          try { console.info('PPA: applyGenerateResult →', filled); } catch (e2) {}
+
+          renderNotice('success', 'AI draft generated. Review, tweak, then Save Draft or Publish.');
+        });
+      }, 'generate');
+    }, true);
+  }
+
+  window.PPAAdmin = window.PPAAdmin || {};
+  window.PPAAdmin.apiPost = apiPost;
+  window.PPAAdmin.postGenerate = function () { return apiPost('ppa_generate', buildPreviewPayload()); };
+  window.PPAAdmin.postStore = function (mode) { return apiPost('ppa_store', buildStorePayload(mode || 'draft')); };
+  window.PPAAdmin.markdownToHtml = markdownToHtml;
+  window.PPAAdmin.renderPreview = renderPreview;
+  window.PPAAdmin._js_ver = PPA_JS_VER;
+
+  (function patchModuleBridge(){
+    try {
+      window.PPAAdminModules = window.PPAAdminModules || {};
+      window.PPAAdminModules.api = window.PPAAdminModules.api || {};
+      if (window.PPAAdminModules.api.apiPost !== apiPost) {
+        window.PPAAdminModules.api.apiPost = apiPost;
+      }
+    } catch (e) {}
+  })();
+
   console.info('PPA: admin.js initialized →', PPA_JS_VER);
+
 })();

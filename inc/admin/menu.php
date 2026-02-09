@@ -3,12 +3,18 @@
  * PostPress AI — Admin Menu Bootstrap
  *
  * ========= CHANGE LOG =========
- * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;     // CHANGED:
- *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.     // CHANGED:
- * 2025-11-08: Add submenus under the top-level:                                                   // CHANGED:
- *             - Rename default submenu to “PostPress Composer” (same slug as parent).             // CHANGED:
- *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.                     // CHANGED:
- *             - Remove legacy Tools→Testbed to avoid duplicates.                                  // CHANGED:
+ * 2025-11-11: Use PPA_PLUGIN_DIR for template resolution (more reliable than nested plugin_dir_path math).   // CHANGED:
+ *             Keep capability 'edit_posts' and consistent permission messages.                               // CHANGED:
+ *             Clarify/annotate legacy Tools→Testbed removal.                                                 // CHANGED:
+ * 2025-11-10: Fallback Testbed markup now uses IDs expected by ppa-testbed.js                // (prev)
+ *             (ppa-testbed-input|preview|store|output|status). Prefer ppa-testbed.php        // (prev)
+ *             over testbed.php when including templates. No inline assets added.             // (prev)
+ * 2025-11-09: Add self-contained markup fallback for Testbed when no template file is found;
+ *             align H1 to "Testbed"; keep no-inline assets; centralized enqueue owns CSS/JS.
+ * 2025-11-08: Add submenus under the top-level:
+ *             - Rename default submenu to “PostPress Composer” (same slug as parent).
+ *             - Add “Testbed” submenu (slug: ppa-testbed) under PostPress AI.
+ *             - Remove legacy Tools→Testbed to avoid duplicates.
  * 2025-11-04: New file. Restores the top-level "PostPress AI" admin menu and composer renderer.
  *             - Registers menu with capability 'edit_posts' (Admin/Editor/Author).
  *             - Defines ppa_render_composer() (no inline JS/CSS; includes composer.php).
@@ -45,34 +51,34 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			65
 		);
 
-		// Rename the auto-generated first submenu to “PostPress Composer”                // CHANGED:
-		global $submenu;                                                                 // CHANGED:
-		if ( isset( $submenu[ $menu_slug ][0] ) ) {                                      // CHANGED:
-			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );   // CHANGED:
-		}                                                                                // CHANGED:
+		// Rename the auto-generated first submenu to “PostPress Composer”
+		global $submenu;
+		if ( isset( $submenu[ $menu_slug ][0] ) ) {
+			$submenu[ $menu_slug ][0][0] = __( 'PostPress Composer', 'postpress-ai' );
+		}
 
-		// Explicitly ensure the Composer submenu exists with the same slug as parent    // CHANGED:
-		add_submenu_page(                                                                // CHANGED:
-			$menu_slug,                                                                  // parent
-			__( 'PostPress Composer', 'postpress-ai' ),                                  // page title
-			__( 'PostPress Composer', 'postpress-ai' ),                                  // menu title
+		// Explicitly ensure the Composer submenu exists with the same slug as parent
+		add_submenu_page(
+			$menu_slug,                                 // parent
+			__( 'PostPress Composer', 'postpress-ai' ), // page title
+			__( 'PostPress Composer', 'postpress-ai' ), // menu title
 			$capability,
-			$menu_slug,                                                                  // same slug as parent
+			$menu_slug,                                 // same slug as parent
 			'ppa_render_composer'
 		);
 
-		// Testbed submenu under PostPress AI                                            // CHANGED:
-		add_submenu_page(                                                                // CHANGED:
-			$menu_slug,                                                                  // parent = PostPress AI
-			__( 'PPA Testbed', 'postpress-ai' ),                                         // page title
-			__( 'Testbed', 'postpress-ai' ),                                             // menu title
+		// Testbed submenu under PostPress AI
+		add_submenu_page(
+			$menu_slug,                                 // parent = PostPress AI
+			__( 'PPA Testbed', 'postpress-ai' ),        // page title
+			__( 'Testbed', 'postpress-ai' ),            // menu title
 			$capability,
-			'ppa-testbed',                                                                // slug
-			'ppa_render_testbed'                                                          // callback
+			'ppa-testbed',                              // slug
+			'ppa_render_testbed'                        // callback
 		);
 
-		// Remove any legacy Tools→Testbed to avoid duplicates                           // CHANGED:
-		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                // CHANGED:
+		// Remove any legacy Tools→Testbed to avoid duplicates (harmless if not present).                 // CHANGED:
+		remove_submenu_page( 'tools.php', 'ppa-testbed' );                                               // CHANGED:
 
 		error_log( 'PPA: admin_menu registered (slug=' . $menu_slug . ', cap=' . $capability . ')' );
 	}
@@ -89,8 +95,8 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
 		}
 
-		$composer = trailingslashit( plugin_dir_path( dirname( __FILE__, 2 ) ) ) . 'inc/admin/composer.php';
-		// Above resolves to .../postpress-ai/inc/admin/composer.php
+		// Prefer constant defined by root loader; avoids nested plugin_dir_path drift.                     // CHANGED:
+		$composer = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/composer.php';                           // CHANGED:
 
 		if ( file_exists( $composer ) ) {
 			error_log( 'PPA: including composer.php' );
@@ -110,52 +116,55 @@ if ( ! function_exists( 'ppa_render_composer' ) ) {
  * Testbed renderer (submenu).
  * Looks for one of the known filenames, falls back to minimal stub if absent.
  */
-if ( ! function_exists( 'ppa_render_testbed' ) ) {                                          // CHANGED:
-	function ppa_render_testbed() {                                                          // CHANGED:
-		if ( ! current_user_can( 'edit_posts' ) ) {                                         // CHANGED:
-			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) ); // CHANGED:
-		}                                                                                    // CHANGED:
+if ( ! function_exists( 'ppa_render_testbed' ) ) {
+	function ppa_render_testbed() {
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );
+		}
 
-		$base = trailingslashit( plugin_dir_path( dirname( __FILE__, 2 ) ) ) . 'inc/admin/'; // CHANGED:
-		$candidates = array(                                                                 // CHANGED:
-			$base . 'testbed.php',                                                           // CHANGED:
-			$base . 'ppa-testbed.php',                                                       // CHANGED:
-		);                                                                                   // CHANGED:
-		foreach ( $candidates as $file ) {                                                   // CHANGED:
-			if ( file_exists( $file ) ) {                                                    // CHANGED:
-				error_log( 'PPA: including ' . basename( $file ) );                          // CHANGED:
-				require $file;                                                               // CHANGED:
-				return;                                                                      // CHANGED:
-			}                                                                                // CHANGED:
-		}                                                                                    // CHANGED:
+		// Prefer constant-defined base dir for reliability.                                              // CHANGED:
+		$base = trailingslashit( PPA_PLUGIN_DIR ) . 'inc/admin/';                                         // CHANGED:
 
-		// Fallback UI — no inline JS/CSS; centralized enqueue provides styles/scripts.      // CHANGED:
-		error_log( 'PPA: testbed UI not found in inc/admin/ — using fallback markup' );      // CHANGED:
+		// Prefer the new template name first, then legacy.
+		$candidates = array(
+			$base . 'ppa-testbed.php',
+			$base . 'testbed.php',
+		);
+
+		foreach ( $candidates as $file ) {
+			if ( file_exists( $file ) ) {
+				error_log( 'PPA: including ' . basename( $file ) );
+				require $file;
+				return;
+			}
+		}
+
+		// Fallback UI — no inline JS/CSS; centralized enqueue provides styles/scripts.
+		error_log( 'PPA: testbed UI not found in inc/admin/ — using fallback markup' );
 		?>
-		<div class="wrap ppa-testbed-wrap">                                                  <!-- CHANGED -->
-			<h1><?php echo esc_html__( 'Testbed', 'postpress-ai' ); ?></h1>                  <!-- CHANGED -->
+		<div class="wrap ppa-testbed-wrap">
+			<h1><?php echo esc_html__( 'Testbed', 'postpress-ai' ); ?></h1>
 			<p class="ppa-hint">
 				<?php echo esc_html__( 'This is the PostPress AI Testbed. Use it to send preview/draft requests to the backend.', 'postpress-ai' ); ?>
 			</p>
 
-			<div class="ppa-form-group">
-				<label for="ppaTbTitle"><?php echo esc_html__( 'Title', 'postpress-ai' ); ?></label>
-				<input type="text" id="ppaTbTitle" placeholder="<?php echo esc_attr__( 'Enter a title…', 'postpress-ai' ); ?>">
-			</div>
+			<!-- Status area consumed by JS -->
+			<div id="ppa-testbed-status" class="ppa-notice" role="status" aria-live="polite"></div>
 
 			<div class="ppa-form-group">
-				<label for="ppaTbContent"><?php echo esc_html__( 'Content', 'postpress-ai' ); ?></label>
-				<textarea id="ppaTbContent" rows="8" placeholder="<?php echo esc_attr__( 'Optional: seed content or notes…', 'postpress-ai' ); ?>"></textarea>
+				<label for="ppa-testbed-input"><?php echo esc_html__( 'Payload (JSON or brief text)', 'postpress-ai' ); ?></label>
+				<textarea id="ppa-testbed-input" rows="8" placeholder="<?php echo esc_attr__( 'Enter JSON for advanced control or plain text for a quick brief…', 'postpress-ai' ); ?>"></textarea>
 			</div>
 
-			<div class="ppa-actions" role="group" aria-label="Testbed actions">
-				<button id="ppaTbPreview" class="ppa-btn" type="button"><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></button>
-				<button id="ppaTbDraft" class="ppa-btn ppa-btn-secondary" type="button"><?php echo esc_html__( 'Save to Draft', 'postpress-ai' ); ?></button>
+			<div class="ppa-actions" role="group" aria-label="<?php echo esc_attr__( 'Testbed actions', 'postpress-ai' ); ?>">
+				<button id="ppa-testbed-preview" class="ppa-btn" type="button"><?php echo esc_html__( 'Preview', 'postpress-ai' ); ?></button>
+				<button id="ppa-testbed-store" class="ppa-btn ppa-btn-secondary" type="button"><?php echo esc_html__( 'Save to Draft', 'postpress-ai' ); ?></button>
 			</div>
 
-			<div id="ppaTbLog" class="ppa-log" aria-live="polite" aria-atomic="true"></div>
+			<h2 class="screen-reader-text"><?php echo esc_html__( 'Response Output', 'postpress-ai' ); ?></h2>
+			<pre id="ppa-testbed-output" aria-live="polite" aria-label="<?php echo esc_attr__( 'Preview or store response output', 'postpress-ai' ); ?>"></pre>
 		</div>
 		<?php
-		// End fallback markup                                                              // CHANGED:
-	}                                                                                        // CHANGED:
+		// End fallback markup
+	}
 }
