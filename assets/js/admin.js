@@ -14,7 +14,9 @@
  * 2026-01-24: FIX: Translate invalid_json hardening — salvage JSON from noisy WP output + detect HTML/401 + normalize WP ajax envelope. // CHANGED:
  * 2026-01-25: FIX: Prevent Output Language translation polling from overwriting newly generated previews (ppa:new_preview event). // CHANGED:
 * 2026-02-18: FIX: Output Language “Original” correctly restores the generated English preview (prevents freezing translated HTML as baseline). // CHANGED:
- *
+ 
+ * 2026-02-18: FIX: Guide genre title guard — prevents the first outline item (or generic section headings) from being used as the post title. // CHANGED:
+*
  *            - Strips BOM + trims + extracts first JSON object/array region                                  // CHANGED:
  *            - Adds X-WP-Nonce + X-Requested-With + Accept headers                                            // CHANGED:
  *            - Converts {success,data} into consistent {ok:true|false,...}                                    // CHANGED:
@@ -26,7 +28,8 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-02-18.1'; // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
+  var PPA_JS_VER = 'admin.v2026-02-18.3'; // CHANGED: title safety for Auto/Guide + Store
+  try { console.info('PPA: admin.js loaded →', PPA_JS_VER); } catch (eV0) {} // CHANGED: // CHANGED: add Guide genre title guard (avoid outline item as title) // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -784,6 +787,49 @@
       payload.target_sites = [ statusVal ];
     }
 
+    // CHANGED: Title safety (Store) — prevent the WordPress draft title from becoming Outline item #1.
+    // Root cause: On Save Draft, PHP store endpoint uses payload.title for post_title.
+    // If payload.title is blank OR is "1. Clarity: ..." (outline item), WP draft title is wrong. // CHANGED:
+    try { // CHANGED:
+      var subjEl = $('#ppa-subject'); // CHANGED:
+      var subj = subjEl ? String(subjEl.value || '').trim() : ''; // CHANGED:
+      if (!subj && payload.subject) subj = String(payload.subject || '').trim(); // CHANGED:
+      subj = ppaCleanTitle(subj); // CHANGED:
+
+      if (subj) { // CHANGED:
+        var titleNow = ppaCleanTitle(payload.title); // CHANGED:
+        var tNorm = ppaNormalizeComparableTitle(titleNow); // CHANGED:
+
+        // Pull outline item #1 from the rendered Preview pane (most reliable). // CHANGED:
+        var oFirst = ''; // CHANGED:
+        try { // CHANGED:
+          var pane2 = getPreviewPane(); // CHANGED:
+          if (pane2) { // CHANGED:
+            var li1 = null; // CHANGED:
+            try { li1 = pane2.querySelector('.ppa-outline-list .ppa-outline-item:first-child'); } catch (eOL0) { li1 = null; } // CHANGED:
+            if (li1) { // CHANGED:
+              var a1 = null; // CHANGED:
+              try { a1 = li1.querySelector('a'); } catch (eOL1) { a1 = null; } // CHANGED:
+              oFirst = a1 ? String(a1.textContent || '') : String(li1.textContent || ''); // CHANGED:
+            } // CHANGED:
+          } // CHANGED:
+        } catch (eOL2) { oFirst = ''; } // CHANGED:
+        oFirst = String(oFirst || '').trim(); // CHANGED:
+        var oNorm2 = ppaNormalizeComparableTitle(oFirst); // CHANGED:
+
+        // Decide if we should force Subject into payload.title. // CHANGED:
+        var shouldUseSubject = false; // CHANGED:
+        if (!titleNow) shouldUseSubject = true; // CHANGED:
+        if (!shouldUseSubject && tNorm && oNorm2 && tNorm === oNorm2) shouldUseSubject = true; // CHANGED:
+        if (!shouldUseSubject && ppaIsGenericSectionHeading(tNorm)) shouldUseSubject = true; // CHANGED:
+
+        if (shouldUseSubject) { // CHANGED:
+          payload.title = subj; // CHANGED:
+          if (!payload.slug) payload.slug = sanitizeSlug(payload.title); // CHANGED:
+        } // CHANGED:
+      } // CHANGED:
+    } catch (eTitleGuard) {} // CHANGED:
+
     if (!payload.content || !String(payload.content).trim()) {
       var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
@@ -1202,15 +1248,101 @@
     return unwrappedData;
   }
 
+
+  // -------------------------------------------------------------------------
+  // CHANGED: Guide genre title guard
+  // Problem: When Genre is "Guide", the model sometimes returns the FIRST outline item as the post title.
+  // Fix: If genre=guide AND generated title matches outline item #1 (or is a generic section heading),
+  //      then prefer the user's Subject instead for the WP title field.
+  // -------------------------------------------------------------------------
+  function ppaGetSelectedGenreValue() { // CHANGED:
+    var genreEl = $('#ppa-genre') || $('#ppa_genre'); // CHANGED:
+    return genreEl ? String(genreEl.value || '').trim().toLowerCase() : ''; // CHANGED:
+  }
+
+  function ppaGetSubjectValue() { // CHANGED:
+    var subjectEl = $('#ppa-subject'); // CHANGED:
+    return subjectEl ? String(subjectEl.value || '').trim() : ''; // CHANGED:
+  }
+
+  function ppaFirstOutlineItem(result) { // CHANGED:
+    try {
+      if (!result || typeof result !== 'object') return ''; // CHANGED:
+      var outlineText = outlineToMarkdown(result.outline); // CHANGED:
+      if (!outlineText) return ''; // CHANGED:
+      var parts = ppaParseOutlineText(outlineText); // CHANGED:
+      return (parts && parts.length) ? String(parts[0] || '').trim() : ''; // CHANGED:
+    } catch (e0) {
+      return ''; // CHANGED:
+    }
+  }
+
+  function ppaIsGenericSectionHeading(normTitle) { // CHANGED:
+    // normTitle should be output of ppaNormalizeComparableTitle(...)                         // CHANGED:
+    var t = String(normTitle || '').trim().toLowerCase(); // CHANGED:
+    if (!t) return false; // CHANGED:
+
+    // Common "not a real title" headings that show up as outline items.                      // CHANGED:
+    var generic = { // CHANGED:
+      'introduction': 1, // CHANGED:
+      'intro': 1, // CHANGED:
+      'overview': 1, // CHANGED:
+      'summary': 1, // CHANGED:
+      'conclusion': 1, // CHANGED:
+      'final thoughts': 1, // CHANGED:
+      'next steps': 1, // CHANGED:
+      'table of contents': 1, // CHANGED:
+      'contents': 1, // CHANGED:
+      'toc': 1, // CHANGED:
+      'what youll learn': 1, // CHANGED:
+      'what you will learn': 1, // CHANGED:
+      'resources': 1, // CHANGED:
+      'faq': 1, // CHANGED:
+      'frequently asked questions': 1 // CHANGED:
+    };
+
+    if (generic[t]) return true; // CHANGED:
+
+    // Step-style outline headings masquerading as titles.                                    // CHANGED:
+    if (/^step\s+\d+/.test(t)) return true; // CHANGED:
+    if (/^chapter\s+\d+/.test(t)) return true; // CHANGED:
+    if (/^part\s+\d+/.test(t)) return true; // CHANGED:
+
+    return false; // CHANGED:
+  }
+
+  function ppaGuideTitleGuard(result, aiTitle) { // CHANGED:
+    // CHANGED: This guard is NO LONGER limited to Genre=Guide.
+    // Reason: Auto genre can still generate an "AI title" that is literally Outline item #1
+    // (e.g. "1. Clarity: ..."), and that later becomes the WordPress post_title on Save Draft. // CHANGED:
+
+    var subject = ppaCleanTitle(ppaGetSubjectValue()); // CHANGED:
+    if (!subject) return aiTitle; // CHANGED:
+
+    var firstOutline = ppaFirstOutlineItem(result); // CHANGED:
+    var aiNorm = ppaNormalizeComparableTitle(aiTitle); // CHANGED:
+    var outlineNorm = ppaNormalizeComparableTitle(firstOutline); // CHANGED:
+
+    // If the AI title matches outline item #1, or looks like a generic section heading, use Subject instead. // CHANGED:
+    if (aiNorm && outlineNorm && aiNorm === outlineNorm) return subject; // CHANGED:
+    if (ppaIsGenericSectionHeading(aiNorm)) return subject; // CHANGED:
+
+    return aiTitle; // CHANGED:
+  }
+
   function applyGenerateResult(result) {
     if (!result || typeof result !== 'object') return { titleFilled: false, excerptFilled: false, slugFilled: false };
 
-    var title = ppaCleanTitle(result.title || '');
+    var aiTitle = ppaCleanTitle(result.title || ''); // CHANGED:
+    var title = ppaGuideTitleGuard(result, aiTitle); // CHANGED: guard Guide titles from outline-item titles
     var bodyMd = String(result.body_markdown || result.body || '');
     var meta = result.meta || result.seo || {};
 
-    // CHANGED: Strip duplicate title heading from body markdown before converting to HTML.
-    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title);
+    // CHANGED: Strip duplicate title headings from body markdown before converting to HTML.
+    // We strip against: AI title, safe title, and outline item #1 (covers Guide edge cases). // CHANGED:
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, aiTitle); // CHANGED:
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, title); // CHANGED:
+    bodyMd = ppaStripLeadingTitleHeading(bodyMd, ppaFirstOutlineItem(result)); // CHANGED:
 
     var filled = { titleFilled: false, excerptFilled: false, slugFilled: false };
 
@@ -1398,6 +1530,8 @@
 
     withBusy(function () {
       var payload = buildStorePayload('draft');
+      try { console.info('PPA: draft payload (title guard) →', { subject: payload.subject, title: payload.title, slug: payload.slug }); } catch (eDbg1) {} // CHANGED:
+
       return apiPost('ppa_store', payload).then(function (res) {
         var wp = unwrapWpAjax(res.body);
         var data = wp.hasEnvelope ? wp.data : res.body;
@@ -1472,6 +1606,8 @@
 
     withBusy(function () {
       var payload = buildStorePayload('publish');
+      try { console.info('PPA: publish payload (title guard) →', { subject: payload.subject, title: payload.title, slug: payload.slug }); } catch (eDbg2) {} // CHANGED:
+
       return apiPost('ppa_store', payload).then(function (res) {
         var wp = unwrapWpAjax(res.body);
         var data = wp.hasEnvelope ? wp.data : res.body;
