@@ -1,53 +1,166 @@
 /**
  * PostPress AI — Composer Preview Spinner
- * Path: assets/js/admin-preview-spinner.js
+ * File: assets/js/admin-preview-spinner.js
  *
  * ========= CHANGE LOG =========
- * 2026-02-18 — UI: Loader-circle-9 updated to PostPress AI brand color #ff6c00.      // CHANGED:
- *            — TODO: Display clear notification when Target Audience is empty.       // CHANGED:
- *            — Keep stable fetch wrapper + preview overlay sizing sync intact.
+ * 2026-02-18 — FIX: Restore preview loading overlay (was not showing).                 // CHANGED:
+ * 2026-02-18 — FIX: Show loader overlay when switching languages (XHR + fetch hook).   // CHANGED:
+ * 2026-02-18 — UI: When translating, show target language name under the spinner.     // CHANGED:
  *
- * 2025-12-22.1: Detect preview/generate actions when `action` is sent in POST body (FormData/URLSearchParams/x-www-form-urlencoded),
- *               not only URL query; de-dupe injected <style> tag; add a version tag for grep/logs.
- *
- * Purpose:
- * - Add a loading overlay on the preview column whenever PostPress AI runs Preview or Generate requests.
- *
- * TODO (UI validation):
- * - Display a clear notification indicating that the Target Audience field must be filled in.
+ * Notes:
+ * - This script is intentionally defensive: it works whether requests use fetch() OR XMLHttpRequest().
+ * - It ONLY watches WP admin-ajax actions for PostPress AI preview/generate/translate.
  */
 
 (function () {
   'use strict';
 
-  var PPA_SPINNER_VER = 'preview-spinner.v2026-02-18.3'; // CHANGED:
-  window.PPA_PREVIEW_SPINNER_VER = PPA_SPINNER_VER; // CHANGED:
-
+  // Prevent double-init
   if (window.__PPA_PREVIEW_SPINNER_INIT__) return;
   window.__PPA_PREVIEW_SPINNER_INIT__ = true;
 
-  var root = document.getElementById('ppa-composer');
-  if (!root || typeof window.fetch !== 'function') return;
+  var PPA_SPINNER_VER = 'admin-preview-spinner.v2026-02-18.4'; // CHANGED:
+  window.PPA_PREVIEW_SPINNER_VER = PPA_SPINNER_VER; // CHANGED:
 
-  var previewPane = document.getElementById('ppa-preview-pane');
-  if (!previewPane) return;
+  // --- Locate preview pane (must exist for overlay to be meaningful) ---
+  var previewPane =
+    document.getElementById('ppa-preview-pane') ||
+    document.querySelector('[data-ppa-preview-pane]') ||
+    document.querySelector('.ppa-preview-pane');
 
-  // previewPane.parentElement is typically the scroll container for the preview column.
-  var overlayContainer = previewPane.parentElement || previewPane;
+  if (!previewPane) {
+    // No preview pane found; nothing to do.
+    return;
+  }
 
+  // --- Helpers ---
+  function safeStr(v) {
+    return (v == null) ? '' : String(v);
+  }
+
+  function isAdminAjaxUrl(url) {
+    var u = safeStr(url).toLowerCase();
+    return u.indexOf('admin-ajax.php') !== -1;
+  }
+
+  function extractActionFromUrl(url) {
+    var u = safeStr(url).toLowerCase();
+    // Query-string action (most common)
+    if (u.indexOf('action=ppa_preview') !== -1) return 'ppa_preview';
+    if (u.indexOf('action=ppa_generate') !== -1) return 'ppa_generate';
+    if (u.indexOf('action=ppa_translate_preview') !== -1) return 'ppa_translate_preview';
+    return '';
+  }
+
+  function extractActionFromBody(body) {
+    try {
+      // URLSearchParams
+      if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        return safeStr(body.get('action')).toLowerCase();
+      }
+
+      // FormData
+      if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        return safeStr(body.get('action')).toLowerCase();
+      }
+
+      // String body (x-www-form-urlencoded)
+      if (typeof body === 'string') {
+        var m = body.match(/(?:^|&)action=([^&]+)/i);
+        if (m && m[1]) return decodeURIComponent(m[1]).toLowerCase();
+      }
+    } catch (e) {}
+
+    return '';
+  }
+
+  function getWatchedKind(url, body) {
+    // Only watch WP admin-ajax for our 3 actions.
+    if (!isAdminAjaxUrl(url)) return '';
+
+    // Prefer URL param action.
+    var aUrl = extractActionFromUrl(url);
+    if (aUrl) return aUrl;
+
+    // Fallback: POST body action.
+    var aBody = extractActionFromBody(body);
+    if (aBody === 'ppa_preview' || aBody === 'ppa_generate' || aBody === 'ppa_translate_preview') return aBody;
+
+    return '';
+  }
+
+  function isScrollable(el) {
+    if (!el) return false;
+    try {
+      var cs = window.getComputedStyle(el);
+      var oy = cs ? cs.overflowY : '';
+      var scrollLike = (oy === 'auto' || oy === 'scroll' || oy === 'overlay');
+      if (!scrollLike) return false;
+      return (el.scrollHeight > el.clientHeight + 2);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function pickOverlayHost() {
+    // Prefer a known wrapper if present, otherwise pick the best scrollable container near previewPane.
+    var wrapper =
+      (previewPane.closest && previewPane.closest('.ppa-preview, .ppa-preview-col, .ppa-preview-column, .ppa-preview-wrap, .ppa-preview-pane-wrap')) ||
+      previewPane.parentElement ||
+      previewPane;
+
+    var candidates = [
+      wrapper,
+      previewPane.parentElement,
+      previewPane,
+      wrapper && wrapper.parentElement
+    ];
+
+    for (var i = 0; i < candidates.length; i++) {
+      if (isScrollable(candidates[i])) return candidates[i];
+    }
+
+    // If nothing is clearly scrollable, use wrapper.
+    return wrapper || previewPane;
+  }
+
+  function getTargetLanguageLabel() { // CHANGED:
+    try {
+      var sel =
+        document.getElementById('ppa-output-language') ||
+        document.querySelector('select[name="ppa_output_language"]') ||
+        document.querySelector('select[data-ppa-output-language]');
+
+      if (!sel || !sel.options || sel.selectedIndex == null) return '';
+      var opt = sel.options[sel.selectedIndex];
+      var label = opt && opt.textContent ? String(opt.textContent).trim() : '';
+      if (!label) return '';
+      if (label.toLowerCase() === 'original') return '';
+      return label;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // --- Build overlay UI ---
+  var host = pickOverlayHost();
+
+  // Ensure host is positioned for absolute overlay
   try {
-    var cs = window.getComputedStyle(overlayContainer);
-    if (cs && cs.position === 'static') overlayContainer.style.position = 'relative';
+    var hostCS = window.getComputedStyle(host);
+    if (hostCS && hostCS.position === 'static') host.style.position = 'relative';
   } catch (e) {}
 
   var overlay = document.createElement('div');
   overlay.className = 'ppa-preview-spinner-overlay';
   overlay.setAttribute('aria-hidden', 'true');
+  overlay.style.display = 'none';
+  overlay.style.opacity = '0';
 
   var spinnerWrap = document.createElement('div');
   spinnerWrap.className = 'ppa-preview-spinner';
 
-  // loader-circle-9 markup
+  // loader-circle-9 markup (kept minimal)
   var loader = document.createElement('div');
   loader.className = 'loader-circle-9';
   loader.setAttribute('role', 'status');
@@ -58,84 +171,127 @@
   loader.appendChild(loaderSpan);
 
   spinnerWrap.appendChild(loader);
+
+  // CHANGED: translate label under spinner
+  var spinnerLabel = document.createElement('div');
+  spinnerLabel.className = 'ppa-preview-spinner-label';
+  spinnerLabel.setAttribute('aria-hidden', 'true');
+  spinnerLabel.textContent = '';
+  spinnerLabel.style.display = 'none';
+  spinnerWrap.appendChild(spinnerLabel);
+
   overlay.appendChild(spinnerWrap);
-  overlayContainer.appendChild(overlay);
+  host.appendChild(overlay);
 
-  overlay.style.display = 'none';
-  overlay.style.opacity = '0';
-
-  var activeCount = 0;
-  var fadeTimeout = null;
-
-  function safeNum(n) { return (typeof n === 'number' && isFinite(n)) ? n : 0; }
-
-  // Keep overlay covering the visible portion of the scroll container while busy.
+  // Keep overlay pinned to visible viewport inside scroll host.
   function syncOverlayViewport() {
     try {
-      var h = Math.max(safeNum(overlayContainer.clientHeight), 0);
-      var t = safeNum(overlayContainer.scrollTop);
+      var h = Math.max(host.clientHeight || 0, 0);
+      var t = host.scrollTop || 0;
 
+      // When host scrolls, keep overlay at the visible top.
       overlay.style.top = t + 'px';
       overlay.style.height = h + 'px';
     } catch (e) {}
   }
 
-  function showSpinner() {
+  var activeCount = 0;
+  var activeTranslateCount = 0; // CHANGED:
+  var fadeTimeout = null;
+
+  function showOverlay() {
     if (fadeTimeout) { clearTimeout(fadeTimeout); fadeTimeout = null; }
     syncOverlayViewport();
     overlay.style.display = 'flex';
+
+    // Force reflow so opacity transition reliably kicks in.
+    // eslint-disable-next-line no-unused-expressions
+    overlay.offsetHeight;
+
     overlay.style.opacity = '1';
   }
 
-  function hideSpinner() {
+  function hideOverlay() {
     overlay.style.opacity = '0';
     fadeTimeout = setTimeout(function () {
       overlay.style.display = 'none';
     }, 260);
   }
 
-  function beginSpinner() {
+  function setTranslateLabelFromUi() { // CHANGED:
+    var label = getTargetLanguageLabel();
+    spinnerLabel.textContent = label || '';
+    spinnerLabel.style.display = label ? 'block' : 'none';
+  }
+
+  function clearTranslateLabel() { // CHANGED:
+    spinnerLabel.textContent = '';
+    spinnerLabel.style.display = 'none';
+  }
+
+  function begin(kind) { // CHANGED:
     activeCount++;
-    if (activeCount === 1) showSpinner();
+
+    if (kind === 'ppa_translate_preview') {
+      activeTranslateCount++;
+      setTranslateLabelFromUi();
+    }
+
+    if (activeCount === 1) showOverlay();
+    else syncOverlayViewport();
   }
 
-  function endSpinner() {
+  function end(kind) { // CHANGED:
+    if (kind === 'ppa_translate_preview') {
+      if (activeTranslateCount > 0) activeTranslateCount--;
+      if (activeTranslateCount <= 0) { activeTranslateCount = 0; clearTranslateLabel(); }
+    }
+
     if (activeCount > 0) activeCount--;
-    if (activeCount <= 0) { activeCount = 0; hideSpinner(); }
+    if (activeCount <= 0) { activeCount = 0; hideOverlay(); }
   }
 
-  function onMaybeUpdate() { if (activeCount > 0) syncOverlayViewport(); }
+  function onMaybeUpdate() {
+    if (activeCount > 0) syncOverlayViewport();
+  }
 
-  try { overlayContainer.addEventListener('scroll', onMaybeUpdate, { passive: true }); } catch (e1) {}
+  try { host.addEventListener('scroll', onMaybeUpdate, { passive: true }); } catch (e1) {}
   try { window.addEventListener('resize', onMaybeUpdate); } catch (e2) {}
 
   try {
     if (typeof ResizeObserver !== 'undefined') {
       var ro = new ResizeObserver(onMaybeUpdate);
-      ro.observe(overlayContainer);
+      ro.observe(host);
     }
   } catch (e3) {}
 
-  try {
-    if (typeof MutationObserver !== 'undefined') {
-      var mo = new MutationObserver(onMaybeUpdate);
-      mo.observe(previewPane, { childList: true, subtree: true, characterData: true });
-    }
-  } catch (e4) {}
-
-  // Styles (single injected tag, overwritten to ensure correct loader CSS)
+  // --- Styles: injected once ---
   var css =
     '.ppa-preview-spinner-overlay{' +
       'position:absolute;left:0;right:0;top:0;height:100%;' +
       'display:none;align-items:center;justify-content:center;' +
+      'z-index:9999;' + // CHANGED:
+      'pointer-events:none;' +
+      '--ppa-brand:#ff6c00;' + // CHANGED:
       'background:radial-gradient(circle at center,rgba(0,0,0,0.12) 0,rgba(0,0,0,0.28) 45%,rgba(0,0,0,0.4) 100%);' +
       'backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);' +
-      'z-index:10;transition:opacity 0.24s ease-out;pointer-events:none;' +
+      'transition:opacity 0.24s ease-out;' +
     '}' +
-    '.ppa-preview-spinner{display:flex;align-items:center;justify-content:center;}' +
+    '.ppa-preview-spinner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;}' +
+    '.ppa-preview-spinner-label{' +
+      'margin-top:2px;' +
+      'font-family:inherit;' +
+      'font-size:14px;' +
+      'font-weight:700;' +
+      'letter-spacing:0.02em;' +
+      'color:var(--ppa-brand);' +
+      'text-align:center;' +
+      'opacity:0.95;' +
+      'text-transform:none;' +
+      'text-shadow:0 2px 12px rgba(0,0,0,.55);' +
+    '}' +
 
-    /* Loader-circle-9 (adapted to work inside our overlay; no body styles) */
-    ':root{--ppa-brand:#ff6c00;}' + // CHANGED:
+    /* Loader-circle-9 (scoped) */
     '.loader-circle-9{' +
       'position:relative;' +
       'width:70px;height:70px;' +
@@ -146,7 +302,7 @@
       'line-height:70px;' +
       'font-family:sans-serif;' +
       'font-size:12px;' +
-      'color:var(--ppa-brand);' + // CHANGED:
+      'color:var(--ppa-brand);' +
       'text-transform:uppercase;' +
       'box-shadow:0 0 20px rgba(0,0,0,.5);' +
       'user-select:none;' +
@@ -156,8 +312,8 @@
       'position:absolute;top:-3px;left:-3px;' +
       'width:100%;height:100%;' +
       'border:3px solid transparent;' +
-      'border-top:3px solid var(--ppa-brand);' + // CHANGED:
-      'border-right:3px solid var(--ppa-brand);' + // CHANGED:
+      'border-top:3px solid var(--ppa-brand);' +
+      'border-right:3px solid var(--ppa-brand);' +
       'border-radius:50%;' +
       'animation:ppa_loader_animateC 2s linear infinite;' +
     '}' +
@@ -177,10 +333,10 @@
       'position:absolute;' +
       'width:16px;height:16px;' +
       'border-radius:50%;' +
-      'background:var(--ppa-brand);' + // CHANGED:
+      'background:var(--ppa-brand);' +
       'top:-6px;' +
       'right:-8px;' +
-      'box-shadow:0 0 18px rgba(255,108,0,.95);' + // CHANGED:
+      'box-shadow:0 0 18px rgba(255,108,0,.95);' +
     '}' +
     '@keyframes ppa_loader_animateC{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}' +
     '@keyframes ppa_loader_animate{0%{transform:rotate(45deg)}100%{transform:rotate(405deg)}}';
@@ -194,49 +350,60 @@
   }
   styleTag.textContent = css;
 
-  var originalFetch = window.fetch;
+  // --- Hook: fetch() ---
+  if (typeof window.fetch === 'function') {
+    var originalFetch = window.fetch;
+    window.fetch = function (input, init) { // CHANGED:
+      var url = (typeof input === 'string') ? input : (input && input.url) || '';
+      var body = init ? init.body : undefined;
+      var kind = getWatchedKind(url, body);
 
-  function extractAction(init) {
-    if (!init || !init.body) return '';
-    try {
-      if (typeof URLSearchParams !== 'undefined' && init.body instanceof URLSearchParams) {
-        return String(init.body.get('action') || '').toLowerCase();
-      }
-      if (typeof FormData !== 'undefined' && init.body instanceof FormData) {
-        return String(init.body.get('action') || '').toLowerCase();
-      }
-      if (typeof init.body === 'string') {
-        var m = init.body.match(/(?:^|&)action=([^&]+)/i);
-        if (m && m[1]) return decodeURIComponent(m[1]).toLowerCase();
-      }
-    } catch (e) {}
-    return '';
+      if (kind) begin(kind);
+
+      return originalFetch.call(window, input, init)
+        .then(function (resp) {
+          if (kind) end(kind);
+          return resp;
+        })
+        .catch(function (err) {
+          if (kind) end(kind);
+          throw err;
+        });
+    };
   }
 
-  function isWatched(input, init) {
-    var url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (!url || url.toLowerCase().indexOf('admin-ajax.php') === -1) return false;
+  // --- Hook: XMLHttpRequest (covers jQuery $.ajax / $.post) ---
+  if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype) {
+    var origOpen = XMLHttpRequest.prototype.open;
+    var origSend = XMLHttpRequest.prototype.send;
 
-    if (url.indexOf('action=ppa_preview') !== -1 || url.indexOf('action=ppa_generate') !== -1) return true;
+    XMLHttpRequest.prototype.open = function (method, url) { // CHANGED:
+      this.__ppa_url = url;
+      return origOpen.apply(this, arguments);
+    };
 
-    var a = extractAction(init);
-    return a === 'ppa_preview' || a === 'ppa_generate';
+    XMLHttpRequest.prototype.send = function (body) { // CHANGED:
+      try {
+        var url = this.__ppa_url || '';
+        var kind = getWatchedKind(url, body);
+
+        if (kind) {
+          begin(kind);
+
+          var xhr = this;
+          var done = function () {
+            try { xhr.removeEventListener('loadend', done); } catch (e1) {}
+            end(kind);
+          };
+
+          // loadend fires for success/error/abort/timeout
+          xhr.addEventListener('loadend', done);
+        }
+      } catch (e2) {}
+
+      return origSend.apply(this, arguments);
+    };
   }
 
-  window.fetch = function (input, init) {
-    var watch = isWatched(input, init);
-    if (watch) beginSpinner();
-
-    return originalFetch.call(window, input, init)
-      .then(function (r) {
-        if (watch) endSpinner();
-        return r;
-      })
-      .catch(function (e) {
-        if (watch) endSpinner();
-        throw e;
-      });
-  };
-
-  console.info('PPA: preview spinner initialized → ' + PPA_SPINNER_VER);
+  console.info('PPA: preview spinner ready → ' + PPA_SPINNER_VER);
 })();
