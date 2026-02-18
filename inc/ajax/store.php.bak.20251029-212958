@@ -1,0 +1,215 @@
+<?php
+namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.
+
+/*
+CHANGE LOG
+----------
+2025-10-29 • Implement Save-to-Draft mode; robust JSON+form normalization; echo-only fallback;           # CHANGED:
+             capability checks; debug breadcrumbs; single-backslash namespace; no leading "\" calls.     # CHANGED:
+*/
+
+defined('ABSPATH') || exit;
+
+// --- Debug breadcrumbs (non-sensitive) -------------------------------------------------------------- # CHANGED:
+error_log('PPA: store.php loaded');                                                                     # CHANGED:
+
+/**
+ * Normalize mixed JSON/form input into a canonical array.
+ *
+ * @return array{data:array, meta:array, err:?string}
+ */
+function ppa_normalize_request(): array {                                                                # CHANGED:
+    $raw     = file_get_contents('php://input');
+    $ct      = isset($_SERVER['CONTENT_TYPE']) ? (string) $_SERVER['CONTENT_TYPE'] : '';
+    $is_json = stripos($ct, 'application/json') !== false;
+    $method  = isset($_SERVER['REQUEST_METHOD']) ? (string) $_SERVER['REQUEST_METHOD'] : '';
+    $payload = [];
+    $err     = null;
+
+    if ($is_json && $raw !== '') {
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $payload = $decoded;
+        } else {
+            $err = 'invalid json: ' . json_last_error_msg();
+        }
+    }
+
+    // If JSON missing/invalid, use POST (typical admin-ajax form).
+    if (empty($payload) && !empty($_POST)) {
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $payload = $_POST;
+    }
+
+    // Canonical fields
+    $title   = isset($payload['title'])   ? $payload['title']   : '';
+    $content = isset($payload['content']) ? $payload['content'] : '';
+    $excerpt = isset($payload['excerpt']) ? $payload['excerpt'] : '';
+    $status  = isset($payload['status'])  ? $payload['status']  : '';
+    $slug    = isset($payload['slug'])    ? $payload['slug']    : '';
+    $mode    = isset($payload['mode'])    ? $payload['mode']    : '';
+
+    // Optional collections: allow array or CSV string
+    $tags       = isset($payload['tags']) ? $payload['tags'] : [];
+    $categories = isset($payload['categories']) ? $payload['categories'] : [];
+    $author     = isset($payload['author']) ? $payload['author'] : '';
+
+    if (is_string($tags)) {
+        $tags = array_filter(array_map('trim', explode(',', $tags)), 'strlen');
+    } elseif (!is_array($tags)) {
+        $tags = [];
+    }
+
+    if (is_string($categories)) {
+        $categories = array_filter(array_map('trim', explode(',', $categories)), 'strlen');
+    } elseif (!is_array($categories)) {
+        $categories = [];
+    }
+
+    // Sanitize (content/excerpt use wp_kses_post; others are text)
+    $title_s   = sanitize_text_field((string) $title);
+    $status_s  = sanitize_text_field((string) $status);
+    $slug_s    = sanitize_title((string) $slug);
+    $mode_s    = sanitize_text_field((string) $mode);
+    $author_s  = sanitize_text_field((string) $author);
+    $content_s = wp_kses_post((string) $content);
+    $excerpt_s = wp_kses_post((string) $excerpt);
+
+    $tags_s = [];
+    foreach ($tags as $t) { $tags_s[] = sanitize_text_field((string) $t); }
+
+    $cats_s = [];
+    foreach ($categories as $c) { $cats_s[] = sanitize_text_field((string) $c); }
+
+    $data = [
+        'title'      => $title_s,
+        'content'    => $content_s,
+        'excerpt'    => $excerpt_s,
+        'status'     => $status_s,
+        'slug'       => $slug_s,
+        'tags'       => $tags_s,
+        'categories' => $cats_s,
+        'author'     => $author_s,
+        'mode'       => $mode_s,
+    ];
+
+    $meta = [
+        'ct'      => $ct,
+        'raw_len' => strlen((string) $raw),
+        'json'    => $is_json ? 'yes' : 'no',
+        'method'  => $method,
+    ];
+
+    return ['data' => $data, 'meta' => $meta, 'err' => $err];
+}
+
+/**
+ * Guard helper for capability checks.
+ *
+ * @param string $cap Capability (e.g., 'edit_posts').
+ * @return array{ok:bool,code:int,msg:string}
+ */
+function ppa_guard_cap(string $cap): array {                                                             # CHANGED:
+    if (!is_user_logged_in()) {
+        return ['ok' => false, 'code' => 401, 'msg' => 'auth required'];
+    }
+    if (!current_user_can($cap)) {
+        return ['ok' => false, 'code' => 403, 'msg' => 'insufficient capability'];
+    }
+    return ['ok' => true, 'code' => 200, 'msg' => 'ok'];
+}
+
+/**
+ * Main handler for ppa_store.
+ * - mode=draft → creates a Draft post
+ * - otherwise → echo-only normalize response (no writes)
+ */
+function handle_store(): void {
+    $pack = ppa_normalize_request();                                                                     # CHANGED:
+
+    $mode = strtolower($pack['data']['mode'] ?? '');
+
+    if ($mode === 'draft') {
+        error_log('PPA: store mode=draft start');                                                        # CHANGED:
+        $g = ppa_guard_cap('edit_posts');                                                                # CHANGED:
+        if (!$g['ok']) {
+            wp_send_json(
+                ['ok' => false, 'error' => $g['msg'], 'ver' => 'postpress-ai.v2.1-2025-10-29'],
+                $g['code']
+            );
+        }
+
+        // Build post array (force draft)
+        $postarr = [
+            'post_title'   => $pack['data']['title'] ?: '(untitled)',
+            'post_content' => $pack['data']['content'],
+            'post_excerpt' => $pack['data']['excerpt'],
+            'post_status'  => 'draft',
+            'post_type'    => 'post',
+        ];
+
+        if ($pack['data']['slug'] !== '') {
+            $postarr['post_name'] = $pack['data']['slug'];
+        }
+
+        // Assign author if provided; else current user
+        $author_id = get_current_user_id();
+        if ($pack['data']['author'] !== '') {
+            $maybe = (int) $pack['data']['author'];
+            if ($maybe > 0) {
+                $author_id = $maybe;
+            }
+        }
+        $postarr['post_author'] = $author_id;
+
+        $post_id = wp_insert_post($postarr, true);
+        if (is_wp_error($post_id)) {
+            error_log('PPA: store mode=draft wp_error: ' . $post_id->get_error_message());               # CHANGED:
+            wp_send_json(
+                [
+                    'ok'      => false,
+                    'error'   => 'insert failed',
+                    'message' => $post_id->get_error_message(),
+                    'ver'     => 'postpress-ai.v2.1-2025-10-29',
+                ],
+                500
+            );
+        }
+
+        // Terms (best-effort; tolerate slugs/ids; ignore failures quietly)
+        if (!empty($pack['data']['categories'])) {
+            wp_set_post_terms((int) $post_id, $pack['data']['categories'], 'category', false);
+        }
+        if (!empty($pack['data']['tags'])) {
+            wp_set_post_terms((int) $post_id, $pack['data']['tags'], 'post_tag', false);
+        }
+
+        $edit_link = get_edit_post_link((int) $post_id, '');
+
+        $resp = [
+            'ok'        => true,
+            'post_id'   => (int) $post_id,
+            'status'    => 'draft',
+            'provider'  => 'local-fallback',
+            'edit_link' => $edit_link,
+            'ver'       => 'postpress-ai.v2.1-2025-10-29',
+        ];
+        error_log('PPA: store mode=draft ok id=' . (int) $post_id);                                      # CHANGED:
+        wp_send_json($resp, 200);
+    }
+
+    // Default path: echo normalized payload (no writes)
+    error_log('PPA: store echo-only path');                                                              # CHANGED:
+    $resp = [
+        'ok'      => true,
+        'result'  => $pack['data'],
+        'meta'    => $pack['meta'],
+        'warning' => $pack['err'], // null if none
+        'ver'     => '1',
+    ];
+    wp_send_json($resp, 200);
+}
+
+// Hooks (both logged-in and public) ------------------------------------------------------------------ # CHANGED:
+add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');                                 # CHANGED:
+add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');                                 # CHANGED:

@@ -1,0 +1,106 @@
+<?php
+/**
+ * Plugin Name: PostPress AI
+ * Plugin URI:  https://techwithwayne.com/
+ * Description: Minimal PostPress AI skeleton (rebuild). Add features file-by-file.
+ * Version:     0.1.0
+ * Author:      Tech With Wayne
+ */
+
+
+/*
+CHANGE LOG
+2025-10-16 — CHANGED: Removed inline admin_enqueue_scripts anonymous hook to avoid duplicate enqueues.
+CHANGED: Enqueue responsibilities moved to inc/admin/enqueue.php (already required earlier).
+*/
+
+// Prevent direct access
+defined( 'ABSPATH' ) || exit;
+
+// Constants
+if ( ! defined( 'PPA_PLUGIN_DIR' ) ) {
+    define( 'PPA_PLUGIN_DIR', plugin_dir_path( __FILE__ ) ); // CHANGED: ensure constant exists
+}
+if ( ! defined( 'PPA_PLUGIN_URL' ) ) {
+    define( 'PPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) ); // CHANGED: ensure constant exists
+}
+
+// Light debug to help with server-side verification
+if ( function_exists( 'error_log' ) ) {
+    error_log( 'PPA: postpress-ai plugin loaded' ); // CHANGED: debug log
+}
+
+// Include helpers and AJAX handlers (if present)
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/helpers.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/helpers.php';
+}
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/marker.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/ajax/marker.php';
+}
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/preview.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/ajax/preview.php';
+}
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/ajax/store.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/ajax/store.php';
+}
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/admin/composer.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/admin/composer.php';
+}
+
+// Load admin enqueue helpers (centralized enqueue implementation)
+// CHANGED: rely on inc/admin/enqueue.php to register/enqueue and localize scripts to avoid duplicate enqueues
+if ( file_exists( PPA_PLUGIN_DIR . 'inc/admin/enqueue.php' ) ) {
+    require_once PPA_PLUGIN_DIR . 'inc/admin/enqueue.php'; // CHANGED: ensure admin enqueue is loaded from inc/admin/enqueue.php
+}
+
+// ----------
+// NOTE: removed inline admin_enqueue_scripts anonymous block here to avoid duplicate enqueues / duplicate localize calls.
+// If you prefer the inline approach, we must remove the inc/admin/enqueue.php require above instead.
+// ----------
+
+// If you had inline enqueuing earlier, it's been intentionally removed in favor of inc/admin/enqueue.php.
+// This keeps enqueues in one place and prevents duplicate localization (PPA_AJAX / PPA) mismatches.
+
+// ----------
+// AJAX handlers (minimal safe stubs if external handler functions are present)
+// These call into namespaced handlers when available (PPA\Ajax\*), otherwise respond with an error.
+// ----------
+
+add_action( 'wp_ajax_ppa_preview', function() {
+    if ( ! isset( $_POST['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'ppa_admin_nonce' ) ) {
+        wp_send_json( array( 'ok' => false, 'error' => 'invalid-nonce' ) );
+    }
+
+    if ( function_exists( 'PPA\\Ajax\\generate_preview' ) ) {
+        $res = call_user_func( 'PPA\\Ajax\\generate_preview', $_POST );
+        if ( is_wp_error( $res ) ) {
+            wp_send_json( array( 'ok' => false, 'error' => $res->get_error_code(), 'message' => $res->get_error_message() ) );
+        }
+        wp_send_json( $res );
+    } else {
+        wp_send_json( array( 'ok' => false, 'error' => 'missing-handler-generate_preview' ) );
+    }
+});
+
+add_action( 'wp_ajax_ppa_save_draft', function() {
+    if ( ! isset( $_POST['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'ppa_admin_nonce' ) ) {
+        wp_send_json( array( 'ok' => false, 'error' => 'invalid-nonce' ) );
+    }
+
+    if ( function_exists( 'PPA\\Ajax\\save_draft' ) ) {
+        $res = call_user_func( 'PPA\\Ajax\\save_draft', $_POST );
+        wp_send_json( $res );
+    } else {
+        wp_send_json( array( 'ok' => false, 'error' => 'missing-handler-save_draft' ) );
+    }
+});
+
+// Composer page callback (kept minimal — actual rendering is in inc/admin/composer.php)
+// Health check for WP-CLI
+function ppa_health_check() {
+    return array(
+        'ok'      => true,
+        'plugin'  => 'postpress-ai',
+        'message' => 'skeleton loaded',
+    );
+}

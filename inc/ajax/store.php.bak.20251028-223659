@@ -1,0 +1,156 @@
+\<?php
+/**
+ * PostPress AI — AJAX Store Proxy
+ *
+ * CHANGE LOG
+ * 2025-10-28 • FIX: guard helper function to avoid redeclare when preview.php already defined it.  # CHANGED:
+ * 2025-10-28 • Robust input merge (raw JSON + $_POST + $_REQUEST), safe breadcrumbs, always JSON-forward to Django.
+ * 2025-10-27 • Harden JSON forwarding; accept JSON or form; normalize payload; safe breadcrumbs.
+ */
+
+namespace PPA\Ajax;
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Merge incoming inputs from multiple sources without secrets.
+ * Guarded to avoid redeclare when preview.php already provided it.
+ *
+ * @return array<string,mixed>
+ */
+if (!function_exists(__NAMESPACE__ . '\\ppa_collect_input')) {
+    function ppa_collect_input(): array {
+        $raw = file_get_contents('php://input');
+        $raw_len = is_string($raw) ? strlen($raw) : 0;
+
+        $json = null;
+        if ($raw_len > 0) {
+            $json = json_decode($raw, true);
+            if (!is_array($json)) {
+                // Some stacks add slashes
+                $json = json_decode(stripslashes($raw), true);
+            }
+        }
+
+        // Start with JSON if valid, then layer POST, then REQUEST
+        $in = is_array($json) ? $json : [];
+        foreach (['_POST', '_REQUEST'] as $super) {
+            /** @var array $src */
+            $src = $GLOBALS[$super] ?? [];
+            if (is_array($src)) {
+                foreach ($src as $k => $v) {
+                    if (!array_key_exists($k, $in)) {
+                        $in[$k] = $v;
+                    }
+                }
+            }
+        }
+
+        // Safe breadcrumb only (no secrets)
+        error_log(sprintf(
+            'PPA: store input raw_len=%d post_keys=%d req_keys=%d json=%s',
+            $raw_len,
+            is_array($_POST ?? null) ? count($_POST) : 0,
+            is_array($_REQUEST ?? null) ? count($_REQUEST) : 0,
+            is_array($json) ? 'yes' : 'no'
+        ));
+
+        return $in;
+    }
+}
+
+/**
+ * Handle store via admin-ajax.php?action=ppa_store
+ */
+function store() {
+    $in = ppa_collect_input();
+
+    // Normalize
+    $title      = isset($in['title']) ? sanitize_text_field($in['title']) : '';
+    $content    = isset($in['content']) ? wp_kses_post($in['content']) : '';
+    $status     = isset($in['status']) ? sanitize_text_field($in['status']) : 'draft';
+    $excerpt    = isset($in['excerpt']) ? sanitize_text_field($in['excerpt']) : '';
+    $slug       = isset($in['slug']) ? sanitize_title($in['slug']) : '';
+    $author     = get_current_user_id() ? (string) get_current_user_id() : '';
+    $categories = isset($in['categories']) && is_array($in['categories']) ? array_map('sanitize_text_field', $in['categories']) : [];
+    $tags       = isset($in['tags']) && is_array($in['tags']) ? array_map('sanitize_text_field', $in['tags']) : [];
+
+    $payload = [
+        'title'      => $title,
+        'content'    => $content,
+        'excerpt'    => $excerpt,
+        'status'     => $status ?: 'draft',
+        'slug'       => $slug,
+        'tags'       => $tags,
+        'categories' => $categories,
+        'author'     => $author,
+        // Diagnostics (non-secret)
+        'site'       => get_site_url(),
+        'plugin'     => 'postpress-ai',
+        'timestamp'  => time(),
+    ];
+
+    // Django endpoint
+    $django = defined('PPA_DJANGO_URL') ? constant('PPA_DJANGO_URL') : (getenv('PPA_DJANGO_URL') ?: get_option('ppa_django_url'));
+    if (!$django) { $django = 'https://apps.techwithwayne.com/postpress-ai'; }
+    $endpoint = rtrim($django, '/') . '/store/';
+
+    // Shared key (never log or echo)
+    $shared_key = defined('PPA_SHARED_KEY') ? constant('PPA_SHARED_KEY') : (getenv('PPA_SHARED_KEY') ?: '');
+
+    $headers = [
+        'Content-Type'   => 'application/json',
+        'X-PPA-Install'  => parse_url(get_site_url(), PHP_URL_HOST),
+        'X-PPA-Version'  => 'wp-plugin-1',
+    ];
+    if ($shared_key) { $headers['X-PPA-Key'] = $shared_key; }
+
+    // Forward (always JSON)
+    $body_json = wp_json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $resp = wp_remote_post($endpoint, [
+        'timeout'     => 20,
+        'httpversion' => '1.1',
+        'headers'     => $headers,
+        'body'        => $body_json,
+    ]);
+
+    if (is_wp_error($resp)) {
+        error_log('PPA: store upstream error: ' . $resp->get_error_message());
+        wp_send_json([
+            'ok'       => false,
+            'ver'      => '1',
+            'mode'     => 'normalize-only',
+            'error'    => 'store upstream error',
+            'provider' => 'local-fallback',
+        ], 503);
+    } else {
+        $code = wp_remote_retrieve_response_code($resp);
+        $body = wp_remote_retrieve_body($resp);
+        error_log('PPA: store upstream code=' . intval($code) . ' len=' . strlen((string) $body));
+        if ($code >= 200 && $code < 300) {
+            $decoded = json_decode($body, true);
+            if (is_array($decoded) && !empty($decoded['ok'])) {
+                wp_send_json([
+                    'ok'       => true,
+                    'ver'      => isset($decoded['ver']) ? $decoded['ver'] : '1',
+                    'result'   => isset($decoded['result']) ? $decoded['result'] : $decoded,
+                    'provider' => 'django',
+                ], 200);
+            }
+        }
+    }
+
+    // Fallback (normalize-only)
+    wp_send_json([
+        'ok'       => false,
+        'ver'      => '1',
+        'mode'     => 'normalize-only',
+        'error'    => 'store view unavailable or upstream failure',
+        'provider' => 'local-fallback',
+    ], 503);
+}
+
+add_action('wp_ajax_ppa_store', __NAMESPACE__ . '\\store');
+add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\\store');

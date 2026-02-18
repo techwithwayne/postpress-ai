@@ -1,0 +1,307 @@
+<?php
+namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.
+
+/*
+CHANGE LOG
+----------
+2025-11-06 • Add uniform JSON headers + no-store on all exits.                                            # CHANGED:
+           • Structured error shape: { ok:false, error:{type,message,details}, ver:"1" }.                 # CHANGED:
+           • Success response includes top-level `id` and `result.id` for admin.js pickId().              # CHANGED:
+           • Preserved existing logging; normalized versions to "1".                                       # CHANGED:
+2025-11-04 • Add logging via \PPA\Logging\PPALogging::log_event():
+             - Log auth failures (error/fail), insert failures (error/fail), and draft success
+               (store/ok) with meta {post_id, slug, edit_link}.
+             - Safe helper ppa_log_safe() to avoid hard dependency fatals.
+2025-10-29 • Save-to-Draft: allow auth via either logged-in+cap OR X-PPA-Key;
+             fixed debug tail path; removed leading backslashes; retained single-backslash callbacks.
+*/
+
+defined('ABSPATH') || exit;
+
+// --- Debug breadcrumbs (non-sensitive) -------------------------------------------------------------- # CHANGED:
+error_log('PPA: store.php loaded');                                                                     # CHANGED:
+
+/**
+ * Minimal logging wrapper so this file never fatals if logging class is missing.
+ * @param array<string,mixed> $args
+ * @return int|false
+ */
+if (!function_exists(__NAMESPACE__ . '\\ppa_log_safe')) {
+    function ppa_log_safe(array $args) {
+        if (class_exists('\\PPA\\Logging\\PPALogging') && method_exists('\\PPA\\Logging\\PPALogging', 'log_event')) {
+            try {
+                return \PPA\Logging\PPALogging::log_event($args);
+            } catch (\Throwable $e) {
+                error_log('PPA: store log_event error: ' . $e->getMessage());
+            }
+        }
+        return false;
+    }
+}
+
+/**
+ * Normalize mixed JSON/form input into a canonical array.
+ *
+ * @return array{data:array, meta:array, err:?string}
+ */
+function ppa_normalize_request(): array {                                                                # CHANGED:
+    $raw     = file_get_contents('php://input');
+    $ct      = isset($_SERVER['CONTENT_TYPE']) ? (string) $_SERVER['CONTENT_TYPE'] : '';
+    $is_json = stripos($ct, 'application/json') !== false;
+    $method  = isset($_SERVER['REQUEST_METHOD']) ? (string) $_SERVER['REQUEST_METHOD'] : '';
+    $payload = [];
+    $err     = null;
+
+    if ($is_json && $raw !== '') {
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $payload = $decoded;
+        } else {
+            $err = 'invalid json: ' . json_last_error_msg();
+        }
+    }
+
+    // If JSON missing/invalid, use POST (typical admin-ajax form).
+    if (empty($payload) && !empty($_POST)) {
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $payload = $_POST;
+    }
+
+    // Canonical fields
+    $title   = isset($payload['title'])   ? $payload['title']   : '';
+    $content = isset($payload['content']) ? $payload['content'] : '';
+    $excerpt = isset($payload['excerpt']) ? $payload['excerpt'] : '';
+    $status  = isset($payload['status'])  ? $payload['status']  : '';
+    $slug    = isset($payload['slug'])    ? $payload['slug']    : '';
+    $mode    = isset($payload['mode'])    ? $payload['mode']    : '';
+
+    // Optional collections: allow array or CSV string
+    $tags       = isset($payload['tags']) ? $payload['tags'] : [];
+    $categories = isset($payload['categories']) ? $payload['categories'] : [];
+    $author     = isset($payload['author']) ? $payload['author'] : '';
+
+    if (is_string($tags)) {
+        $tags = array_filter(array_map('trim', explode(',', $tags)), 'strlen');
+    } elseif (!is_array($tags)) {
+        $tags = [];
+    }
+
+    if (is_string($categories)) {
+        $categories = array_filter(array_map('trim', explode(',', $categories)), 'strlen');
+    } elseif (!is_array($categories)) {
+        $categories = [];
+    }
+
+    // Sanitize (content/excerpt use wp_kses_post; others are text)
+    $title_s   = sanitize_text_field((string) $title);
+    $status_s  = sanitize_text_field((string) $status);
+    $slug_s    = sanitize_title((string) $slug);
+    $mode_s    = sanitize_text_field((string) $mode);
+    $author_s  = sanitize_text_field((string) $author);
+    $content_s = wp_kses_post((string) $content);
+    $excerpt_s = wp_kses_post((string) $excerpt);
+
+    $tags_s = [];
+    foreach ($tags as $t) { $tags_s[] = sanitize_text_field((string) $t); }
+
+    $cats_s = [];
+    foreach ($categories as $c) { $cats_s[] = sanitize_text_field((string) $c); }
+
+    $data = [
+        'title'      => $title_s,
+        'content'    => $content_s,
+        'excerpt'    => $excerpt_s,
+        'status'     => $status_s,
+        'slug'       => $slug_s,
+        'tags'       => $tags_s,
+        'categories' => $cats_s,
+        'author'     => $author_s,
+        'mode'       => $mode_s,
+    ];
+
+    $meta = [
+        'ct'      => $ct,
+        'raw_len' => strlen((string) $raw),
+        'json'    => $is_json ? 'yes' : 'no',
+        'method'  => $method,
+    ];
+
+    return ['data' => $data, 'meta' => $meta, 'err' => $err];
+}
+
+/**
+ * Return the configured PPA shared key without logging it.
+ * Prefers WP option 'ppa_shared_key'; falls back to env PPA_SHARED_KEY.
+ */
+function ppa_get_shared_key(): string {                                                                 # CHANGED:
+    $opt = get_option('ppa_shared_key', '');
+    if (is_string($opt) && $opt !== '') {
+        return trim($opt);
+    }
+    // Env fallback (never logged)
+    $env = getenv('PPA_SHARED_KEY');
+    return is_string($env) ? trim($env) : '';
+}
+
+/**
+ * Check whether the incoming request is authorized to create drafts.
+ * True if (A) logged-in and can 'edit_posts' OR (B) header X-PPA-Key matches shared key.
+ */
+function ppa_is_authorized(): bool {                                                                    # CHANGED:
+    if (is_user_logged_in() && current_user_can('edit_posts')) {
+        return true;
+    }
+    $hdr = isset($_SERVER['HTTP_X_PPA_KEY']) ? trim((string) $_SERVER['HTTP_X_PPA_KEY']) : '';
+    if ($hdr === '') {
+        return false;
+    }
+    $key = ppa_get_shared_key();
+    return ($key !== '' && hash_equals($key, $hdr));
+}
+
+/** Emit standard JSON + no-store headers once per request. */                                           # CHANGED:
+function ppa_json_headers(): void {                                                                      # CHANGED:
+    nocache_headers();                                                                                   # CHANGED:
+    header('Content-Type: application/json; charset=' . get_option('blog_charset'));                     # CHANGED:
+    header('Cache-Control: no-store');                                                                   # CHANGED:
+}
+
+/** Structured error responder (uniform shape). */                                                       # CHANGED:
+function ppa_send_error(string $type, string $message, array $details = [], int $status = 400): void {   # CHANGED:
+    wp_send_json([                                                                                       # CHANGED:
+        'ok'    => false,                                                                                # CHANGED:
+        'error' => ['type' => $type, 'message' => $message, 'details' => $details],                      # CHANGED:
+        'ver'   => '1',                                                                                  # CHANGED:
+    ], $status);                                                                                         # CHANGED:
+}
+
+/**
+ * Main handler for ppa_store.
+ * - mode=draft → creates a Draft post
+ * - otherwise → echo-only normalize response (no writes)
+ */
+function handle_store(): void {
+    ppa_json_headers();                                                                                  # CHANGED:
+    $pack = ppa_normalize_request();                                                                     # CHANGED:
+
+    $mode = strtolower($pack['data']['mode'] ?? '');
+    $subject_for_log = ($pack['data']['title'] ?? '') !== '' ? (string) $pack['data']['title'] : __('Save Draft', 'postpress-ai'); // CHANGED:
+
+    if ($mode === 'draft') {
+        // Auth: logged-in+cap OR X-PPA-Key
+        if (!ppa_is_authorized()) {                                                                      # CHANGED:
+            ppa_log_safe([
+                'type'     => 'error',
+                'subject'  => $subject_for_log,
+                'provider' => 'local-fallback',
+                'status'   => 'fail',
+                'message'  => 'auth required',
+                'excerpt'  => wp_trim_words(wp_strip_all_tags((string) ($pack['data']['content'] ?? '')), 24, '…'),
+                'meta'     => ['phase' => 'auth'],
+            ]);
+            ppa_send_error('auth_required', 'authentication required', ['phase' => 'auth'], 401);        # CHANGED:
+        }
+
+        error_log('PPA: store mode=draft start');                                                        // CHANGED:
+
+        // Build post array (force draft)
+        $postarr = [
+            'post_title'   => $pack['data']['title'] ?: '(untitled)',
+            'post_content' => $pack['data']['content'],
+            'post_excerpt' => $pack['data']['excerpt'],
+            'post_status'  => 'draft',
+            'post_type'    => 'post',
+        ];
+
+        if ($pack['data']['slug'] !== '') {
+            $postarr['post_name'] = $pack['data']['slug'];
+        }
+
+        // Assign author if provided; else current user
+        $author_id = get_current_user_id();
+        if ($pack['data']['author'] !== '') {
+            $maybe = (int) $pack['data']['author'];
+            if ($maybe > 0) {
+                $author_id = $maybe;
+            }
+        }
+        $postarr['post_author'] = $author_id;
+
+        $post_id = wp_insert_post($postarr, true);
+        if (is_wp_error($post_id)) {
+            $msg = $post_id->get_error_message();                                                        // CHANGED:
+            error_log('PPA: store mode=draft wp_error: ' . $msg);                                        // CHANGED:
+            ppa_log_safe([
+                'type'     => 'error',
+                'subject'  => $subject_for_log,
+                'provider' => 'local-fallback',
+                'status'   => 'fail',
+                'message'  => $msg,
+                'excerpt'  => wp_trim_words(wp_strip_all_tags((string) $postarr['post_content']), 24, '…'),
+                'meta'     => ['phase' => 'insert'],
+            ]);
+            ppa_send_error('insert_failed', 'failed to save draft', ['detail' => $msg], 500);            # CHANGED:
+        }
+
+        // Terms (best-effort; tolerate slugs/ids; ignore failures quietly)
+        if (!empty($pack['data']['categories'])) {
+            wp_set_post_terms((int) $post_id, $pack['data']['categories'], 'category', false);
+        }
+        if (!empty($pack['data']['tags'])) {
+            wp_set_post_terms((int) $post_id, $pack['data']['tags'], 'post_tag', false);
+        }
+
+        $edit_link = get_edit_post_link((int) $post_id, '');
+
+        // SUCCESS LOG
+        ppa_log_safe([
+            'type'     => 'store',
+            'subject'  => $subject_for_log,
+            'provider' => 'local-fallback',
+            'status'   => 'ok',
+            'message'  => 'draft saved',
+            'excerpt'  => wp_trim_words(wp_strip_all_tags((string) ($pack['data']['excerpt'] ?: $pack['data']['content'])), 24, '…'),
+            'content'  => (string) $pack['data']['content'],
+            'meta'     => [
+                'post_id'   => (int) $post_id,
+                'slug'      => (string) ($pack['data']['slug'] ?? ''),
+                'edit_link' => (string) $edit_link,
+            ],
+        ]);
+
+        // Success payload — include `id` for admin.js pickId()                                # CHANGED:
+        $resp = [
+            'ok'        => true,
+            'id'        => (int) $post_id,                                                    # CHANGED:
+            'post_id'   => (int) $post_id, // back-compat                                      # CHANGED:
+            'status'    => 'draft',
+            'provider'  => 'local-fallback',
+            'edit_link' => $edit_link,
+            'ver'       => '1',                                                                # CHANGED:
+            'result'    => [                                                                   # CHANGED:
+                'id'        => (int) $post_id,                                                # CHANGED:
+                'status'    => 'draft',                                                       # CHANGED:
+                'edit_link' => $edit_link,                                                    # CHANGED:
+                'slug'      => (string) ($pack['data']['slug'] ?? ''),                        # CHANGED:
+                'title'     => (string) ($pack['data']['title'] ?? ''),                       # CHANGED:
+            ],                                                                                # CHANGED:
+        ];
+        error_log('PPA: store mode=draft ok id=' . (int) $post_id);                            # CHANGED:
+        wp_send_json($resp, 200);
+    }
+
+    // Default path: echo normalized payload (no writes)
+    error_log('PPA: store echo-only path');                                                              # CHANGED:
+    $resp = [
+        'ok'      => true,
+        'result'  => $pack['data'],
+        'meta'    => $pack['meta'],
+        'warning' => $pack['err'], // null if none
+        'ver'     => '1',                                                                                 # CHANGED:
+    ];
+    wp_send_json($resp, 200);
+}
+
+// Hooks (both logged-in and public) ------------------------------------------------------------------ # CHANGED:
+add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');                                 # CHANGED:
+add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');                                 # CHANGED:

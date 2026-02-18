@@ -1,0 +1,114 @@
+<?php
+namespace PPA\Ajax; // MUST be first — no BOM/whitespace above.
+
+// CHANGE LOG
+// 2025-10-28 • Fix fatal: namespace first; prevent function redeclare; robust input normalization; safe breadcrumbs; echo payload back.
+
+\defined('ABSPATH') || exit;
+
+/**
+ * Minimal bootstrap breadcrumb.
+ */
+\error_log('PPA: ajax loaded store.php');
+
+/**
+ * Collect and normalize input for AJAX handlers.
+ * Guarded to avoid redeclare if preview.php also defines it.
+ */
+if (!\function_exists(__NAMESPACE__ . '\ppa_collect_input')) {
+    /**
+     * Normalize mixed inputs (JSON or form) into a canonical array.
+     *
+     * @return array{ok:bool, meta:array, data:array, err: string|null}
+     */
+    function ppa_collect_input(): array
+    {
+        $ct = $_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+        $raw = \file_get_contents('php://input') ?: '';
+        $is_json = \is_string($ct) && \stripos($ct, 'application/json') !== false;
+
+        $meta = [
+            'ct'      => $ct,
+            'raw_len' => \strlen($raw),
+            'json'    => $is_json ? 'yes' : 'no',
+            'method'  => $_SERVER['REQUEST_METHOD'] ?? '',
+        ];
+
+        $payload = [];
+        $err = null;
+
+        if ($is_json && $raw !== '') {
+            $decoded = \json_decode($raw, true);
+            if (\json_last_error() === JSON_ERROR_NONE && \is_array($decoded)) {
+                $payload = $decoded;
+            } else {
+                $err = 'invalid json: ' . \json_last_error_msg();
+            }
+        }
+
+        // If not JSON—or JSON failed—prefer POST fields for typical admin-ajax form submissions
+        if (empty($payload) && !empty($_POST)) {
+            // phpcs:ignore WordPress.Security.NonceVerification
+            $payload = \wp_unslash($_POST);
+        }
+
+        // Normalize fields we care about
+        $norm = [
+            'title'      => isset($payload['title']) ? (string)$payload['title'] : '',
+            'content'    => isset($payload['content']) ? (string)$payload['content'] : '',
+            'excerpt'    => isset($payload['excerpt']) ? (string)$payload['excerpt'] : '',
+            'status'     => isset($payload['status']) ? (string)$payload['status'] : 'draft',
+            'slug'       => isset($payload['slug']) ? (string)$payload['slug'] : '',
+            'tags'       => isset($payload['tags']) && \is_array($payload['tags']) ? $payload['tags'] : [],
+            'categories' => isset($payload['categories']) && \is_array($payload['categories']) ? $payload['categories'] : [],
+            'author'     => isset($payload['author']) ? (string)$payload['author'] : '',
+        ];
+
+        // Breadcrumb (no secrets)
+        \error_log(
+            'PPA: store input ct=' . $meta['ct'] .
+            ' raw_len=' . $meta['raw_len'] .
+            ' json=' . $meta['json'] .
+            ' post_keys=' . (isset($_POST) ? \count($_POST) : 0) .
+            ' req_keys=' . (isset($_REQUEST) ? \count($_REQUEST) : 0)
+        );
+
+        return [
+            'ok'   => true,
+            'meta' => $meta,
+            'data' => $norm,
+            'err'  => $err,
+        ];
+    }
+}
+
+/**
+ * AJAX handler for ppa_store (normalize-only passthrough for now).
+ * In later turns, we can proxy to Django and return its response.
+ */
+function handle_store(): void
+{
+    // Capability check — keep simple; refine later if needed.
+    if (!\current_user_can('edit_posts')) {
+        \wp_send_json(['ok' => false, 'error' => 'forbidden', 'ver' => '1'], 403);
+    }
+
+    $pack = ppa_collect_input();
+
+    // For now, we normalize + echo back. Upstream proxy can be added next turn.
+    // If JSON came in empty for a form submission, the normalization above will still fill from $_POST.
+    $resp = [
+        'ok'      => true,
+        'mode'    => 'normalize',
+        'result'  => $pack['data'],
+        'meta'    => $pack['meta'],
+        'warning' => $pack['err'], // null if none
+        'ver'     => '1'
+    ];
+
+    // Always JSON.
+    \wp_send_json($resp, 200);
+}
+
+// Register AJAX action.
+\add_action('wp_ajax_ppa_store', __NAMESPACE__ . '\handle_store');

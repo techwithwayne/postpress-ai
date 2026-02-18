@@ -1,0 +1,202 @@
+/**
+ * admin.js
+ *
+ * CHANGE LOG
+ * 2025-10-13 - v0.2.1 test
+ * - CHANGED: Attach to multiple Composer DOM flavors:
+ *   - #ppa-composer-root (compatibility shim)
+ *   - .ppa-composer-wrap + #ppa-preview-body (original restored UI)
+ * - CHANGED: Map element IDs across both DOM shapes (subject, preview button, preview pane).
+ * - CHANGED: Keep defensive fetching + normalization of proxy/Django responses.
+ * - CHANGED: Extra console.info debug lines to aid triage.
+ *
+ * Author: Tech With Wayne / Assistant
+ */
+
+/* CHANGED: IIFE wrapper to avoid leaking globals */
+(function () { // CHANGED:
+  'use strict'; // CHANGED:
+
+  console.info('PPA: admin.js loaded'); // CHANGED:
+
+  // CHANGED: Safe accessor for window.PPA
+  function getPPA() { // CHANGED:
+    return (typeof window !== 'undefined' && window.PPA) ? window.PPA : null; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: Build preview URL (admin-ajax proxy)
+  function buildPreviewUrl() { // CHANGED:
+    var ppa = getPPA(); // CHANGED:
+    if (!ppa || !ppa.ajax_url) { // CHANGED:
+      return null; // CHANGED:
+    } // CHANGED:
+    var action = (ppa.preview_action) ? ppa.preview_action : 'ppa_preview'; // CHANGED:
+    return ppa.ajax_url + '?action=' + encodeURIComponent(action); // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: perform POST JSON preview request
+  async function fetchPreview(payload) { // CHANGED:
+    var url = buildPreviewUrl(); // CHANGED:
+    if (!url) { // CHANGED:
+      throw new Error('PPA: ajax_url not available'); // CHANGED:
+    } // CHANGED:
+    var res = await fetch(url, { // CHANGED:
+      method: 'POST', // CHANGED:
+      headers: { 'Content-Type': 'application/json' }, // CHANGED:
+      body: JSON.stringify(payload), // CHANGED:
+      credentials: 'same-origin' // CHANGED:
+    }); // CHANGED:
+    var data = await res.json(); // CHANGED:
+    return data; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: normalize many response shapes
+  function normalizePreviewResponse(data) { // CHANGED:
+    if (!data) return {}; // CHANGED:
+    if (data.success && data.data) { // CHANGED:
+      if (data.data.result) return data.data.result; // CHANGED:
+      return data.data; // CHANGED:
+    } // CHANGED:
+    if (data.result) return data.result; // CHANGED:
+    if (data.html || data.content) return data; // CHANGED:
+    if (data.data && data.data.result) return data.data.result; // CHANGED:
+    return {}; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: DOM shape detection + mapping
+  function detectComposerRoot() { // CHANGED:
+    // Priority: explicit root id used by the shim
+    var root = document.getElementById('ppa-composer-root'); // CHANGED:
+    if (root) { // CHANGED:
+      console.info('PPA: detected root #ppa-composer-root (shim)'); // CHANGED:
+      return { // CHANGED:
+        root: root, // CHANGED:
+        subject: root.querySelector('.ppa-subject') || root.querySelector('#ppa-subject'), // CHANGED:
+        previewBtn: root.querySelector('.ppa-compose-btn') || root.querySelector('#ppa-preview-btn'), // CHANGED:
+        previewPane: root.querySelector('#ppa-preview-pane') || root.querySelector('#ppa-preview-body') // CHANGED:
+      }; // CHANGED:
+    } // CHANGED:
+
+    // Fallback: restored original server-rendered UI (.ppa-composer-wrap)
+    var wrap = document.querySelector('.ppa-composer-wrap'); // CHANGED:
+    if (wrap) { // CHANGED:
+      console.info('PPA: detected original UI .ppa-composer-wrap'); // CHANGED:
+      return { // CHANGED:
+        root: wrap, // CHANGED:
+        subject: wrap.querySelector('#ppa-subject') || wrap.querySelector('.ppa-subject'), // CHANGED:
+        previewBtn: wrap.querySelector('#ppa-preview-btn') || wrap.querySelector('.ppa-compose-btn'), // CHANGED:
+        previewPane: wrap.querySelector('#ppa-preview-body') || wrap.querySelector('#ppa-preview-pane') // CHANGED:
+      }; // CHANGED:
+    } // CHANGED:
+
+    // Last resort: look for preview pane or subject anywhere
+    var possiblePreview = document.querySelector('#ppa-preview-body') || document.querySelector('#ppa-preview-pane'); // CHANGED:
+    var possibleSubject = document.querySelector('#ppa-subject') || document.querySelector('.ppa-subject'); // CHANGED:
+    if (possiblePreview || possibleSubject) { // CHANGED:
+      console.info('PPA: found partial composer elements on page'); // CHANGED:
+      return { // CHANGED:
+        root: document.body, // CHANGED:
+        subject: possibleSubject, // CHANGED:
+        previewBtn: document.querySelector('#ppa-preview-btn') || document.querySelector('.ppa-compose-btn'), // CHANGED:
+        previewPane: possiblePreview // CHANGED:
+      }; // CHANGED:
+    } // CHANGED:
+
+    // nothing found
+    return null; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: create minimal UI for fallback root (only used if root exists and no toolbar found)
+  function createFallbackToolbar(root) { // CHANGED:
+    var toolbar = root.querySelector('.ppa-composer-toolbar'); // CHANGED:
+    if (toolbar) return toolbar; // CHANGED:
+    toolbar = document.createElement('div'); // CHANGED:
+    toolbar.className = 'ppa-composer-toolbar'; // CHANGED:
+    toolbar.style.display = 'flex'; toolbar.style.gap = '8px'; toolbar.style.alignItems = 'center'; toolbar.style.marginBottom = '12px'; // CHANGED:
+
+    var subjectEl = document.createElement('input'); subjectEl.type = 'text'; subjectEl.id = 'ppa-subject'; subjectEl.className = 'ppa-subject'; subjectEl.placeholder = 'Subject (e.g. Improve website speed)'; subjectEl.style.flex = '1'; subjectEl.style.padding = '8px'; // CHANGED:
+
+    var composeBtn = document.createElement('button'); composeBtn.type = 'button'; composeBtn.id = 'ppa-preview-btn'; composeBtn.className = 'ppa-compose-btn button button-primary'; composeBtn.textContent = 'Compose (Preview)'; composeBtn.style.whiteSpace = 'nowrap'; // CHANGED:
+
+    var msg = document.createElement('div'); msg.className = 'ppa-toolbar-msg'; msg.style.minWidth = '180px'; msg.style.fontSize = '13px'; msg.style.opacity = '0.85'; // CHANGED:
+
+    toolbar.appendChild(subjectEl); toolbar.appendChild(composeBtn); toolbar.appendChild(msg); // CHANGED:
+    root.insertBefore(toolbar, root.firstChild); // CHANGED:
+    return toolbar; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: ensure preview pane exists
+  function ensurePreviewPane(root) { // CHANGED:
+    var pane = root.querySelector('#ppa-preview-body') || root.querySelector('#ppa-preview-pane'); // CHANGED:
+    if (pane) return pane; // CHANGED:
+    pane = document.createElement('div'); pane.id = 'ppa-preview-pane'; pane.className = 'ppa-preview-pane'; pane.style.marginTop = '18px'; pane.style.padding = '18px'; pane.style.background = '#fff'; pane.style.border = '1px solid #ddd'; pane.style.borderRadius = '6px'; pane.style.minHeight = '120px'; root.appendChild(pane); return pane; // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: Main wiring
+  function bootstrapComposer() { // CHANGED:
+    var mapping = detectComposerRoot(); // CHANGED:
+    if (!mapping) { // CHANGED:
+      console.warn('PPA: Compose button and preview pane not found; nothing attached.'); // CHANGED:
+      return; // CHANGED:
+    } // CHANGED:
+
+    // If root is shim and toolbar missing, create it
+    if (mapping.root && !mapping.root.querySelector('.ppa-composer-toolbar') && mapping.root.id === 'ppa-composer-root') { // CHANGED:
+      createFallbackToolbar(mapping.root); // CHANGED:
+      // update mapping after insertion
+      mapping = detectComposerRoot(); // CHANGED:
+    } // CHANGED:
+
+    // Ensure preview pane is present
+    var previewEl = mapping.previewPane || ensurePreviewPane(mapping.root); // CHANGED:
+
+    // Determine subject element (may be input or textarea)
+    var subjectEl = mapping.subject || mapping.root.querySelector('#ppa-subject') || mapping.root.querySelector('.ppa-subject'); // CHANGED:
+
+    // Determine preview button
+    var previewBtn = mapping.previewBtn || mapping.root.querySelector('#ppa-preview-btn') || mapping.root.querySelector('.ppa-compose-btn'); // CHANGED:
+
+    if (!previewBtn) { // CHANGED:
+      console.warn('PPA: preview button not found after mapping; nothing attached.'); // CHANGED:
+      return; // CHANGED:
+    } // CHANGED:
+
+    console.info('PPA: Attaching preview flow (subjectEl=%o, previewBtn=%o, previewEl=%o)', subjectEl, previewBtn, previewEl); // CHANGED:
+
+    previewBtn.addEventListener('click', async function (ev) { // CHANGED:
+      ev.preventDefault(); // CHANGED:
+      previewBtn.disabled = true; previewBtn.dataset.origText = previewBtn.textContent; previewBtn.textContent = 'Composing…'; // CHANGED:
+      var subject = (subjectEl && (subjectEl.value || subjectEl.textContent)) ? (subjectEl.value || subjectEl.textContent) : 'Preview'; // CHANGED:
+      var payload = { subject: subject, tone: 'casual', word_count: 150 }; // CHANGED:
+      try { // CHANGED:
+        var raw = await fetchPreview(payload); // CHANGED:
+        var normalized = normalizePreviewResponse(raw); // CHANGED:
+        var html = normalized.html || normalized.content || '<p><em>No preview returned</em></p>'; // CHANGED:
+        previewEl.innerHTML = html; // CHANGED:
+        console.info('PPA: preview injected'); // CHANGED:
+      } catch (err) { // CHANGED:
+        console.error('PPA: preview request failed', err); // CHANGED:
+        previewEl.innerHTML = '<p><em>Error fetching preview — check console for details.</em></p>'; // CHANGED:
+      } finally { // CHANGED:
+        previewBtn.disabled = false; previewBtn.textContent = previewBtn.dataset.origText || 'Compose (Preview)'; // CHANGED:
+      } // CHANGED:
+    }); // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: Start on DOM ready
+  if (document.readyState === 'loading') { // CHANGED:
+    document.addEventListener('DOMContentLoaded', bootstrapComposer); // CHANGED:
+  } else { // CHANGED:
+    bootstrapComposer(); // CHANGED:
+  } // CHANGED:
+
+  // CHANGED: Debug helper
+  window.PPA = window.PPA || {}; // CHANGED:
+  window.PPA._debug_triggerPreview = function (subject) { // CHANGED:
+    var mapping = detectComposerRoot(); if (!mapping) { console.warn('PPA debug: root not found'); return; } // CHANGED:
+    var previewEl = mapping.previewPane || ensurePreviewPane(mapping.root); // CHANGED:
+    var payload = { subject: subject || 'Debug Preview', tone: 'casual', word_count: 150 }; // CHANGED:
+    fetchPreview(payload).then(normalizePreviewResponse).then(function (res) { previewEl.innerHTML = (res && (res.html || res.content)) || '<p><em>No preview</em></p>'; }).catch(function (err) { console.error('PPA debug preview failed', err); }); // CHANGED:
+  }; // CHANGED:
+
+})(); // CHANGED:

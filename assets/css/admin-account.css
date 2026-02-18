@@ -1,0 +1,307 @@
+/*
+PostPress AI — Admin Account Screen (Isolated)
+
+========= CHANGE LOG =========
+2026-01-15: ADD: New Account screen styling. Scoped to Account screen only.
+
+Rules:
+- This file is ONLY enqueued on the Account screen.
+- No dependencies on admin.css or other plugin CSS.
+*/
+
+/* Scope hard to our screen */
+body.postpress-ai_page_postpress-ai-account {
+  --ppa-bg: #0b0b0b;
+  --ppa-card: #121212;
+  --ppa-card2: #161616;
+  --ppa-border: #242424;
+  --ppa-text: #f2f2f2;
+  --ppa-muted: #a7a7a7;
+  --ppa-accent: #ff6c00;
+  --ppa-good: #2ecc71;
+  --ppa-bad: #ff4d4d;
+  --ppa-radius: 16px;
+  --ppa-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+
+body.postpress-ai_page_postpress-ai-account #wpcontent {
+  background: var(--ppa-bg);
+}
+
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account {
+  color: var(--ppa-text);
+  max-width: 1180px;
+  margin: 18px 0 40px;
+}
+
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a {
+  color: var(--ppa-text);
+}
+
+/* Header */
+body.postpress-ai_page_postpress-ai-account .ppa-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius);
+  background: linear-gradient(180deg, var(--ppa-card2), var(--ppa-card));
+  box-shadow: var(--ppa-shadow);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-title {
+  margin: 0;
+  font-size: 22px;
+  color: #ff6c00;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-subtitle {
+  margin: 6px 0 0;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  box-shadow: none;
+  text-decoration: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .button.button-primary.ppa-btn {
+  background: var(--ppa-accent);
+  border-color: var(--ppa-accent);
+  color: #111;
+  font-weight: 700;
+}
+
+body.postpress-ai_page_postpress-ai-account .button.button-primary.ppa-btn:hover {
+  filter: brightness(1.05);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost {
+  background: transparent;
+  border-color: var(--ppa-border);
+  color: var(--ppa-text);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost:hover {
+  border-color: var(--ppa-accent);
+}
+
+/* Status */
+body.postpress-ai_page_postpress-ai-account .ppa-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--ppa-border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-good .ppa-status__dot { background: var(--ppa-good); }
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-bad  .ppa-status__dot { background: var(--ppa-bad); }
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__text {
+  color: var(--ppa-muted);
+}
+
+/* Grid */
+body.postpress-ai_page_postpress-ai-account .ppa-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 980px) {
+  body.postpress-ai_page_postpress-ai-account .ppa-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Card */
+body.postpress-ai_page_postpress-ai-account .ppa-card {
+  background: var(--ppa-card);
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius);
+  padding: 14px;
+  box-shadow: var(--ppa-shadow);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-card__title {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-muted {
+  color: var(--ppa-muted);
+  font-size: 13px;
+}
+
+/* Pill */
+body.postpress-ai_page_postpress-ai-account .ppa-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ppa-border);
+  font-size: 12px;
+  color: var(--ppa-muted);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-pill[data-state="active"] {
+  border-color: rgba(46,204,113,0.45);
+  color: var(--ppa-good);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-pill[data-state="inactive"] {
+  border-color: rgba(255,77,77,0.45);
+  color: var(--ppa-bad);
+}
+
+/* Key/Value rows */
+body.postpress-ai_page_postpress-ai-account .ppa-kv {
+  margin: 0;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv__row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ppa-border);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv__row:first-child {
+  border-top: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv dt {
+  color: var(--ppa-muted);
+  font-weight: 600;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv dd {
+  margin: 0;
+  color: var(--ppa-text);
+  word-break: break-word;
+}
+
+/* Meter */
+body.postpress-ai_page_postpress-ai-account .ppa-meter {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--ppa-border);
+  overflow: hidden;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-meter__bar {
+  height: 100%;
+  background: var(--ppa-accent);
+  width: 0%;
+  transition: width 220ms ease;
+}
+
+/* Usage */
+body.postpress-ai_page_postpress-ai-account .ppa-usage {
+  margin-top: 12px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__big {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__small {
+  margin-top: 6px;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__sep {
+  margin: 0 6px;
+  opacity: 0.8;
+}
+
+/* Actions */
+body.postpress-ai_page_postpress-ai-account .ppa-card__actions {
+  margin-top: 12px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-note {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--ppa-muted);
+}
+
+/* Sites list */
+body.postpress-ai_page_postpress-ai-account .ppa-list {
+  margin-top: 10px;
+  border: 1px solid var(--ppa-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site:first-child {
+  border-top: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site__url {
+  color: var(--ppa-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site__state {
+  font-size: 12px;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-list__empty {
+  padding: 12px;
+  color: var(--ppa-muted);
+}
