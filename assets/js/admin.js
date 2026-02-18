@@ -16,6 +16,7 @@
 * 2026-02-18: FIX: Output Language “Original” correctly restores the generated English preview (prevents freezing translated HTML as baseline). // CHANGED:
  
  * 2026-02-18: FIX: Guide genre title guard — prevents the first outline item (or generic section headings) from being used as the post title. // CHANGED:
+ * 2026-02-18: UX: If Target Audience is empty, show an inline warning under the field and focus it before Generate Preview runs. // CHANGED:
 *
  *            - Strips BOM + trims + extracts first JSON object/array region                                  // CHANGED:
  *            - Adds X-WP-Nonce + X-Requested-With + Accept headers                                            // CHANGED:
@@ -28,8 +29,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-02-18.3'; // CHANGED: title safety for Auto/Guide + Store
-  try { console.info('PPA: admin.js loaded →', PPA_JS_VER); } catch (eV0) {} // CHANGED: // CHANGED: add Guide genre title guard (avoid outline item as title) // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
+  var PPA_JS_VER = 'admin.v2026-02-18.3'; // CHANGED: clearer Target Audience required notice + focus // CHANGED: add Guide genre title guard (avoid outline item as title) // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -787,49 +787,6 @@
       payload.target_sites = [ statusVal ];
     }
 
-    // CHANGED: Title safety (Store) — prevent the WordPress draft title from becoming Outline item #1.
-    // Root cause: On Save Draft, PHP store endpoint uses payload.title for post_title.
-    // If payload.title is blank OR is "1. Clarity: ..." (outline item), WP draft title is wrong. // CHANGED:
-    try { // CHANGED:
-      var subjEl = $('#ppa-subject'); // CHANGED:
-      var subj = subjEl ? String(subjEl.value || '').trim() : ''; // CHANGED:
-      if (!subj && payload.subject) subj = String(payload.subject || '').trim(); // CHANGED:
-      subj = ppaCleanTitle(subj); // CHANGED:
-
-      if (subj) { // CHANGED:
-        var titleNow = ppaCleanTitle(payload.title); // CHANGED:
-        var tNorm = ppaNormalizeComparableTitle(titleNow); // CHANGED:
-
-        // Pull outline item #1 from the rendered Preview pane (most reliable). // CHANGED:
-        var oFirst = ''; // CHANGED:
-        try { // CHANGED:
-          var pane2 = getPreviewPane(); // CHANGED:
-          if (pane2) { // CHANGED:
-            var li1 = null; // CHANGED:
-            try { li1 = pane2.querySelector('.ppa-outline-list .ppa-outline-item:first-child'); } catch (eOL0) { li1 = null; } // CHANGED:
-            if (li1) { // CHANGED:
-              var a1 = null; // CHANGED:
-              try { a1 = li1.querySelector('a'); } catch (eOL1) { a1 = null; } // CHANGED:
-              oFirst = a1 ? String(a1.textContent || '') : String(li1.textContent || ''); // CHANGED:
-            } // CHANGED:
-          } // CHANGED:
-        } catch (eOL2) { oFirst = ''; } // CHANGED:
-        oFirst = String(oFirst || '').trim(); // CHANGED:
-        var oNorm2 = ppaNormalizeComparableTitle(oFirst); // CHANGED:
-
-        // Decide if we should force Subject into payload.title. // CHANGED:
-        var shouldUseSubject = false; // CHANGED:
-        if (!titleNow) shouldUseSubject = true; // CHANGED:
-        if (!shouldUseSubject && tNorm && oNorm2 && tNorm === oNorm2) shouldUseSubject = true; // CHANGED:
-        if (!shouldUseSubject && ppaIsGenericSectionHeading(tNorm)) shouldUseSubject = true; // CHANGED:
-
-        if (shouldUseSubject) { // CHANGED:
-          payload.title = subj; // CHANGED:
-          if (!payload.slug) payload.slug = sanitizeSlug(payload.title); // CHANGED:
-        } // CHANGED:
-      } // CHANGED:
-    } catch (eTitleGuard) {} // CHANGED:
-
     if (!payload.content || !String(payload.content).trim()) {
       var pane = getPreviewPane();
       var html = pane ? String(pane.innerHTML || '').trim() : '';
@@ -1312,9 +1269,8 @@
   }
 
   function ppaGuideTitleGuard(result, aiTitle) { // CHANGED:
-    // CHANGED: This guard is NO LONGER limited to Genre=Guide.
-    // Reason: Auto genre can still generate an "AI title" that is literally Outline item #1
-    // (e.g. "1. Clarity: ..."), and that later becomes the WordPress post_title on Save Draft. // CHANGED:
+    var genre = ppaGetSelectedGenreValue(); // CHANGED:
+    if (genre !== 'guide') return aiTitle; // CHANGED:
 
     var subject = ppaCleanTitle(ppaGetSubjectValue()); // CHANGED:
     if (!subject) return aiTitle; // CHANGED:
@@ -1323,7 +1279,7 @@
     var aiNorm = ppaNormalizeComparableTitle(aiTitle); // CHANGED:
     var outlineNorm = ppaNormalizeComparableTitle(firstOutline); // CHANGED:
 
-    // If the AI title matches outline item #1, or looks like a generic section heading, use Subject instead. // CHANGED:
+    // If the title matches outline item #1, or looks like a generic section heading, use Subject instead.
     if (aiNorm && outlineNorm && aiNorm === outlineNorm) return subject; // CHANGED:
     if (ppaIsGenericSectionHeading(aiNorm)) return subject; // CHANGED:
 
@@ -1492,18 +1448,103 @@
     try { draftWin.close(); } catch (e0) {}
   }
 
+  
+  // -------------------------------------------------------------------------
+  // CHANGED: Clear, inline guard for required "Target Audience"
+  // - Shows a calm but obvious message right under the field
+  // - Focuses the field so the user can fix it fast
+  // - Used by Generate Preview (and also Draft/Publish since audience is required there too)
+  // -------------------------------------------------------------------------
+
+  function getAudienceEl() { // CHANGED:
+    return $('#ppa-audience'); // CHANGED:
+  } // CHANGED:
+
+  function clearAudienceInlineHint() { // CHANGED:
+    var a = getAudienceEl(); // CHANGED:
+    if (!a) return; // CHANGED:
+    try { a.classList.remove('ppa-missing-required'); } catch (e0) {} // CHANGED:
+    try { a.removeAttribute('aria-invalid'); } catch (e1) {} // CHANGED:
+    try { a.style.outline = ''; a.style.outlineOffset = ''; } catch (e2) {} // CHANGED:
+
+    // Remove any prior hint under the field
+    try { // CHANGED:
+      var wrap = a.parentNode || root; // CHANGED:
+      var hint = wrap && wrap.querySelector ? wrap.querySelector('[data-ppa-inline-hint="audience"]') : null; // CHANGED:
+      if (hint && hint.parentNode) hint.parentNode.removeChild(hint); // CHANGED:
+    } catch (e3) {} // CHANGED:
+  } // CHANGED:
+
+  function showAudienceInlineHint(message) { // CHANGED:
+    var a = getAudienceEl(); // CHANGED:
+    if (!a) { // CHANGED:
+      // Fallback: still show toolbar notice even if the input isn't found.
+      renderNotice('warn', String(message || 'Target audience is required.')); // CHANGED:
+      return; // CHANGED:
+    } // CHANGED:
+
+    // Visual cue (no CSS file edits; stays local to this field)
+    try { // CHANGED:
+      a.classList.add('ppa-missing-required'); // CHANGED:
+      a.setAttribute('aria-invalid', 'true'); // CHANGED:
+      a.style.outline = '2px solid #ff6c00'; // CHANGED:
+      a.style.outlineOffset = '2px'; // CHANGED:
+    } catch (e0) {} // CHANGED:
+
+    // Create / update hint text under the input
+    try { // CHANGED:
+      var wrap = a.parentNode || root; // CHANGED:
+      var hint = wrap && wrap.querySelector ? wrap.querySelector('[data-ppa-inline-hint="audience"]') : null; // CHANGED:
+      if (!hint) { // CHANGED:
+        hint = document.createElement('div'); // CHANGED:
+        hint.setAttribute('data-ppa-inline-hint', 'audience'); // CHANGED:
+        // Inline styles so we don't touch Composer CSS (gospel)
+        hint.style.marginTop = '8px'; // CHANGED:
+        hint.style.fontSize = '13px'; // CHANGED:
+        hint.style.fontWeight = '700'; // CHANGED:
+        hint.style.letterSpacing = '0.01em'; // CHANGED:
+        hint.style.color = '#ff6c00'; // CHANGED:
+        hint.style.opacity = '0.95'; // CHANGED:
+        hint.style.textShadow = '0 2px 12px rgba(0,0,0,.55)'; // CHANGED:
+        hint.style.maxWidth = '100%'; // CHANGED:
+        hint.style.lineHeight = '1.25'; // CHANGED:
+        wrap.appendChild(hint); // CHANGED:
+      } // CHANGED:
+      hint.textContent = String(message || 'Target audience is required.'); // CHANGED:
+    } catch (e1) {} // CHANGED:
+
+    // Get the user right to the fix
+    try { a.focus(); } catch (e2) {} // CHANGED:
+    try { a.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e3) {} // CHANGED:
+  } // CHANGED:
+
   function requireAudienceOrWarn() { // CHANGED:
-    try {
-      var meta = buildComposerMetaPayload();
-      if (!String(meta.audience || '').trim()) {
-        renderNotice('warn', 'Target audience is required.');
-        return false;
-      }
-    } catch (e0) {
-      return true;
-    }
-    return true;
-  }
+    try { // CHANGED:
+      var meta = buildComposerMetaPayload(); // CHANGED:
+      if (!String(meta.audience || '').trim()) { // CHANGED:
+        var msg = 'Target Audience is required — fill it in, then click Generate Preview.'; // CHANGED:
+        renderNotice('warn', msg); // CHANGED:
+        showAudienceInlineHint(msg); // CHANGED:
+        return false; // CHANGED:
+      } // CHANGED:
+      clearAudienceInlineHint(); // CHANGED:
+    } catch (e0) { // CHANGED:
+      return true; // CHANGED:
+    } // CHANGED:
+    return true; // CHANGED:
+  } // CHANGED:
+
+  (function bindAudienceHintClearOnInput() { // CHANGED:
+    var a = getAudienceEl(); // CHANGED:
+    if (!a) return; // CHANGED:
+    try { // CHANGED:
+      a.addEventListener('input', function () { // CHANGED:
+        if (String(a.value || '').trim()) clearAudienceInlineHint(); // CHANGED:
+      }); // CHANGED:
+    } catch (e0) {} // CHANGED:
+  })(); // CHANGED:
+
+
 
   function handleDraftClick(ev) {
     btnDraft = document.getElementById('ppa-draft') || btnDraft;
@@ -1530,8 +1571,6 @@
 
     withBusy(function () {
       var payload = buildStorePayload('draft');
-      try { console.info('PPA: draft payload (title guard) →', { subject: payload.subject, title: payload.title, slug: payload.slug }); } catch (eDbg1) {} // CHANGED:
-
       return apiPost('ppa_store', payload).then(function (res) {
         var wp = unwrapWpAjax(res.body);
         var data = wp.hasEnvelope ? wp.data : res.body;
@@ -1606,8 +1645,6 @@
 
     withBusy(function () {
       var payload = buildStorePayload('publish');
-      try { console.info('PPA: publish payload (title guard) →', { subject: payload.subject, title: payload.title, slug: payload.slug }); } catch (eDbg2) {} // CHANGED:
-
       return apiPost('ppa_store', payload).then(function (res) {
         var wp = unwrapWpAjax(res.body);
         var data = wp.hasEnvelope ? wp.data : res.body;
@@ -1652,10 +1689,7 @@
       return;
     }
 
-    if (!String(probe.audience || '').trim()) {
-      renderNotice('warn', 'Target audience is required.');
-      return;
-    }
+    if (!requireAudienceOrWarn()) return; // CHANGED:
 
     withBusy(function () {
       return apiPost('ppa_generate', probe).then(function (res) {
