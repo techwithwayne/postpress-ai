@@ -188,6 +188,8 @@ if ( ! function_exists( 'ppa_disabled_btn_attrs' ) ) { // CHANGED:
                 </div>
             </dl>
 
+            <div class="ppa-sites-list__label ppa-muted"><?php echo esc_html__( 'Sites on this key', 'postpress-ai' ); ?></div> <!-- CHANGED -->
+
             <div class="ppa-list" id="ppa-sites-list">
                 <div class="ppa-list__empty"><?php echo esc_html__( 'Refresh to load your activated sites.', 'postpress-ai' ); ?></div>
             </div>
@@ -272,4 +274,5 @@ if ( ! function_exists( 'ppa_disabled_btn_attrs' ) ) { // CHANGED:
     </div>
 
     <input type="hidden" id="ppa-account-site" value="<?php echo esc_attr( $site_url ); ?>" />
+    <input type="hidden" id="ppa-account-has-license-key" value="<?php echo $license_key !== '' ? '1' : '0'; ?>" /> <!-- CHANGED: allows JS to treat missing key as disconnected -->
 </div>

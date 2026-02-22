@@ -3,11 +3,8 @@ PostPress AI — Admin Account Screen (Isolated)
 
 ========= CHANGE LOG =========
 2026-01-15: ADD: New Account screen styling. Scoped to Account screen only.
-
-Rules:
-- This file is ONLY enqueued on the Account screen.
-- No dependencies on admin.css or other plugin CSS.
-*/
+2026-02-22: FIX: Zebra striping for Sites list; FIX: Ghost button hover turning white;
+           ADD: Subtle brand glow around Account cards.  /* CHANGED */
 
 /* Scope hard to our screen */
 body.postpress-ai_page_postpress-ai-account {
@@ -22,6 +19,7 @@ body.postpress-ai_page_postpress-ai-account {
   --ppa-bad: #ff4d4d;
   --ppa-radius: 16px;
   --ppa-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  --ppa-glow: 0 0 0 1px rgba(255,108,0,0.20), 0 0 18px rgba(255,108,0,0.10); /* CHANGED */
 }
 
 body.postpress-ai_page_postpress-ai-account #wpcontent {
@@ -92,6 +90,55 @@ body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost:hover {
   border-color: var(--ppa-accent);
 }
 
+/* CHANGED: Prevent WP admin hover from turning ghost buttons white (class-based) */
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:hover,
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:active,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:hover,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:active {
+  background: rgba(255,108,0,0.12);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: none;
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:focus {
+  box-shadow: 0 0 0 2px rgba(255,108,0,0.28);
+  outline: none;
+}
+
+/* CHANGED: Prevent WP admin hover from turning buttons white (structure-based safety net)
+   Covers buttons that do NOT carry .ppa-btn--ghost (ex: Buy Tokens / Billing Portal / Open Settings). */
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary),
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary) {
+  background: transparent;
+  border-color: var(--ppa-border);
+  color: var(--ppa-text);
+  box-shadow: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):hover,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):focus,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):hover,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):focus {
+  background: rgba(255,108,0,0.12);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: 0 0 0 2px rgba(255,108,0,0.22);
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):active,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):active {
+  background: rgba(255,108,0,0.16);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: none;
+}
+
 /* Status */
 body.postpress-ai_page_postpress-ai-account .ppa-status {
   display: flex;
@@ -138,7 +185,7 @@ body.postpress-ai_page_postpress-ai-account .ppa-card {
   border: 1px solid var(--ppa-border);
   border-radius: var(--ppa-radius);
   padding: 14px;
-  box-shadow: var(--ppa-shadow);
+  box-shadow: var(--ppa-shadow), var(--ppa-glow); /* CHANGED */
 }
 
 body.postpress-ai_page_postpress-ai-account .ppa-card__head {
@@ -275,6 +322,7 @@ body.postpress-ai_page_postpress-ai-account .ppa-list {
   overflow: hidden;
 }
 
+/* Legacy row class (kept for safety) */
 body.postpress-ai_page_postpress-ai-account .ppa-site {
   display: flex;
   align-items: center;
@@ -287,6 +335,58 @@ body.postpress-ai_page_postpress-ai-account .ppa-site {
 
 body.postpress-ai_page_postpress-ai-account .ppa-site:first-child {
   border-top: none;
+}
+
+/* CHANGED: Live markup row class (.ppa-list__row) — this is what your DOM actually uses */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:first-child,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:first-child {
+  border-top: none;
+}
+
+/* CHANGED: Zebra striping for "Sites on this key" rows (LIVE) */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:nth-child(odd),
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:nth-child(odd) {
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:nth-child(even),
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:nth-child(even) {
+  background: rgba(255,255,255,0.045);
+}
+
+/* Live row inner cells */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__left,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__left {
+  color: var(--ppa-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__right,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__right {
+  font-size: 12px;
+  color: var(--ppa-muted);
+  flex: 0 0 auto;
+}
+
+/* Zebra striping fallback for legacy .ppa-site rows */
+body.postpress-ai_page_postpress-ai-account .ppa-site:nth-child(odd) {
+  background: rgba(255,255,255,0.02);
+}
+body.postpress-ai_page_postpress-ai-account .ppa-site:nth-child(even) {
+  background: rgba(255,255,255,0.045);
 }
 
 body.postpress-ai_page_postpress-ai-account .ppa-site__url {
