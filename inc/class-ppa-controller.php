@@ -9,6 +9,7 @@
  * CHANGE LOG
  * 2026-02-19 • FIX: Forward whitelisted Account intent params (billing_portal) from WP → Django so Django can return a one-time Stripe Billing Portal session URL (no email login). // CHANGED:
  *            • HARDEN: Add a short WP transient cache for account_status to prevent Django rate-limit 'too many requests' during UI refresh/popup workflows (bypassed for billing_portal intent). // CHANGED:
+ * 2026-02-22 • FIX: Save Draft (Store) now forces WP draft title to use Composer Subject/Title (original saves) via last-subject capture on Generate + final post_title enforce (no outline/H1 bleed). // CHANGED:
  * 2026-02-20 • FIX: Accept PPA admin nonce via headers (X-PPA-Nonce / X-WP-Nonce) and support legacy 'ppa-admin' nonce action string for customer installs. // CHANGED:
  *            • FIX: Treat x-www-form-urlencoded POSTs with a JSON 'payload' field as valid JSON bodies (back-compat across JS bundles). // CHANGED:
  *            • FIX: Update default Django base URL fallback to apps.techwithwayne.com to prevent WP-theme 404 HTML being returned from postpressai.com when the base option is unset. // CHANGED:
@@ -73,11 +74,23 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			);
 		}
 
-		private static function must_post() {
-			if ( strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) !== 'POST' ) {
-				wp_send_json_error( self::error_payload( 'method_not_allowed', 405 ), 405 );
-			}
-		}
+                private static function must_post() { // CHANGED:
+                        $m = 'POST'; // CHANGED:
+                        if ( isset( $_SERVER['REQUEST_METHOD'] ) ) { $m = strtoupper( (string) $_SERVER['REQUEST_METHOD'] ); } // CHANGED:
+                        if ( 'POST' !== $m ) {
+                                wp_send_json_error( self::error_payload( 'method_not_allowed', 405 ), 405 );
+                        }
+                }
+
+                private static function must_post_or_get() { // CHANGED:
+                        $m = 'POST'; // CHANGED:
+                        if ( isset( $_SERVER['REQUEST_METHOD'] ) ) { $m = strtoupper( (string) $_SERVER['REQUEST_METHOD'] ); } // CHANGED:
+                        if ( 'POST' !== $m && 'GET' !== $m ) {
+                                wp_send_json_error( self::error_payload( 'method_not_allowed', 405 ), 405 );
+                        }
+                }
+
+
 
 		private static function verify_nonce_or_forbid() {
 			$nonce = '';
@@ -111,36 +124,72 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			}
 		}
 
-		private static function read_json_body() {
-			// Read raw request bytes first (works for JSON POSTs).
-			$raw = file_get_contents( 'php://input' );
+		                                private static function read_json_body() {
+                        // Read raw request bytes first (works for JSON POSTs).
+                        $raw = file_get_contents( 'php://input' );
 
-			// ALSO support x-www-form-urlencoded requests that send JSON in a "payload" field.
-			// This is important for customers because different JS bundles have used different
-			// transport formats over time (and we want "Generate Preview" to just work).
-			if ( isset( $_POST['payload'] ) && '' !== (string) $_POST['payload'] ) {
-				$raw = (string) wp_unslash( $_POST['payload'] );
-			}
+                        // ALSO support x-www-form-urlencoded requests that send JSON in a "payload" field.
+                        // This is important for customers because different JS bundles have used different
+                        // transport formats over time (and we want "Generate Preview" to just work).
+                        if ( isset( $_POST['payload'] ) && '' !== (string) $_POST['payload'] ) {
+                                $raw = (string) wp_unslash( $_POST['payload'] );
+                        }
 
-			if ( ! is_string( $raw ) || '' === $raw ) {
-				return array(
-					'raw'  => '',
-					'json' => null,
-				);
-			}
+                        // Try to parse JSON if the body looks like JSON.
+                        $json = null;
+                        if ( is_string( $raw ) && '' !== $raw ) {
+                                $tmp = json_decode( $raw, true );
+                                if ( is_array( $tmp ) ) {
+                                        $json = $tmp;
+                                }
+                        }
 
-			$json = json_decode( $raw, true );
-			if ( ! is_array( $json ) ) {
-				$json = null;
-			}
+                                                // CHANGED: If JSON parsing failed (or body is empty) but we have form/query fields,
+                        // convert them into JSON so intent flags (billing_portal) are reliably detected.
+                        $source = array(); // CHANGED:
+                        if ( isset( $_POST ) && is_array( $_POST ) && ! empty( $_POST ) ) { $source = $_POST; } // CHANGED:
+                        elseif ( isset( $_GET ) && is_array( $_GET ) && ! empty( $_GET ) ) { $source = $_GET; } // CHANGED:
 
-			return array(
-				'raw'  => $raw,
-				'json' => $json,
-			);
-		}
+                        if ( null === $json && ! empty( $source ) ) { // CHANGED:
+                                $fallback = array(); // CHANGED:
+                                $skip     = array( 'action', 'nonce', 'payload', '_wpnonce', '_ajax_nonce', '_wp_http_referer' ); // CHANGED:
 
-		private static function normalize_base_candidate( $base ) {
+                                foreach ( $source as $k => $v ) { // CHANGED:
+                                        $kk = (string) $k; // CHANGED:
+                                        if ( in_array( $kk, $skip, true ) ) { continue; } // CHANGED:
+
+                                        if ( is_array( $v ) ) { // CHANGED:
+                                                $arr = array(); // CHANGED:
+                                                foreach ( $v as $vv ) { // CHANGED:
+                                                        if ( is_scalar( $vv ) ) { $arr[] = (string) wp_unslash( $vv ); } // CHANGED:
+                                                }
+                                                if ( ! empty( $arr ) ) { $fallback[ $kk ] = $arr; } // CHANGED:
+                                        } else { // CHANGED:
+                                                if ( is_scalar( $v ) ) { $fallback[ $kk ] = (string) wp_unslash( $v ); } // CHANGED:
+                                        }
+                                }
+
+                                if ( ! empty( $fallback ) ) { // CHANGED:
+                                        $json = $fallback; // CHANGED:
+                                        $raw  = wp_json_encode( $fallback ); // CHANGED:
+                                }
+                        }
+
+                        // If we still don't have JSON, treat as no body (avoid sending invalid JSON downstream).
+                        if ( ! is_string( $raw ) || '' === $raw || null === $json ) {
+                                return array(
+                                        'raw'  => '',
+                                        'json' => null,
+                                );
+                        }
+
+                        return array(
+                                'raw'  => $raw,
+                                'json' => $json,
+                        );
+                }
+
+private static function normalize_base_candidate( $base ) {
 			$base = trim( (string) $base );
 			$base = rtrim( $base, '/' );
 			return $base;
@@ -163,6 +212,11 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 
 			if ( '' === $base ) {
 				$base = (string) get_option( 'ppa_django_base_url', '' );
+			}
+
+			// CHANGED: Support newer option name used by some installs.
+			if ( '' === $base ) {
+				$base = (string) get_option( 'ppa_django_url', '' );
 			}
 
 			$base = self::normalize_base_candidate( $base );
@@ -209,15 +263,41 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 		}
 
 		private static function build_args( $json_body ) {
-			$timeout = 25;
+			// CHANGED: Keep WP→Django calls stable during slow generations.
+			$timeout = 60; // CHANGED: >=45s per product requirement
+
+			$key     = trim( (string) self::activation_key() ); // CHANGED:
+			$install = (string) self::site_url_for_auth(); // CHANGED:
+			$view    = (string) self::$endpoint; // CHANGED:
+
+			$headers = array(
+				'Content-Type'   => 'application/json',
+				'Accept'         => 'application/json',
+				'X-PPA-Install'  => $install, // CHANGED: site identity for Option A auth
+			);
+
+			// CHANGED: Django primary auth header (shared key OR license key fallback).
+			if ( '' !== $key ) {
+				$headers['X-PPA-Key'] = $key; // CHANGED:
+			}
+
+			// CHANGED: Helpful for backend logging / routing parity (safe, no secrets).
+			if ( '' !== $view ) {
+				$headers['X-PPA-View'] = $view; // CHANGED:
+			}
+
+			// CHANGED: Optional version hint (best-effort).
+			if ( defined( 'PPA_VERSION' ) ) { // CHANGED:
+				$headers['X-PPA-Version'] = (string) PPA_VERSION; // CHANGED:
+			}
 
 			$args = array(
-				'timeout'   => $timeout,
-				'headers'   => array(
-					'Content-Type' => 'application/json',
-					'Accept'       => 'application/json',
-				),
-				'body'      => $json_body,
+				'timeout'     => $timeout,
+				'redirection' => 0, // CHANGED: prevent POST body/header loss on redirects
+				'blocking'    => true,
+				'sslverify'   => true,
+				'headers'     => $headers,
+				'body'        => $json_body,
 				'data_format' => 'body',
 			);
 
@@ -614,6 +694,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			}                                                                                                              // CHANGED:
 
 			$title_candidates = array(                                                                                    // CHANGED:
+				self::dig( $payload_json, 'ppa_subject' ),                                                           // CHANGED: prefer Composer Subject/Title for original saves
 				self::dig( $payload_json, 'translation.title' ),                                                           // CHANGED:
 				self::dig( $payload_json, 'translation.post_title' ),                                                      // CHANGED:
 				self::dig( $payload_json, 'post_title' ),                                                                  // CHANGED:
@@ -702,6 +783,36 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			$payload = self::read_json_body();
 			$base    = self::django_base();
 
+			// CHANGED: Remember the last Composer Subject/Title (per-user) so Save Draft (Store)
+			// can force WP post_title to match the Subject even if the store payload omits it.
+			$req_json = ( isset( $payload['json'] ) && is_array( $payload['json'] ) ) ? $payload['json'] : null; // CHANGED:
+			if ( is_array( $req_json ) && function_exists( 'get_current_user_id' ) && function_exists( 'update_user_meta' ) ) { // CHANGED:
+				$last_subject = (string) self::first_nonempty_string( array( // CHANGED:
+					( isset( $req_json['subject'] ) && is_scalar( $req_json['subject'] ) ) ? (string) $req_json['subject'] : '', // CHANGED:
+					( isset( $req_json['subject_title'] ) && is_scalar( $req_json['subject_title'] ) ) ? (string) $req_json['subject_title'] : '', // CHANGED:
+					( isset( $req_json['subjectTitle'] ) && is_scalar( $req_json['subjectTitle'] ) ) ? (string) $req_json['subjectTitle'] : '', // CHANGED:
+					( isset( $req_json['subject_text'] ) && is_scalar( $req_json['subject_text'] ) ) ? (string) $req_json['subject_text'] : '', // CHANGED:
+					( isset( $req_json['subjectText'] ) && is_scalar( $req_json['subjectText'] ) ) ? (string) $req_json['subjectText'] : '', // CHANGED:
+					( isset( $req_json['subject_input'] ) && is_scalar( $req_json['subject_input'] ) ) ? (string) $req_json['subject_input'] : '', // CHANGED:
+					( isset( $req_json['subjectInput'] ) && is_scalar( $req_json['subjectInput'] ) ) ? (string) $req_json['subjectInput'] : '', // CHANGED:
+					( isset( $req_json['ppa_subject'] ) && is_scalar( $req_json['ppa_subject'] ) ) ? (string) $req_json['ppa_subject'] : '', // CHANGED:
+					self::dig( $req_json, 'composer.subject' ), // CHANGED:
+					self::dig( $req_json, 'composer.title' ), // CHANGED:
+					self::dig( $req_json, 'fields.subject' ), // CHANGED:
+					self::dig( $req_json, 'fields.title' ), // CHANGED:
+					self::dig( $req_json, 'payload.subject' ), // CHANGED:
+					self::dig( $req_json, 'payload.title' ), // CHANGED:
+					self::dig( $req_json, 'data.subject' ), // CHANGED:
+					self::dig( $req_json, 'data.title' ), // CHANGED:
+				) ); // CHANGED:
+				$last_subject = trim( (string) $last_subject ); // CHANGED:
+				if ( '' !== $last_subject ) { // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject', $last_subject ); // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject_ts', (string) time() ); // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
+
 			$django_url = $base . '/preview/';
 
 			$response = wp_remote_post( $django_url, self::build_args( self::ensure_payload_has_auth( $payload ) ) );
@@ -744,6 +855,84 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			$payload = self::read_json_body(); // CHANGED:
 			$base    = self::django_base(); // CHANGED:
 
+			// CHANGED: For ORIGINAL saves, force the WP draft title to match the Composer Subject/Title
+			// (not the first outline item / H1 that comes back from the AI).
+			$preferred_title = ''; // CHANGED:
+			$is_original = true; // CHANGED:
+			$req_json = ( isset( $payload['json'] ) && is_array( $payload['json'] ) ) ? $payload['json'] : null; // CHANGED:
+			$req_lang = ''; // CHANGED:
+			if ( is_array( $req_json ) ) { // CHANGED:
+				// Detect translation vs Original (best-effort). // CHANGED:
+				foreach ( array( 'language', 'lang', 'target_language', 'translation_language', 'output_language', 'to_language', 'to_lang' ) as $lk ) { // CHANGED:
+					if ( isset( $req_json[ $lk ] ) && is_scalar( $req_json[ $lk ] ) ) { // CHANGED:
+						$req_lang = trim( (string) $req_json[ $lk ] ); // CHANGED:
+						if ( '' !== $req_lang ) { break; } // CHANGED:
+					} // CHANGED:
+				} // CHANGED:
+				// Nested language hints (some JS payloads wrap fields). // CHANGED:
+				if ( '' === $req_lang ) { // CHANGED:
+					$req_lang = (string) self::first_nonempty_string( array( // CHANGED:
+						self::dig( $req_json, 'translation.language' ), // CHANGED:
+						self::dig( $req_json, 'translation.lang' ), // CHANGED:
+						self::dig( $req_json, 'fields.language' ), // CHANGED:
+						self::dig( $req_json, 'fields.lang' ), // CHANGED:
+						self::dig( $req_json, 'payload.language' ), // CHANGED:
+						self::dig( $req_json, 'payload.lang' ), // CHANGED:
+					) ); // CHANGED:
+					$req_lang = trim( $req_lang ); // CHANGED:
+				} // CHANGED:
+				if ( '' !== $req_lang && 'original' !== strtolower( $req_lang ) ) { // CHANGED:
+					$is_original = false; // CHANGED:
+				} // CHANGED:
+				// Explicit markers. // CHANGED:
+				if ( isset( $req_json['is_translation'] ) && (bool) $req_json['is_translation'] ) { $is_original = false; } // CHANGED:
+				if ( isset( $req_json['translation'] ) && is_array( $req_json['translation'] ) ) { $is_original = false; } // CHANGED:
+				if ( $is_original ) { // CHANGED:
+					// Robustly pick the Composer subject/title from many known shapes. // CHANGED:
+					$preferred_title = (string) self::first_nonempty_string( array( // CHANGED:
+						( isset( $req_json['subject'] ) && is_scalar( $req_json['subject'] ) ) ? (string) $req_json['subject'] : '', // CHANGED:
+						( isset( $req_json['subject_title'] ) && is_scalar( $req_json['subject_title'] ) ) ? (string) $req_json['subject_title'] : '', // CHANGED:
+						( isset( $req_json['subjectTitle'] ) && is_scalar( $req_json['subjectTitle'] ) ) ? (string) $req_json['subjectTitle'] : '', // CHANGED:
+						( isset( $req_json['subject_text'] ) && is_scalar( $req_json['subject_text'] ) ) ? (string) $req_json['subject_text'] : '', // CHANGED:
+						( isset( $req_json['subjectText'] ) && is_scalar( $req_json['subjectText'] ) ) ? (string) $req_json['subjectText'] : '', // CHANGED:
+						( isset( $req_json['subject_input'] ) && is_scalar( $req_json['subject_input'] ) ) ? (string) $req_json['subject_input'] : '', // CHANGED:
+						( isset( $req_json['subjectInput'] ) && is_scalar( $req_json['subjectInput'] ) ) ? (string) $req_json['subjectInput'] : '', // CHANGED:
+						( isset( $req_json['ppa_subject'] ) && is_scalar( $req_json['ppa_subject'] ) ) ? (string) $req_json['ppa_subject'] : '', // CHANGED:
+						self::dig( $req_json, 'composer.subject' ), // CHANGED:
+						self::dig( $req_json, 'composer.title' ), // CHANGED:
+						self::dig( $req_json, 'fields.subject' ), // CHANGED:
+						self::dig( $req_json, 'fields.title' ), // CHANGED:
+						self::dig( $req_json, 'payload.subject' ), // CHANGED:
+						self::dig( $req_json, 'payload.title' ), // CHANGED:
+						self::dig( $req_json, 'data.subject' ), // CHANGED:
+						self::dig( $req_json, 'data.title' ), // CHANGED:
+						self::dig( $req_json, 'post.subject' ), // CHANGED:
+						self::dig( $req_json, 'post.title' ), // CHANGED:
+					) ); // CHANGED:
+
+					$preferred_title = trim( (string) $preferred_title ); // CHANGED:
+
+					// CHANGED: If store payload doesn't include the subject, fall back to the last subject we captured on Generate Preview.
+					if ( '' === $preferred_title && function_exists( 'get_current_user_id' ) && function_exists( 'get_user_meta' ) ) { // CHANGED:
+						$last = trim( (string) get_user_meta( get_current_user_id(), 'ppa_last_subject', true ) ); // CHANGED:
+						if ( '' !== $last ) { $preferred_title = $last; } // CHANGED:
+					} // CHANGED:
+
+					// CHANGED: As a final fallback only, accept generic title/topic fields (may reflect AI title/outline).
+					if ( '' === $preferred_title ) { // CHANGED:
+						$preferred_title = trim( (string) self::first_nonempty_string( array( // CHANGED:
+							( isset( $req_json['title'] ) && is_scalar( $req_json['title'] ) ) ? (string) $req_json['title'] : '', // CHANGED:
+							( isset( $req_json['topic'] ) && is_scalar( $req_json['topic'] ) ) ? (string) $req_json['topic'] : '', // CHANGED:
+						) ) ); // CHANGED:
+					} // CHANGED:
+
+					$preferred_title = trim( (string) $preferred_title ); // CHANGED:
+					if ( '' !== $preferred_title ) { // CHANGED:
+						error_log( 'PPA: [store] preferred_title override enabled (original save).' ); // CHANGED:
+					} // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
 			$django_url = $base . '/store/'; // CHANGED:
 
 			$response = wp_remote_post( $django_url, self::build_args( self::ensure_payload_has_auth( $payload ) ) ); // CHANGED:
@@ -781,8 +970,21 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 				$payload_json = $json; // CHANGED:
 			} // CHANGED:
 
+			// CHANGED: Override WP post title with Composer Subject/Title for ORIGINAL saves.
+			// We set multiple keys so title selection is bulletproof across envelope shapes.
+			if ( is_array( $payload_json ) && '' !== $preferred_title ) { // CHANGED:
+				$payload_json['ppa_subject'] = (string) $preferred_title; // CHANGED:
+				$payload_json['post_title']  = (string) $preferred_title; // CHANGED:
+				$payload_json['title']       = (string) $preferred_title; // CHANGED:
+			}
+
 			$up = self::upsert_wp_post_from_django( is_array( $payload_json ) ? $payload_json : array() ); // CHANGED:
 			if ( isset( $up['ok'] ) && true === $up['ok'] ) { // CHANGED:
+				// CHANGED: Final enforce WP draft title for ORIGINAL saves (last write wins).
+				if ( $is_original && '' !== $preferred_title && function_exists( 'wp_update_post' ) && isset( $up['post_id'] ) ) { // CHANGED:
+					wp_update_post( array( 'ID' => (int) $up['post_id'], 'post_title' => (string) $preferred_title ), true ); // CHANGED:
+				}
+
 				// Attach post info to the response so the Composer can open it.                                           // CHANGED:
 				if ( ! isset( $json['data'] ) || ! is_array( $json['data'] ) ) { // CHANGED:
 					$json['data'] = array(); // CHANGED:
@@ -827,6 +1029,36 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			$payload = self::read_json_body();
 			$base    = self::django_base();
 
+			// CHANGED: Remember the last Composer Subject/Title (per-user) so Save Draft (Store)
+			// can force WP post_title to match the Subject even if the store payload omits it.
+			$req_json = ( isset( $payload['json'] ) && is_array( $payload['json'] ) ) ? $payload['json'] : null; // CHANGED:
+			if ( is_array( $req_json ) && function_exists( 'get_current_user_id' ) && function_exists( 'update_user_meta' ) ) { // CHANGED:
+				$last_subject = (string) self::first_nonempty_string( array( // CHANGED:
+					( isset( $req_json['subject'] ) && is_scalar( $req_json['subject'] ) ) ? (string) $req_json['subject'] : '', // CHANGED:
+					( isset( $req_json['subject_title'] ) && is_scalar( $req_json['subject_title'] ) ) ? (string) $req_json['subject_title'] : '', // CHANGED:
+					( isset( $req_json['subjectTitle'] ) && is_scalar( $req_json['subjectTitle'] ) ) ? (string) $req_json['subjectTitle'] : '', // CHANGED:
+					( isset( $req_json['subject_text'] ) && is_scalar( $req_json['subject_text'] ) ) ? (string) $req_json['subject_text'] : '', // CHANGED:
+					( isset( $req_json['subjectText'] ) && is_scalar( $req_json['subjectText'] ) ) ? (string) $req_json['subjectText'] : '', // CHANGED:
+					( isset( $req_json['subject_input'] ) && is_scalar( $req_json['subject_input'] ) ) ? (string) $req_json['subject_input'] : '', // CHANGED:
+					( isset( $req_json['subjectInput'] ) && is_scalar( $req_json['subjectInput'] ) ) ? (string) $req_json['subjectInput'] : '', // CHANGED:
+					( isset( $req_json['ppa_subject'] ) && is_scalar( $req_json['ppa_subject'] ) ) ? (string) $req_json['ppa_subject'] : '', // CHANGED:
+					self::dig( $req_json, 'composer.subject' ), // CHANGED:
+					self::dig( $req_json, 'composer.title' ), // CHANGED:
+					self::dig( $req_json, 'fields.subject' ), // CHANGED:
+					self::dig( $req_json, 'fields.title' ), // CHANGED:
+					self::dig( $req_json, 'payload.subject' ), // CHANGED:
+					self::dig( $req_json, 'payload.title' ), // CHANGED:
+					self::dig( $req_json, 'data.subject' ), // CHANGED:
+					self::dig( $req_json, 'data.title' ), // CHANGED:
+				) ); // CHANGED:
+				$last_subject = trim( (string) $last_subject ); // CHANGED:
+				if ( '' !== $last_subject ) { // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject', $last_subject ); // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject_ts', (string) time() ); // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
+
 			$django_url = $base . '/generate/';
 			$response   = wp_remote_post( $django_url, self::build_args( self::ensure_payload_has_auth( $payload ) ) );
 
@@ -863,7 +1095,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 ); // CHANGED:
 			}
 
-			self::must_post();              // CHANGED:
+			self::must_post_or_get(); // CHANGED:              // CHANGED:
 			self::verify_nonce_or_forbid(); // CHANGED:
 
 			// LOCKED: do NOT accept arbitrary license keys from the browser. Use stored activation key only.              // CHANGED:
@@ -1076,7 +1308,7 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 ); // CHANGED:
 			}                                                                                                            // CHANGED:
 
-			self::must_post();              // CHANGED:
+			self::must_post_or_get(); // CHANGED:              // CHANGED:
 			self::verify_nonce_or_forbid(); // CHANGED:
 
 			// LOCKED: Use stored activation key only.                                                                    // CHANGED:
@@ -1218,6 +1450,36 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 
 			$payload = self::read_json_body();
 			$base    = self::django_base();
+
+			// CHANGED: Remember the last Composer Subject/Title (per-user) so Save Draft (Store)
+			// can force WP post_title to match the Subject even if the store payload omits it.
+			$req_json = ( isset( $payload['json'] ) && is_array( $payload['json'] ) ) ? $payload['json'] : null; // CHANGED:
+			if ( is_array( $req_json ) && function_exists( 'get_current_user_id' ) && function_exists( 'update_user_meta' ) ) { // CHANGED:
+				$last_subject = (string) self::first_nonempty_string( array( // CHANGED:
+					( isset( $req_json['subject'] ) && is_scalar( $req_json['subject'] ) ) ? (string) $req_json['subject'] : '', // CHANGED:
+					( isset( $req_json['subject_title'] ) && is_scalar( $req_json['subject_title'] ) ) ? (string) $req_json['subject_title'] : '', // CHANGED:
+					( isset( $req_json['subjectTitle'] ) && is_scalar( $req_json['subjectTitle'] ) ) ? (string) $req_json['subjectTitle'] : '', // CHANGED:
+					( isset( $req_json['subject_text'] ) && is_scalar( $req_json['subject_text'] ) ) ? (string) $req_json['subject_text'] : '', // CHANGED:
+					( isset( $req_json['subjectText'] ) && is_scalar( $req_json['subjectText'] ) ) ? (string) $req_json['subjectText'] : '', // CHANGED:
+					( isset( $req_json['subject_input'] ) && is_scalar( $req_json['subject_input'] ) ) ? (string) $req_json['subject_input'] : '', // CHANGED:
+					( isset( $req_json['subjectInput'] ) && is_scalar( $req_json['subjectInput'] ) ) ? (string) $req_json['subjectInput'] : '', // CHANGED:
+					( isset( $req_json['ppa_subject'] ) && is_scalar( $req_json['ppa_subject'] ) ) ? (string) $req_json['ppa_subject'] : '', // CHANGED:
+					self::dig( $req_json, 'composer.subject' ), // CHANGED:
+					self::dig( $req_json, 'composer.title' ), // CHANGED:
+					self::dig( $req_json, 'fields.subject' ), // CHANGED:
+					self::dig( $req_json, 'fields.title' ), // CHANGED:
+					self::dig( $req_json, 'payload.subject' ), // CHANGED:
+					self::dig( $req_json, 'payload.title' ), // CHANGED:
+					self::dig( $req_json, 'data.subject' ), // CHANGED:
+					self::dig( $req_json, 'data.title' ), // CHANGED:
+				) ); // CHANGED:
+				$last_subject = trim( (string) $last_subject ); // CHANGED:
+				if ( '' !== $last_subject ) { // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject', $last_subject ); // CHANGED:
+					update_user_meta( get_current_user_id(), 'ppa_last_subject_ts', (string) time() ); // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
 
 			$django_url = $base . '/debug/headers/';
 
