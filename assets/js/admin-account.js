@@ -28,24 +28,38 @@ PostPress AI — Admin Account Screen (Isolated)
            FIX: Treat WP "-1" nonce failure even when HTTP 200 (common admin-ajax behavior).                  // CHANGED:
            HARDEN: When disabling links, also remove target/rel (prevents stale enabled behavior).            // CHANGED:
 
-Notes:
-- This file is ONLY enqueued on the Account screen.
-- No dependencies on other PPA scripts.
+2026-02-22: FIX: POPUPS: Don’t rely on exact button IDs anymore. Use delegated click handling to always catch
+                     Upgrade/Buy/Billing clicks and open the popup immediately (popup-safe).                  // CHANGED:
+           FIX: POPUPS: Billing Portal always requests a fresh one-time URL via intent=billing_portal, even if
+                     the button is currently disabled (server decides).                                       // CHANGED:
+
+2026-02-22: FIX: SITES: Render Active/Site Limit/Remaining from license.sites.* (∞ when unlimited).          // CHANGED:
 */
 
 (function () {
   'use strict';
 
-  var inflight = false; // CHANGED:
-  var lastFetchAt = 0;  // CHANGED: throttle auto-refresh on focus/visibility
+  var inflight = false;
+  var lastFetchAt = 0;
+  var lastPayload = null;
 
-  function $(id) {
-    return document.getElementById(id);
-  }
+  function $(id) { return document.getElementById(id); }
 
   function num(v) {
     var n = Number(v);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function boolish(v) {
+    if (v === true) return true;
+    if (v === false) return false;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') {
+      var s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === 'yes' || s === 'y') return true;
+      if (s === 'false' || s === '0' || s === 'no' || s === 'n') return false;
+    }
+    return null;
   }
 
   function fmtInt(v) {
@@ -60,6 +74,35 @@ Notes:
     return v;
   }
 
+  function toSafeStr(v) {
+    if (v === null || v === undefined) return '';
+    try { return String(v); } catch (e) { return ''; }
+  }
+
+  function firstDefined(list) {
+    if (!Array.isArray(list)) return null;
+    for (var i = 0; i < list.length; i++) {
+      var v = list[i];
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'string' && v.trim() === '') continue;
+      return v;
+    }
+    return null;
+  }
+
+  function setText(id, value) {
+    var el = $(id);
+    if (!el) return;
+    el.textContent = (value === null || value === undefined || value === '') ? '—' : String(value);
+  }
+
+  function setTextAny(ids, value) {
+    if (!Array.isArray(ids)) return;
+    for (var i = 0; i < ids.length; i++) {
+      setText(ids[i], value);
+    }
+  }
+
   function setStatus(type, msg) {
     var el = $('ppa-account-status');
     if (!el) return;
@@ -69,38 +112,9 @@ Notes:
     if (type === 'bad') el.classList.add('is-bad');
 
     var text = msg || '—';
-
-    // Some templates do NOT include a child .ppa-status__text.
-    // In that case, update the container directly so status is always visible.                         // CHANGED:
     var t = el.querySelector('.ppa-status__text');
-    if (t) {
-      t.textContent = text;
-    } else {
-      el.textContent = text;                                                                            // CHANGED:
-    }
-  }
-
-  function setText(id, value) {
-    var el = $(id);
-    if (!el) return;
-    el.textContent = (value === null || value === undefined || value === '') ? '—' : String(value);
-  }
-
-  function toSafeStr(v) {
-    if (v === null || v === undefined) return '';
-    try { return String(v); } catch (e) { return ''; }
-  }
-
-  function firstDefined(list) { // CHANGED:
-    // Return the first value that is not null/undefined/empty-string.
-    if (!Array.isArray(list)) return null;
-    for (var i = 0; i < list.length; i++) {
-      var v = list[i];
-      if (v === null || v === undefined) continue;
-      if (typeof v === 'string' && v.trim() === '') continue;
-      return v;
-    }
-    return null;
+    if (t) t.textContent = text;
+    else el.textContent = text;
   }
 
   function parseMaybeDate(v) {
@@ -138,6 +152,35 @@ Notes:
     return a + ' – ' + b;
   }
 
+  function dig(obj, path) {
+    if (!obj || typeof obj !== 'object') return null;
+    if (!path) return null;
+    var cur = obj;
+    var segs = String(path).split('.');
+    for (var i = 0; i < segs.length; i++) {
+      var k = segs[i];
+      if (!cur || typeof cur !== 'object' || !(k in cur)) return null;
+      cur = cur[k];
+    }
+    return cur;
+  }
+
+  function withTs(url) {
+    var base = toSafeStr(url);
+    if (!base) return base;
+    var ts = String(Date.now());
+    try {
+      var u = new URL(base, window.location.href);
+      u.searchParams.set('_ts', ts);
+      return u.toString();
+    } catch (e) {
+      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_ts=' + encodeURIComponent(ts);
+    }
+  }
+
+  // ----------------------------
+  // Sites list
+  // ----------------------------
   function renderSites(list) {
     var wrap = $('ppa-sites-list');
     if (!wrap) return;
@@ -171,58 +214,15 @@ Notes:
     });
   }
 
-  function updateLicensePill(state, text) {
-    var pill = $('ppa-license-pill');
-    if (!pill) return;
-    var s = String(state || '').toLowerCase();
-    pill.setAttribute('data-state', s || 'unknown');
-    if (text) {
-      pill.textContent = String(text);
-      return;
-    }
-    if (s === 'active') pill.textContent = 'License Active';
-    else if (s === 'inactive') pill.textContent = 'License Inactive';
-    else pill.textContent = 'License Unknown';
-  }
-
-  function dig(obj, path) {
-    if (!obj || typeof obj !== 'object') return null;
-    if (!path) return null;
-    var cur = obj;
-    var segs = String(path).split('.');
-    for (var i = 0; i < segs.length; i++) {
-      var k = segs[i];
-      if (!cur || typeof cur !== 'object' || !(k in cur)) return null;
-      cur = cur[k];
-    }
-    return cur;
-  }
-
-  function withTs(url) { // CHANGED:
-    // Cache-bust at the URL level too (some intermediaries ignore POST body).
-    var base = toSafeStr(url);
-    if (!base) return base;
-    var ts = String(Date.now());
-    try {
-      var u = new URL(base, window.location.href);
-      u.searchParams.set('_ts', ts);
-      return u.toString();
-    } catch (e) {
-      // Fallback for older environments
-      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_ts=' + encodeURIComponent(ts);
-    }
-  }
-
   // ----------------------------
   // Link enabling (Django authoritative)
   // ----------------------------
-
-  function isHttpUrl(v) { // CHANGED:
+  function isHttpUrl(v) {
     var s = toSafeStr(v).trim();
-    return !!s && /^https?:\/\//i.test(s); // CHANGED:
+    return !!s && /^https?:\/\//i.test(s);
   }
 
-  function setLinkEnabled(el, href) { // CHANGED:
+  function setLinkEnabled(el, href) {
     if (!el) return;
     var url = toSafeStr(href).trim();
     if (isHttpUrl(url)) {
@@ -234,234 +234,95 @@ Notes:
       el.removeAttribute('tabindex');
       return;
     }
-
-    // Disable safely (and remove stale enabled attrs).                                                  // CHANGED:
     el.setAttribute('href', '#');
     el.classList.add('is-disabled');
     el.setAttribute('aria-disabled', 'true');
     el.setAttribute('tabindex', '-1');
-    el.removeAttribute('target'); // CHANGED:
-    el.removeAttribute('rel');    // CHANGED:
+    el.removeAttribute('target');
+    el.removeAttribute('rel');
   }
 
-  function preventDisabledClicksOnce() { // CHANGED:
-    var ids = ['ppa-account-upgrade', 'ppa-account-buy-tokens', 'ppa-account-billing-portal']; // CHANGED:
-    ids.forEach(function (id) {
-      var el = $(id);
-      if (!el) return;
-      if (el.__ppaBound) return; // CHANGED:
-      el.__ppaBound = true;      // CHANGED:
-      el.addEventListener('click', function (e) {
-        // If disabled, never navigate / jump to top.
-        if (el.classList.contains('is-disabled') || el.getAttribute('aria-disabled') === 'true') {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      });
-    });
-  }
-
-  function applyLinksFromLicense(licenseObj) { // CHANGED:
+  function applyLinksFromLicense(licenseObj) {
     if (!licenseObj || typeof licenseObj !== 'object') return;
 
     var links = (licenseObj.links && typeof licenseObj.links === 'object') ? licenseObj.links : {};
-    // Support a few reasonable aliases without changing contract.
-    var upgrade = links.upgrade || links.upgrade_url || null;                 // CHANGED:
-    var buyTokens = links.buy_tokens || links.buyTokens || links.purchase || null; // CHANGED:
-    var billingPortal = links.billing_portal || links.billingPortal || links.portal || null; // CHANGED:
+    var upgrade = links.upgrade || links.upgrade_url || null;
+    var buyTokens = links.buy_tokens || links.buyTokens || links.purchase || null;
+    var billingPortal = links.billing_portal || links.billingPortal || links.portal || null;
 
-    setLinkEnabled($('ppa-account-upgrade'), upgrade);               // CHANGED:
-    setLinkEnabled($('ppa-account-buy-tokens'), buyTokens);          // CHANGED:
-    setLinkEnabled($('ppa-account-billing-portal'), billingPortal);  // CHANGED:
+    setLinkEnabled($('ppa-account-upgrade'), upgrade);
+    setLinkEnabled($('ppa-account-buy-tokens'), buyTokens);
+    setLinkEnabled($('ppa-account-billing-portal'), billingPortal);
   }
 
-  function renderFromData(data) {
-    if (!data || typeof data !== 'object') {
-      setStatus('bad', 'Account data missing.');
-      return;
-    }
+  // ----------------------------
+  // Popup helpers
+  // ----------------------------
+  function openSizedPopup(name, preferredW, preferredH) {
+    var availW = (window.screen && window.screen.availWidth) ? window.screen.availWidth : 1200;
+    var availH = (window.screen && window.screen.availHeight) ? window.screen.availHeight : 900;
 
-    var envelopeOk = (typeof data.ok === 'boolean') ? data.ok : null;
-    var envelopeErr = (data.error && typeof data.error === 'object') ? data.error : null;
+    var w = Math.min(Number(preferredW) || 980, Math.max(520, availW - 60));
+    var h = Math.min(Number(preferredH) || 780, Math.max(520, availH - 120));
 
-    var core = (data.data && typeof data.data === 'object') ? data.data :
-               (data.result && typeof data.result === 'object') ? data.result :
-               data;
+    var left = Math.max(0, Math.round((availW - w) / 2));
+    var top = Math.max(0, Math.round((availH - h) / 2));
+
+    var features =
+      'popup=yes' +
+      ',width=' + w +
+      ',height=' + h +
+      ',left=' + left +
+      ',top=' + top +
+      ',resizable=yes,scrollbars=yes';
+
+    var win = window.open('about:blank', name, features);
+    return win || null;
+  }
+
+  function writePopupLoading(win, label) {
+    if (!win) return;
+    try {
+      win.document.title = 'PostPress AI';
+      win.document.body.innerHTML =
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:18px;">' +
+        '<div style="font-size:14px;opacity:.85;">PostPress AI</div>' +
+        '<div style="margin-top:10px;font-size:18px;font-weight:600;">Loading…</div>' +
+        '<div style="margin-top:8px;font-size:13px;opacity:.8;">' + (label || '') + '</div>' +
+        '</div>';
+    } catch (e) {}
+  }
+
+  function extractLinkFromPayload(payload, intent, fallbackHref) {
+    var p = payload && typeof payload === 'object' ? payload : null;
+    if (!p) return isHttpUrl(fallbackHref) ? fallbackHref : null;
+
+    var core = (p.data && typeof p.data === 'object') ? p.data :
+               (p.result && typeof p.result === 'object') ? p.result :
+               p;
 
     var license = (core.license && typeof core.license === 'object') ? core.license :
                   (core.license_snapshot && typeof core.license_snapshot === 'object') ? core.license_snapshot :
                   (core.lic && typeof core.lic === 'object') ? core.lic :
                   core;
 
-    // Apply Django-provided links (upgrade/buy/billing) immediately after we have license.               // CHANGED:
-    applyLinksFromLicense(license);                                                                        // CHANGED:
+    var links = (license.links && typeof license.links === 'object') ? license.links : {};
 
-    var activation = (core.activation && typeof core.activation === 'object') ? core.activation : {};
+    var url = null;
+    if (intent === 'billing_portal') url = links.billing_portal || links.billingPortal || links.portal || null;
+    if (intent === 'upgrade') url = links.upgrade || links.upgrade_url || null;
+    if (intent === 'buy_tokens') url = links.buy_tokens || links.buyTokens || links.purchase || null;
 
-    var licStatus = String(license.status || '').toLowerCase();
-    var activated = (activation.activated === true);
-    if (licStatus === 'active' && activated && envelopeOk === true) {
-      updateLicensePill('active', 'License Active');
-    } else if (licStatus && licStatus !== 'active') {
-      updateLicensePill('inactive', 'License Inactive');
-    } else if (activated === false && toSafeStr(activation.site_url)) {
-      updateLicensePill('inactive', 'Site Not Activated');
-    } else {
-      updateLicensePill('unknown', 'License Unknown');
-    }
+    if (!url) url = core.url || core.session_url || core.portal_url || null;
+    if (!url && isHttpUrl(fallbackHref)) url = fallbackHref;
 
-    var plan = (license.plan && typeof license.plan === 'object') ? license.plan : {};
-    var planName = plan.label || plan.name || license.plan_slug || license.plan || '—';
-    setText('ppa-plan-name', planName);
-
-    var billingEmail = dig(core, 'account.email') || dig(core, 'account.billing_email') || license.email || license.billing_email || '';
-    setText('ppa-billing-email', billingEmail || '—');
-
-    // ----------------------------
-    // Tokens (license.v1 nested + legacy flat keys)
-    // ----------------------------
-
-    var tokens = (license.tokens && typeof license.tokens === 'object') ? license.tokens :
-                 (core.tokens && typeof core.tokens === 'object') ? core.tokens :
-                 {};
-
-    // Period: prefer tokens.period object; otherwise accept period_start/period_end aliases.             // CHANGED:
-    var periodObj = null;                                                                                   // CHANGED:
-    if (tokens.period && typeof tokens.period === 'object') {                                                // CHANGED:
-      periodObj = tokens.period;                                                                             // CHANGED:
-    } else {                                                                                                 // CHANGED:
-      var ps = firstDefined([                                                                                // CHANGED:
-        tokens.period_start, tokens.start, tokens.periodStart,                                                // CHANGED:
-        license.tokens_period_start, license.period_start,                                                    // CHANGED:
-        core.tokens_period_start, dig(core, 'tokens.period.start'), dig(core, 'license.tokens.period.start') // CHANGED:
-      ]);                                                                                                    // CHANGED:
-      var pe = firstDefined([                                                                                // CHANGED:
-        tokens.period_end, tokens.end, tokens.periodEnd,                                                      // CHANGED:
-        license.tokens_period_end, license.period_end,                                                        // CHANGED:
-        core.tokens_period_end, dig(core, 'tokens.period.end'), dig(core, 'license.tokens.period.end')       // CHANGED:
-      ]);                                                                                                    // CHANGED:
-      if (ps || pe) periodObj = { start: ps || null, end: pe || null };                                       // CHANGED:
-    }                                                                                                        // CHANGED:
-
-    var periodLabel = firstDefined([tokens.period_label, tokens.period, license.tokens_period_label, core.tokens_period_label]); // CHANGED:
-    if (periodObj) periodLabel = formatPeriodLabel(periodObj);                                               // CHANGED:
-    setText('ppa-tokens-period', periodLabel || '—');                                                        // CHANGED:
-
-    // Used / Limit / Remaining (monthly + total)
-    var used = num(firstDefined([
-      tokens.monthly_used, tokens.used, tokens.usage, tokens.tokens_used, tokens.used_monthly,
-      license.monthly_used, license.tokens_monthly_used, license.tokens_used, license.tokens_used_monthly,
-      core.tokens_used, core.monthly_used, dig(core, 'tokens.monthly_used'), dig(core, 'license.tokens.monthly_used'),
-      dig(core, 'tokens.used'), dig(core, 'license.tokens.used')
-    ]));
-
-    var limit = num(firstDefined([
-      tokens.monthly_limit, tokens.limit, tokens.cap, tokens.tokens_limit, tokens.limit_monthly,
-      license.monthly_limit, license.tokens_monthly_limit, license.tokens_limit, license.tokens_limit_monthly,
-      core.tokens_limit, core.monthly_limit, dig(core, 'tokens.monthly_limit'), dig(core, 'license.tokens.monthly_limit'),
-      dig(core, 'tokens.limit'), dig(core, 'license.tokens.limit')
-    ]));
-
-    // Purchased balance (used to compute remaining_total if Django didn't provide it).                    // CHANGED:
-    var purchased = num(firstDefined([                                                                        // CHANGED:
-      tokens.purchased_balance, tokens.purchased, tokens.addon_balance,                                       // CHANGED:
-      license.purchased_balance, license.purchased_tokens_balance,                                            // CHANGED:
-      core.purchased_balance, core.purchased_tokens_balance,                                                  // CHANGED:
-      dig(core, 'tokens.purchased_balance'), dig(core, 'license.tokens.purchased_balance')                   // CHANGED:
-    ]));                                                                                                      // CHANGED:
-    if (purchased === null) purchased = 0;                                                                    // CHANGED:
-
-    var remainingMonthly = num(firstDefined([
-      tokens.monthly_remaining, tokens.remaining_monthly, tokens.monthly_left,
-      license.tokens_monthly_remaining,
-      core.tokens_monthly_remaining, dig(core, 'tokens.monthly_remaining'), dig(core, 'license.tokens.monthly_remaining')
-    ]));
-
-    // If monthly remaining not provided, compute it from used/limit (stable fallback).                     // CHANGED:
-    if (remainingMonthly === null && used !== null && limit !== null && limit > 0) {                         // CHANGED:
-      remainingMonthly = Math.max(0, limit - used);                                                          // CHANGED:
-    }                                                                                                        // CHANGED:
-
-    var remainingTotal = num(firstDefined([
-      tokens.remaining_total, tokens.remainingTotal,
-      license.tokens_remaining_total, license.remaining_total,
-      core.tokens_remaining_total, dig(core, 'tokens.remaining_total'), dig(core, 'license.tokens.remaining_total')
-    ]));
-
-    // If total remaining not provided, compute it (monthly remaining + purchased).                         // CHANGED:
-    if (remainingTotal === null && remainingMonthly !== null) {                                               // CHANGED:
-      remainingTotal = Math.max(0, remainingMonthly) + Math.max(0, purchased || 0);                           // CHANGED:
-    }                                                                                                        // CHANGED:
-
-    // Always render deterministically (never leave stale text)
-    setText('ppa-tokens-used', (used !== null) ? (fmtInt(used) + ' used') : '—');
-    setText('ppa-tokens-limit', (limit !== null) ? (fmtInt(limit) + ' / month') : '—');
-
-    // Monthly remaining shows in ppa-tokens-remaining.                                                      // CHANGED:
-    setText('ppa-tokens-remaining', (remainingMonthly !== null) ? (fmtInt(remainingMonthly) + ' remaining') : '—'); // CHANGED:
-
-    // Total remaining shows in ppa-tokens-remaining-total.                                                  // CHANGED:
-    setText('ppa-tokens-remaining-total', (remainingTotal !== null) ? (fmtInt(remainingTotal) + ' total') : '—'); // CHANGED:
-
-    // Progress bar: reset safely when unknown
-    var bar = $('ppa-tokens-bar');
-    if (bar) {
-      if (used !== null && limit !== null && limit > 0) {
-        var pct = clamp01(used / limit);
-        bar.style.width = String(Math.round(pct * 100)) + '%';
-      } else {
-        bar.style.width = '0%';
-      }
-    }
-
-    var sites = (license.sites && typeof license.sites === 'object') ? license.sites : {};
-    var sitesUsed = (sites.used !== undefined) ? sites.used : (license.sites_used !== undefined ? license.sites_used : null);
-    var sitesMax = (sites.max !== undefined) ? sites.max : (license.max_sites !== undefined ? license.max_sites : null);
-    var unlimited = (sites.unlimited === true) || (license.unlimited_sites === true);
-
-    // Remaining sites (new UI id)                                                                          // CHANGED:
-    var sitesRemaining = (sites.remaining !== undefined && sites.remaining !== null) ? sites.remaining :     // CHANGED:
-      (license.sites_remaining !== undefined ? license.sites_remaining : null);                               // CHANGED:
-    if (!unlimited && sitesRemaining === null && sitesUsed !== null && sitesMax !== null) {                  // CHANGED:
-      sitesRemaining = Math.max(0, Number(sitesMax) - Number(sitesUsed));                                     // CHANGED:
-    }                                                                                                        // CHANGED:
-
-    if (sitesUsed !== null) setText('ppa-sites-active', String(sitesUsed));
-    if (unlimited) {
-      setText('ppa-sites-limit', 'Unlimited');
-      setText('ppa-sites-remaining', '∞'); // CHANGED:
-      if (sitesUsed !== null) setText('ppa-sites-label', String(sitesUsed) + ' / ∞');
-    } else {
-      if (sitesMax !== null) setText('ppa-sites-limit', String(sitesMax));
-      if (sitesRemaining !== null) setText('ppa-sites-remaining', String(sitesRemaining)); // CHANGED:
-      if (sitesUsed !== null && sitesMax !== null) setText('ppa-sites-label', String(sitesUsed) + ' / ' + String(sitesMax));
-    }
-
-    var list = [];
-    if (Array.isArray(sites.list)) list = sites.list;
-    else if (Array.isArray(core.sites_list)) list = core.sites_list;
-    else if (activation && activation.site_url) {
-      list = [{
-        url: activation.site_url,
-        status: activation.activated ? 'activated' : 'not activated'
-      }];
-    }
-    renderSites(list);
-
-    if (envelopeOk === true) {
-      setStatus('good', 'Account synced.');
-    } else if (envelopeOk === false) {
-      var msg = '';
-      if (envelopeErr) msg = envelopeErr.message || envelopeErr.code || '';
-      msg = msg || data.message || data.error || 'Account check failed.';
-      setStatus('bad', String(msg));
-    } else {
-      setStatus('', 'Account loaded.');
-    }
+    return isHttpUrl(url) ? String(url) : null;
   }
 
+  // ----------------------------
+  // Config + AJAX
+  // ----------------------------
   function bestConfig() {
-    // Prefer localized Account config as the primary source.
     var cfg = window.PPAAccount || {};
 
     var ajaxUrl =
@@ -492,75 +353,62 @@ Notes:
     return { ajaxUrl: ajaxUrl, nonce: nonce, site: site, action: action };
   }
 
-  function addNonceFields(form, nonce) { // CHANGED:
+  function addNonceFields(form, nonce) {
     var n = toSafeStr(nonce);
     if (!n) return;
-
-    // WP nonce validation varies by controller implementation:
-    // - check_ajax_referer($action, 'nonce')
-    // - check_ajax_referer($action, '_ajax_nonce')
-    // - check_ajax_referer($action, 'security')
-    // We send ALL common keys to be bulletproof across implementations. // CHANGED:
-    form.set('nonce', n);         // CHANGED:
-    form.set('_ajax_nonce', n);   // CHANGED:
-    form.set('_wpnonce', n);      // CHANGED:
-    form.set('security', n);      // CHANGED:
-    form.set('ppa_nonce', n);     // CHANGED:
+    form.set('nonce', n);
+    form.set('_ajax_nonce', n);
+    form.set('_wpnonce', n);
+    form.set('security', n);
+    form.set('ppa_nonce', n);
   }
 
-  function addSiteFields(form, site) { // CHANGED:
+  function addSiteFields(form, site) {
     var s = toSafeStr(site);
     if (!s) return;
-    // Some controllers expect 'site', others 'site_url' or 'domain'. Send broadly. // CHANGED:
-    form.set('site', s);          // CHANGED:
-    form.set('site_url', s);      // CHANGED:
-    form.set('domain', s);        // CHANGED:
+    form.set('site', s);
+    form.set('site_url', s);
+    form.set('domain', s);
   }
 
-  function shouldAutoRefresh() { // CHANGED:
-    // Avoid spamming verify if the admin is clicking around quickly.
-    // 15s is enough to catch "I just generated previews" behavior without noise.
+  function shouldAutoRefresh() {
     return (Date.now() - lastFetchAt) > 15000;
   }
 
-  async function fetchAccount(force) { // CHANGED:
-    if (inflight) return; // CHANGED:
-    if (!force && !shouldAutoRefresh() && lastFetchAt > 0) return; // CHANGED:
-    inflight = true;      // CHANGED:
-    lastFetchAt = Date.now(); // CHANGED: record attempt time
-
+  async function postAjax(extraParams, affectUi) {
     var cfg = bestConfig();
 
     if (!cfg.ajaxUrl || !cfg.nonce) {
-      setStatus('bad', 'Account config missing.');
-      inflight = false; // CHANGED:
-      return;
+      if (affectUi) setStatus('bad', 'Account config missing.');
+      return null;
     }
-
-    setStatus('', 'Refreshing…');
 
     var form = new URLSearchParams();
     form.set('action', cfg.action);
     form.set('_ts', String(Date.now()));
-    addNonceFields(form, cfg.nonce);   // CHANGED:
-    addSiteFields(form, cfg.site);     // CHANGED:
+    addNonceFields(form, cfg.nonce);
+    addSiteFields(form, cfg.site);
 
-    // Cache-bust at URL level too (belt + suspenders).                                                    // CHANGED:
-    var ajaxUrl = withTs(cfg.ajaxUrl);                                                                       // CHANGED:
+    if (extraParams && typeof extraParams === 'object') {
+      for (var k in extraParams) {
+        if (!Object.prototype.hasOwnProperty.call(extraParams, k)) continue;
+        form.set(k, String(extraParams[k]));
+      }
+    }
+
+    var ajaxUrl = withTs(cfg.ajaxUrl);
 
     try {
       var resp = await fetch(ajaxUrl, {
         method: 'POST',
         credentials: 'same-origin',
-        cache: 'no-store', // CHANGED: force browser to bypass caches
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': 'application/json, text/plain, */*', // CHANGED
-          // Request cache hints (some proxies honor these)
-          'Cache-Control': 'no-cache, no-store, max-age=0', // CHANGED
-          'Pragma': 'no-cache', // CHANGED
-          'Expires': '0', // CHANGED
-          // Headers are not used by check_ajax_referer(), but are safe diagnostics / future-proof. // CHANGED:
+          'Accept': 'application/json, text/plain, */*',
+          'Cache-Control': 'no-cache, no-store, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
           'X-PPA-Nonce': cfg.nonce,
           'X-WP-Nonce': cfg.nonce,
           'X-Requested-With': 'XMLHttpRequest'
@@ -569,81 +417,347 @@ Notes:
       });
 
       var text = await resp.text();
-      var trimmed = (text || '').trim(); // CHANGED:
+      var trimmed = (text || '').trim();
 
-      // WP nonce failures frequently return "-1" with HTTP 200 (not 403).                                  // CHANGED:
-      if (trimmed === '-1' || trimmed === '0') {                                                             // CHANGED:
-        setStatus('bad', 'Nonce failed. Reload this page, then try again. If it persists, log out/in.');     // CHANGED:
-        inflight = false; // CHANGED:
-        return;
-      }                                                                                                      // CHANGED:
-
-      // If the controller uses check_ajax_referer() and nonce is missing/invalid, WP can also respond 403.
-      if (resp.status === 403 && trimmed === '') { // CHANGED:
-        setStatus('bad', 'Forbidden (nonce failed). Reload this page, then try again. If it persists, log out/in.');
-        inflight = false; // CHANGED:
-        return;
+      if (trimmed === '-1' || trimmed === '0') {
+        if (affectUi) setStatus('bad', 'Nonce failed. Reload this page, then try again.');
+        return null;
       }
 
-      // Try JSON parse (WP should return JSON on success/error; but some failures can be HTML).
       var json = null;
       try { json = JSON.parse(text); } catch (e) { json = null; }
 
       if (!json) {
-        // If it's an HTML/nonce/WAF response, show short hint.
-        if (resp.status === 403) { // CHANGED:
-          setStatus('bad', 'Forbidden (403). Likely nonce/referer security. Reload page and retry.'); // CHANGED:
-        } else {
-          setStatus('bad', 'Could not refresh (non-JSON response).');
-        }
-        inflight = false; // CHANGED:
-        return;
+        if (affectUi) setStatus('bad', 'Could not refresh (non-JSON response).');
+        return null;
       }
 
-      // WP AJAX standard: { success: true|false, data: ... }
       if (json && typeof json === 'object' && 'success' in json) {
-        if (json.success && json.data) {
-          renderFromData(json.data);
-          inflight = false; // CHANGED:
-          return;
+        if (json.success && json.data) return json.data;
+        if (affectUi) {
+          var errMsg = (json.data && (json.data.message || json.data.error)) ? (json.data.message || json.data.error) : '';
+          setStatus('bad', errMsg || 'Account request failed.');
         }
-        var errMsg = (json.data && (json.data.message || json.data.error)) ? (json.data.message || json.data.error) : '';
-        // If controller died with 403 but still returned JSON, surface it.
-        if (resp.status === 403 && !errMsg) { // CHANGED:
-          errMsg = 'Forbidden (nonce failed). Reload page and retry.'; // CHANGED:
-        }
-        setStatus('bad', errMsg || 'Account request failed.');
-        inflight = false; // CHANGED:
-        return;
+        return null;
       }
 
-      // Non-standard JSON shape: render directly.
-      renderFromData(json);
-      inflight = false; // CHANGED:
+      return json;
     } catch (e2) {
-      setStatus('bad', 'Could not refresh (network / JSON error).');
-      inflight = false; // CHANGED:
+      if (affectUi) setStatus('bad', 'Could not refresh (network / JSON error).');
+      return null;
     }
   }
 
+  async function fetchAccount(force) {
+    if (inflight) return null;
+    if (!force && !shouldAutoRefresh() && lastFetchAt > 0) return null;
+
+    inflight = true;
+    lastFetchAt = Date.now();
+    setStatus('', 'Refreshing…');
+
+    var payload = await postAjax(null, true);
+    if (payload) {
+      lastPayload = payload;
+      renderFromData(payload);
+    }
+
+    inflight = false;
+    return payload;
+  }
+
+  async function fetchIntent(intent) {
+    // Intent fetch does NOT depend on inflight; popups must work even during auto-refresh.
+    return await postAjax({ intent: intent }, false);
+  }
+
+  // ----------------------------
+  // Render (same behavior as before)
+  // ----------------------------
+  function renderFromData(data) {
+    if (!data || typeof data !== 'object') {
+      setStatus('bad', 'Account data missing.');
+      return;
+    }
+
+    var envelopeOk = (typeof data.ok === 'boolean') ? data.ok : null;
+    var envelopeErr = (data.error && typeof data.error === 'object') ? data.error : null;
+
+    var core = (data.data && typeof data.data === 'object') ? data.data :
+               (data.result && typeof data.result === 'object') ? data.result :
+               data;
+
+    var license = (core.license && typeof core.license === 'object') ? core.license :
+                  (core.license_snapshot && typeof core.license_snapshot === 'object') ? core.license_snapshot :
+                  (core.lic && typeof core.lic === 'object') ? core.lic :
+                  core;
+
+    applyLinksFromLicense(license);
+
+    var activation = (core.activation && typeof core.activation === 'object') ? core.activation : {};
+
+    var licStatus = String(license.status || '').toLowerCase();
+    var activated = (activation.activated === true);
+
+    if (licStatus === 'active' && activated && envelopeOk === true) {
+      setStatus('good', 'Account synced.');
+    } else if (envelopeOk === false) {
+      var msg = '';
+      if (envelopeErr) msg = envelopeErr.message || envelopeErr.code || '';
+      msg = msg || data.message || data.error || 'Account check failed.';
+      setStatus('bad', String(msg));
+    } else {
+      setStatus('', 'Account loaded.');
+    }
+
+    // Plan (avoid [object Object])
+    var planName = '—';
+    if (license.plan && typeof license.plan === 'object') {
+      planName = license.plan.label || license.plan.name || '—';
+    } else {
+      planName = license.plan_slug || license.plan || '—';
+    }
+    setText('ppa-plan-name', planName);
+
+    var billingEmail = dig(core, 'account.email') || dig(core, 'account.billing_email') || license.email || license.billing_email || '';
+    setText('ppa-billing-email', billingEmail || '—');
+
+    // Tokens
+    var tokens = (license.tokens && typeof license.tokens === 'object') ? license.tokens :
+                 (core.tokens && typeof core.tokens === 'object') ? core.tokens :
+                 {};
+
+    var periodObj = null;
+    if (tokens.period && typeof tokens.period === 'object') {
+      periodObj = tokens.period;
+    } else {
+      var ps = firstDefined([tokens.period_start, tokens.start]);
+      var pe = firstDefined([tokens.period_end, tokens.end]);
+      if (ps || pe) periodObj = { start: ps || null, end: pe || null };
+    }
+
+    var periodLabel = firstDefined([tokens.period_label, tokens.period]);
+    if (periodObj) periodLabel = formatPeriodLabel(periodObj);
+    setText('ppa-tokens-period', periodLabel || '—');
+
+    var used = num(firstDefined([tokens.monthly_used, tokens.used, tokens.usage]));
+    var limit = num(firstDefined([tokens.monthly_limit, tokens.limit, tokens.cap]));
+
+    var remainingMonthly = num(firstDefined([tokens.monthly_remaining, tokens.remaining_monthly]));
+    if (remainingMonthly === null && used !== null && limit !== null && limit > 0) remainingMonthly = Math.max(0, limit - used);
+
+    var remainingTotal = num(firstDefined([tokens.remaining_total, tokens.remainingTotal]));
+
+    setText('ppa-tokens-used', (used !== null) ? (fmtInt(used) + ' used') : '—');
+    setText('ppa-tokens-limit', (limit !== null) ? (fmtInt(limit) + ' / month') : '—');
+    setText('ppa-tokens-remaining', (remainingMonthly !== null) ? (fmtInt(remainingMonthly) + ' remaining') : '—');
+    setText('ppa-tokens-remaining-total', (remainingTotal !== null) ? (fmtInt(remainingTotal) + ' total') : '—');
+
+    var bar = $('ppa-tokens-bar');
+    if (bar) {
+      if (used !== null && limit !== null && limit > 0) {
+        var pct = clamp01(used / limit);
+        bar.style.width = String(Math.round(pct * 100)) + '%';
+      } else {
+        bar.style.width = '0%';
+      }
+    }
+
+    // Sites (counts + list)
+    var sites = (license.sites && typeof license.sites === 'object') ? license.sites : {};
+
+    var sitesUnlimited = boolish(firstDefined([
+      sites.unlimited,
+      license.unlimited_sites,
+      license.unlimitedSites,
+      license.unlimited,
+      license.unlimited_site,
+      license.site_unlimited,
+      license.sites_unlimited,
+      license.sitesUnlimited
+    ]));
+    if (sitesUnlimited === null) sitesUnlimited = false;
+
+    var sitesUsed = num(firstDefined([
+      sites.used,
+      license.sites_used,
+      license.sitesUsed,
+      license.sites_used_count,
+      license.sitesUsedCount,
+      license.sites_used_total,
+      license.sitesUsedTotal
+    ]));
+    if (sitesUsed === null && Array.isArray(sites.list)) sitesUsed = sites.list.length;
+
+    var sitesMax = num(firstDefined([
+      sites.max,
+      license.max_sites,
+      license.maxSites,
+      license.site_limit,
+      license.siteLimit,
+      license.sites_max,
+      license.sitesMax
+    ]));
+
+    var sitesRemaining = num(firstDefined([
+      sites.remaining,
+      license.sites_remaining,
+      license.sitesRemaining,
+      license.remaining_sites,
+      license.remainingSites
+    ]));
+
+    if (!sitesUnlimited) {
+      if (sitesRemaining === null && sitesUsed !== null && sitesMax !== null) {
+        sitesRemaining = Math.max(0, sitesMax - sitesUsed);
+      }
+    }
+
+    var sitesUsedDisplay = (sitesUsed !== null) ? fmtInt(sitesUsed) : '—';
+    var sitesMaxDisplay = sitesUnlimited ? '∞' : ((sitesMax !== null) ? fmtInt(sitesMax) : '—');
+    var sitesRemainingDisplay = sitesUnlimited ? '∞' : ((sitesRemaining !== null) ? fmtInt(sitesRemaining) : '—');
+
+    // These IDs are expected on the Account screen. We set multiple variants for back-compat.
+    setTextAny(['ppa-sites-used', 'ppa-active-sites', 'ppa-sites-active'], sitesUsedDisplay);
+    setTextAny(['ppa-sites-limit', 'ppa-site-limit', 'ppa-sites-max'], sitesMaxDisplay);
+    setTextAny(['ppa-sites-remaining', 'ppa-remaining-sites', 'ppa-sites-left'], sitesRemainingDisplay);
+
+    var list = Array.isArray(sites.list) ? sites.list : (Array.isArray(core.sites_list) ? core.sites_list : []);
+    if (!list.length && activation && activation.site_url) {
+      list = [{ url: activation.site_url, status: activation.activated ? 'activated' : 'not activated' }];
+    }
+    renderSites(list);
+  }
+
+  // ----------------------------
+  // POPUPS: delegated click binding (ID mismatch proof)
+  // ----------------------------
+  function normalizeText(s) {
+    return toSafeStr(s).replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function detectIntent(el) {
+    if (!el) return null;
+
+    var id = normalizeText(el.id || '');
+    var dt =
+      normalizeText(el.getAttribute('data-ppa-intent') || '') ||
+      normalizeText(el.getAttribute('data-intent') || '') ||
+      normalizeText(el.getAttribute('data-action') || '');
+
+    if (dt) {
+      if (dt.indexOf('billing') >= 0 || dt.indexOf('portal') >= 0) return 'billing_portal';
+      if (dt.indexOf('upgrade') >= 0) return 'upgrade';
+      if (dt.indexOf('buy') >= 0 || dt.indexOf('token') >= 0) return 'buy_tokens';
+    }
+
+    if (id.indexOf('billing') >= 0 || id.indexOf('portal') >= 0) return 'billing_portal';
+    if (id.indexOf('upgrade') >= 0) return 'upgrade';
+    if (id.indexOf('buy') >= 0 || id.indexOf('token') >= 0) return 'buy_tokens';
+
+    var txt = normalizeText(el.textContent || '');
+    if (txt.indexOf('billing portal') >= 0) return 'billing_portal';
+    if (txt.indexOf('upgrade plan') >= 0 || txt === 'upgrade') return 'upgrade';
+    if (txt.indexOf('buy tokens') >= 0 || (txt.indexOf('buy') >= 0 && txt.indexOf('token') >= 0)) return 'buy_tokens';
+
+    return null;
+  }
+
+  function getHref(el) {
+    if (!el) return '';
+    var href = '';
+    if (el.tagName === 'A') href = el.getAttribute('href') || '';
+    if (!href) href = el.getAttribute('data-href') || el.getAttribute('data-url') || '';
+    return toSafeStr(href).trim();
+  }
+
+  function inActionsArea(el) {
+    if (!el) return false;
+    // best-effort scoping so we don’t catch unrelated admin clicks
+    return !!el.closest('#ppa-account-actions, .ppa-actions, .ppa-account-actions, .ppa-card--actions, .ppa-actions-card, #ppa-actions');
+  }
+
+  function intentLabel(intent) {
+    if (intent === 'billing_portal') return 'Opening billing portal…';
+    if (intent === 'upgrade') return 'Opening upgrade…';
+    return 'Opening token purchase…';
+  }
+
+  function openIntentPopup(intent, fallbackHref) {
+    var popup = openSizedPopup('ppa_' + intent, 980, 780);
+    if (!popup) {
+      setStatus('bad', 'Popup blocked. Please allow popups for this site, then try again.');
+      return;
+    }
+
+    writePopupLoading(popup, intentLabel(intent));
+
+    // Always try an intent fetch first (server decides what’s allowed).
+    fetchIntent(intent).then(function (payload) {
+      var url = extractLinkFromPayload(payload || lastPayload, intent, fallbackHref);
+      if (!url) {
+        try { popup.close(); } catch (e) {}
+        setStatus('bad', 'Link not available yet. Hit Refresh, then try again.');
+        return;
+      }
+      try {
+        popup.location.href = url;
+        popup.focus();
+      } catch (e2) {
+        setStatus('bad', 'Could not open popup. Please allow popups, then try again.');
+      }
+    });
+  }
+
+  function bindDelegatedPopupsOnce() {
+    if (document.__ppaAccountDelegatedBound) return;
+    document.__ppaAccountDelegatedBound = true;
+
+    document.addEventListener('click', function (e) {
+      var target = e.target;
+      if (!target) return;
+
+      var clickable = target.closest('a,button');
+      if (!clickable) return;
+
+      var intent = detectIntent(clickable);
+      if (!intent) return;
+
+      // Scope: prefer ACTIONS area; but allow exact known IDs if present
+      var id = normalizeText(clickable.id || '');
+      var isKnownId = (id === 'ppa-account-upgrade' || id === 'ppa-account-buy-tokens' || id === 'ppa-account-billing-portal');
+      if (!isKnownId && !inActionsArea(clickable)) return;
+
+      // Prevent default navigation and stop bubbling
+      try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+
+      // If it’s visually disabled, we STILL attempt intent fetch (server will deny if not allowed).
+      var href = getHref(clickable);
+
+      openIntentPopup(intent, href);
+    }, true);
+  }
+
+  // ----------------------------
+  // Bind
+  // ----------------------------
   function bind() {
-    preventDisabledClicksOnce(); // CHANGED:
+    bindDelegatedPopupsOnce();
 
     var btn = $('ppa-account-refresh');
     if (btn) {
-      btn.addEventListener('click', function (e) { // CHANGED:
+      btn.addEventListener('click', function (e) {
         try { e.preventDefault(); } catch (err) {}
-        fetchAccount(true); // CHANGED: manual refresh should always force
+        fetchAccount(true);
       });
     }
 
-    // Auto refresh when user returns to this tab/window (common after Generate Preview).                 // CHANGED:
-    window.addEventListener('focus', function () { fetchAccount(false); });                                // CHANGED:
-    document.addEventListener('visibilitychange', function () {                                            // CHANGED:
-      if (!document.hidden) fetchAccount(false);                                                          // CHANGED:
-    });                                                                                                   // CHANGED:
+    window.addEventListener('focus', function () { fetchAccount(false); });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) fetchAccount(false);
+    });
 
-    fetchAccount(true); // CHANGED: initial load should always force
+    fetchAccount(true);
   }
 
   if (document.readyState === 'loading') {
