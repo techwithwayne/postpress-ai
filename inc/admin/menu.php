@@ -7,6 +7,8 @@
  * 2026-01-21: ADD: Account submenu added + renderer (include account.php, call ppa_render_account(), fallback). // CHANGED:
  * 2026-01-21: HARDEN: Composer renderer now supports both "file echoes UI" and "file defines a render function". // CHANGED:
  * 2026-01-21: CLEAN: Remove success/noise logs; log only on failures.                                          // CHANGED:
+ * 2026-02-23: ADD: Videos submenu + renderer with dummy playlists/cards (no behavior change elsewhere).     // CHANGED:
+ * 2026-02-23: FIX: Videos page now uses YouTube Unlisted IDs + real thumbnails + empty state.         // CHANGED:
  *
  * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
  * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
@@ -170,6 +172,16 @@ if ( ! function_exists( 'ppa_register_admin_menu' ) ) {
 			'postpress-ai-account',
 			'ppa_render_account'
 		);
+
+		// Videos submenu (admin-only)                                                                // CHANGED:
+		add_submenu_page(                                                                            // CHANGED:
+			$menu_slug,                                                                                // CHANGED:
+			__( 'PostPress AI Videos', 'postpress-ai' ),                                                // CHANGED:
+			__( 'Videos', 'postpress-ai' ),                                                             // CHANGED:
+			$capability_admin,                                                                          // CHANGED:
+			'postpress-ai-videos',                                                                      // CHANGED:
+			'ppa_render_videos'                                                                         // CHANGED:
+		);                                                                                            // CHANGED:
 
 		// Testbed submenu (admin-only AND gated)                                                     // CHANGED:
 		$testbed_enabled = ( defined( 'PPA_ENABLE_TESTBED' ) && true === PPA_ENABLE_TESTBED );       // CHANGED:
@@ -338,6 +350,140 @@ if ( ! function_exists( 'ppa_render_account' ) ) {                              
 	}                                                                                                     // CHANGED:
 }                                                                                                         // CHANGED:
 
+/**
+ * Videos renderer (submenu).
+ * v1: hardcoded dummy playlists + videos (Wayne will replace with real recordings later).
+ * No inline CSS/JS here — styling will live in assets/css/admin-videos.css (next step).
+ */
+if ( ! function_exists( 'ppa_render_videos' ) ) {                                                         // CHANGED:
+	function ppa_render_videos() {                                                                           // CHANGED:
+		if ( ! current_user_can( 'manage_options' ) ) {                                                        // CHANGED:
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );           // CHANGED:
+		}                                                                                                      // CHANGED:
+
+		$playlists = array(                                                                                     // CHANGED:
+			'start-here'        => __( 'Start Here', 'postpress-ai' ),                                            // CHANGED:
+			'composer'          => __( 'Composer', 'postpress-ai' ),                                              // CHANGED:
+			'license-account'   => __( 'License & Account', 'postpress-ai' ),                                     // CHANGED:
+			'troubleshooting'   => __( 'Troubleshooting', 'postpress-ai' ),                                       // CHANGED:
+			'whats-new'         => __( 'What’s New', 'postpress-ai' ),                                            // CHANGED:
+		);                                                                                                      // CHANGED:
+
+		// YouTube Unlisted videos (ADD YOUR IDs HERE).                                                         // CHANGED:
+		// Each item: title, dur, pl (playlist key), yt (YouTube video ID).                                      // CHANGED:
+		$videos = array(                                                                                        // CHANGED:
+			// Example:                                                                               // CHANGED:
+			// array( 'title' => __( 'Connect your license', 'postpress-ai' ), 'dur' => '2:41', 'pl' => 'start-here', 'yt' => 'ABC123xyz' ), // CHANGED:
+		);                                                                                                      // CHANGED:
+
+		$active = 'start-here';                                                                                 // CHANGED:
+		if ( isset( $_GET['playlist'] ) ) {                                                                     // CHANGED:
+			$active = sanitize_key( wp_unslash( (string) $_GET['playlist'] ) );                                   // CHANGED:
+		}                                                                                                       // CHANGED:
+		if ( ! isset( $playlists[ $active ] ) ) {                                                               // CHANGED:
+			$active = 'start-here';                                                                               // CHANGED:
+		}                                                                                                       // CHANGED:
+
+		// Filter videos for active playlist                                                                    // CHANGED:
+		$active_videos = array();                                                                               // CHANGED:
+		foreach ( $videos as $v ) {                                                                             // CHANGED:
+			$pl = isset( $v['pl'] ) ? (string) $v['pl'] : '';                                                     // CHANGED:
+			if ( $pl !== $active ) {                                                                              // CHANGED:
+				continue;                                                                                           // CHANGED:
+			}                                                                                                     // CHANGED:
+			$active_videos[] = $v;                                                                                // CHANGED:
+		}                                                                                                       // CHANGED:
+		?>
+		<div class="wrap ppa-videos-wrap">                                                                        <!-- CHANGED: -->
+			<h1 class="ppa-videos-h1"><?php echo esc_html__( 'PostPress AI Videos', 'postpress-ai' ); ?></h1>       <!-- CHANGED: -->
+			<p class="ppa-videos-sub"><?php echo esc_html__( 'Short, clear videos to help you use the plugin without guessing.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+
+			<div class="ppa-videos-toolbar">                                                                        <!-- CHANGED: -->
+				<input class="ppa-videos-search" type="search" placeholder="<?php echo esc_attr__( 'Search videos… (coming soon)', 'postpress-ai' ); ?>" disabled /> <!-- CHANGED: -->
+				<select class="ppa-videos-category" disabled>                                                         <!-- CHANGED: -->
+					<option><?php echo esc_html__( 'Category: All (coming soon)', 'postpress-ai' ); ?></option>        <!-- CHANGED: -->
+				</select>                                                                                             <!-- CHANGED: -->
+				<div class="ppa-videos-pills" aria-hidden="true">                                                     <!-- CHANGED: -->
+					<span class="ppa-videos-pill is-active"><?php echo esc_html__( 'All', 'postpress-ai' ); ?></span>   <!-- CHANGED: -->
+					<span class="ppa-videos-pill"><?php echo esc_html__( 'Favorites', 'postpress-ai' ); ?></span>      <!-- CHANGED: -->
+					<span class="ppa-videos-pill"><?php echo esc_html__( 'Watched', 'postpress-ai' ); ?></span>        <!-- CHANGED: -->
+				</div>                                                                                                <!-- CHANGED: -->
+			</div>                                                                                                   <!-- CHANGED: -->
+
+			<div class="ppa-videos-layout">                                                                         <!-- CHANGED: -->
+				<aside class="ppa-videos-rail">                                                                       <!-- CHANGED: -->
+					<h2 class="ppa-videos-rail-title"><?php echo esc_html__( 'Playlists', 'postpress-ai' ); ?></h2>     <!-- CHANGED: -->
+					<ul class="ppa-videos-rail-list">                                                                   <!-- CHANGED: -->
+						<?php foreach ( $playlists as $key => $label ) : ?>                                               <!-- CHANGED: -->
+							<?php
+								$url = add_query_arg( array( 'page' => 'postpress-ai-videos', 'playlist' => $key ), admin_url( 'admin.php' ) ); // CHANGED:
+								$is_active = ( $key === $active );                                                           // CHANGED:
+							?>
+							<li class="ppa-videos-rail-item<?php echo $is_active ? ' is-active' : ''; ?>">                  <!-- CHANGED: -->
+								<a href="<?php echo esc_url( $url ); ?>"><?php echo esc_html( $label ); ?></a>                 <!-- CHANGED: -->
+							</li>                                                                                           <!-- CHANGED: -->
+						<?php endforeach; ?>                                                                              <!-- CHANGED: -->
+					</ul>                                                                                                <!-- CHANGED: -->
+				</aside>                                                                                               <!-- CHANGED: -->
+
+				<section class="ppa-videos-grid">                                                                      <!-- CHANGED: -->
+					<header class="ppa-videos-grid-head">                                                                <!-- CHANGED: -->
+						<h2 class="ppa-videos-grid-title"><?php echo esc_html( $playlists[ $active ] ); ?></h2>            <!-- CHANGED: -->
+						<p class="ppa-videos-grid-sub"><?php echo esc_html__( 'Add YouTube Unlisted IDs in ppa_render_videos() to populate this list.', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+					</header>                                                                                            <!-- CHANGED: -->
+
+					<div class="ppa-videos-cards">                                                                       <!-- CHANGED: -->
+						<?php if ( empty( $active_videos ) ) : ?>                                                          <!-- CHANGED: -->
+							<div class="ppa-video-card">                                                                     <!-- CHANGED: -->
+								<div class="ppa-video-thumb">                                                                  <!-- CHANGED: -->
+									<span class="ppa-video-thumb-label"><?php echo esc_html__( 'No videos yet', 'postpress-ai' ); ?></span> <!-- CHANGED: -->
+									<span class="ppa-video-dur">—</span>                                                        <!-- CHANGED: -->
+								</div>                                                                                        <!-- CHANGED: -->
+								<div class="ppa-video-meta">                                                                   <!-- CHANGED: -->
+									<div class="ppa-video-title"><?php echo esc_html__( 'Upload to YouTube as Unlisted, then paste the Video ID into $videos.', 'postpress-ai' ); ?></div> <!-- CHANGED: -->
+									<div class="ppa-video-row">                                                                  <!-- CHANGED: -->
+										<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>        <!-- CHANGED: -->
+										<span class="button button-secondary ppa-video-watch" aria-disabled="true"><?php echo esc_html__( 'Coming soon', 'postpress-ai' ); ?></span> <!-- CHANGED: -->
+									</div>                                                                                      <!-- CHANGED: -->
+								</div>                                                                                        <!-- CHANGED: -->
+							</div>                                                                                          <!-- CHANGED: -->
+						<?php else : ?>                                                                                   <!-- CHANGED: -->
+							<?php foreach ( $active_videos as $v ) : ?>                                                     <!-- CHANGED: ?>
+								<?php
+									$title = isset( $v['title'] ) ? (string) $v['title'] : '';
+									$dur   = isset( $v['dur'] ) ? (string) $v['dur'] : '';
+									$yt    = isset( $v['yt'] ) ? trim( (string) $v['yt'] ) : '';
+									$thumb = ( $yt !== '' ) ? ( 'https://i.ytimg.com/vi/' . rawurlencode( $yt ) . '/hqdefault.jpg' ) : '';
+									$url   = ( $yt !== '' ) ? ( 'https://www.youtube.com/watch?v=' . rawurlencode( $yt ) ) : '';
+								?>
+								<div class="ppa-video-card">                                                                 <!-- CHANGED: -->
+									<div class="ppa-video-thumb"<?php echo $thumb ? ' style="background-image:url(' . esc_url( $thumb ) . '); background-size:cover; background-position:center;"' : ''; ?>> <!-- CHANGED: -->
+										<span class="ppa-video-thumb-label"><?php echo esc_html__( 'YouTube', 'postpress-ai' ); ?></span> <!-- CHANGED: -->
+										<span class="ppa-video-dur"><?php echo esc_html( $dur ); ?></span>                        <!-- CHANGED: -->
+									</div>                                                                                      <!-- CHANGED: -->
+									<div class="ppa-video-meta">                                                                <!-- CHANGED: -->
+										<div class="ppa-video-title"><?php echo esc_html( $title ); ?></div>                        <!-- CHANGED: -->
+										<div class="ppa-video-row">                                                               <!-- CHANGED: -->
+											<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>      <!-- CHANGED: -->
+											<?php if ( $url ) : ?>                                                                   <!-- CHANGED: -->
+												<a class="button button-secondary ppa-video-watch" href="<?php echo esc_url( $url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Watch', 'postpress-ai' ); ?></a> <!-- CHANGED: -->
+											<?php else : ?>                                                                         <!-- CHANGED: -->
+												<span class="button button-secondary ppa-video-watch" aria-disabled="true"><?php echo esc_html__( 'Missing ID', 'postpress-ai' ); ?></span> <!-- CHANGED: -->
+											<?php endif; ?>                                                                         <!-- CHANGED: -->
+										</div>                                                                                    <!-- CHANGED: -->
+									</div>                                                                                      <!-- CHANGED: -->
+								</div>                                                                                        <!-- CHANGED: -->
+							<?php endforeach; ?>                                                                             <!-- CHANGED: -->
+						<?php endif; ?>                                                                                    <!-- CHANGED: -->
+					</div>                                                                                                 <!-- CHANGED: -->
+				</section>                                                                                              <!-- CHANGED: -->
+			</div>                                                                                                    <!-- CHANGED: -->
+
+			<p class="ppa-videos-tip"><?php echo esc_html__( 'Next step: add your first Unlisted YouTube ID inside $videos (ppa_render_videos).', 'postpress-ai' ); ?></p> <!-- CHANGED: -->
+		</div>
+		<?php
+	}                                                                                                              // CHANGED:
+}                                                                                                                 // CHANGED:
 /**
  * Testbed renderer (submenu).
  * Looks for one of the known filenames, falls back to minimal stub if absent.
