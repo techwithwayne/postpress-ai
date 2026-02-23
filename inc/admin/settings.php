@@ -13,6 +13,8 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key.
  *
  * ========= CHANGE LOG =========
+ * 2026-02-23: UX: Place “Check License” to the right of “Save” (separate forms, flex row; behavior unchanged). # CHANGED:
+ * 2026-02-23: POLISH: Success banner left stripe is green; Active status dot is green (Brave-safe, scoped). # CHANGED:
  * 2026-02-23: FIX: License Deactivate invalid_json/403 hardening: canonicalize site_url + retry form-encoded POST when JSON parse fails. # CHANGED:
 
  * 2026-01-25: HARDEN: Seed ppa_license_last_result for any wp-admin user (even before a license key is saved) to prevent editor/composer warnings; treat "no key" as unknown activation state. # CHANGED:
@@ -1829,7 +1831,21 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						background:var(--ppa-accent,#ff6c00);
 					}
 					.wrap.ppa-settings .ppa-banner p{margin:0;}
-					.wrap.ppa-settings .ppa-banner--error:before{background:#d63638;}
+					
+					.wrap.ppa-settings .ppa-banner--success:before{background:#00a32a;} /* CHANGED: 2026-02-23 */
+					/* CHANGED: 2026-02-23 — ensure active status dot is green (matches active border) */
+					.wrap.ppa-settings .ppa-badge.ppa-badge--active:before{background:#00a32a !important;}
+					/* CHANGED: 2026-02-23 — Setup actions row: Save (left) + Check License (right) */
+					.wrap.ppa-settings .ppa-setup-actions-row{display:flex;gap:12px;align-items:flex-start;margin-top:16px;}
+					.wrap.ppa-settings .ppa-setup-actions-row__save{flex:0 0 auto;}
+					.wrap.ppa-settings .ppa-setup-actions-row__check{flex:1 1 auto;min-width:240px;}
+					.wrap.ppa-settings .ppa-setup-actions-row__check form{margin:0;}
+					.wrap.ppa-settings .ppa-setup-actions-row__check .button{width:100%;}
+					@media (max-width:782px){.wrap.ppa-settings .ppa-setup-actions-row{flex-wrap:wrap;}
+						.wrap.ppa-settings .ppa-setup-actions-row__check{min-width:0;width:100%;}
+						.wrap.ppa-settings .ppa-setup-actions-row__check .button{width:100%;}
+					}
+.wrap.ppa-settings .ppa-banner--error:before{background:#d63638;}
 				</style>
 
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
@@ -1851,7 +1867,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						</p>
 					<?php endif; ?>
 
-					<form method="post" action="options.php">
+					<form id="ppa-settings-form" method="post" action="options.php">
 						<?php settings_fields( 'ppa_settings' ); ?>
 
 						<table class="form-table" role="presentation">
@@ -1885,24 +1901,34 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 							</tbody>
 						</table>
 
-						<?php submit_button( __( 'Save', 'postpress-ai' ) ); ?>
 					</form>
 
-					<!-- CHANGED: Check License moved into Setup card -->
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form" style="margin-top:10px;">
-						<?php wp_nonce_field( 'ppa-license-verify' ); ?>
-						<input type="hidden" name="action" value="ppa_license_verify" />
-						<?php
-						$disable_verify = ( ! $has_key );
-						$attrs_verify   = $disable_verify ? array( 'disabled' => 'disabled' ) : array();
-						submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false, $attrs_verify );
-						?>
-						<?php if ( $disable_verify ) : ?>
-							<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first.', 'postpress-ai' ); ?></p>
-						<?php elseif ( ! $is_active_here ) : ?>
-							<p class="description ppa-inline-help"><?php esc_html_e( 'Next step: click “Activate This Site” below to turn this site on.', 'postpress-ai' ); ?></p>
-						<?php endif; ?>
-					</form>
+										<div class="ppa-setup-actions-row">
+						<div class="ppa-setup-actions-row__save">
+							<?php
+							// CHANGED: 2026-02-23 — Render Save button outside the options form (uses HTML5 form="ppa-settings-form").
+							// This keeps behavior identical (submits the options.php form) while allowing side-by-side layout.
+							submit_button( __( 'Save', 'postpress-ai' ), 'primary', 'submit', false, array( 'form' => 'ppa-settings-form' ) );
+							?>
+						</div>
+						<div class="ppa-setup-actions-row__check">
+							<!-- CHANGED: 2026-02-23 — “Check License” sits to the right of “Save” (separate form; behavior unchanged) -->
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form ppa-action-form--check-license">
+													<?php wp_nonce_field( 'ppa-license-verify' ); ?>
+													<input type="hidden" name="action" value="ppa_license_verify" />
+													<?php
+													$disable_verify = ( ! $has_key );
+													$attrs_verify   = $disable_verify ? array( 'disabled' => 'disabled' ) : array();
+													submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false, $attrs_verify );
+													?>
+													<?php if ( $disable_verify ) : ?>
+														<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first.', 'postpress-ai' ); ?></p>
+													<?php elseif ( ! $is_active_here ) : ?>
+														<p class="description ppa-inline-help"><?php esc_html_e( 'Next step: click “Activate This Site” below to turn this site on.', 'postpress-ai' ); ?></p>
+													<?php endif; ?>
+												</form>
+						</div>
+					</div>
 
 					<?php if ( $has_key ) : ?>
 						<?php
