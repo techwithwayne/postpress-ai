@@ -23,13 +23,16 @@ body.postpress-ai_page_postpress-ai-account {
 }
 
 body.postpress-ai_page_postpress-ai-account #wpcontent {
-  background: var(--ppa-bg);
+  /* background: var(--ppa-bg); */
 }
 
 body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account {
   color: var(--ppa-text);
   max-width: 1180px;
   margin: 18px 0 40px;
+  padding: 30px;
+  border-radius: 20px;
+  background-color: #121212;
 }
 
 body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a {

@@ -70,7 +70,6 @@ body.postpress-ai_page_postpress-ai-settings #wpbody-content {
 /* Frame */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings {
   max-width: var(--ppa-max);
-  margin: 14px auto;
   padding: var(--ppa-frame-pad);
   background: linear-gradient(180deg, #141414, #101010);
   border: 1px solid rgba(255,255,255,.08);
@@ -90,7 +89,7 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > h1 {
   margin: 0 0 12px;
   padding: 0;
   color: var(--ppa-accent) !important;
-  font-weight: 500 !important;
+  font-weight: 400 !important;
   letter-spacing: .15px !important;
   font-size: 22px !important;
   line-height: 1.15 !important;
