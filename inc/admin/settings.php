@@ -13,6 +13,8 @@
  * - Connection Key is legacy; if present we use it, otherwise we use License Key as the auth key.
  *
  * ========= CHANGE LOG =========
+ * 2026-02-23: FIX: License Deactivate invalid_json/403 hardening: canonicalize site_url + retry form-encoded POST when JSON parse fails. # CHANGED:
+
  * 2026-01-25: HARDEN: Seed ppa_license_last_result for any wp-admin user (even before a license key is saved) to prevent editor/composer warnings; treat "no key" as unknown activation state. # CHANGED:
  *
  * 2026-01-24: HARDEN: Always seed ppa_license_last_result transient on admin load when missing (prevents “not set” warnings). # CHANGED:
@@ -58,6 +60,10 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 		const TRANSIENT_LAST_LIC   = 'ppa_license_last_result';
 		const LAST_LIC_TTL_SECONDS = 10 * MINUTE_IN_SECONDS;
 
+
+		// CHANGED: On-demand reveal of the license key (never shown by default).
+		const TRANSIENT_REVEAL_KEY    = 'ppa_reveal_license_key'; // CHANGED:
+		const REVEAL_KEY_TTL_SECONDS = 30; // CHANGED: seconds
 		// Idempotency guards (this file may be included more than once depending on admin bootstrap).
 		private static $booted              = false;
 		private static $settings_registered = false;
@@ -133,6 +139,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			add_action( 'admin_post_ppa_license_verify', array( __CLASS__, 'handle_license_verify' ) );
 			add_action( 'admin_post_ppa_license_activate', array( __CLASS__, 'handle_license_activate' ) );
 			add_action( 'admin_post_ppa_license_deactivate', array( __CLASS__, 'handle_license_deactivate' ) );
+			// CHANGED: Key visibility + reset helpers (server-side only).
+			add_action( 'admin_post_ppa_license_reveal_key', array( __CLASS__, 'handle_license_reveal_key' ) ); // CHANGED:
+			add_action( 'admin_post_ppa_license_clear_key', array( __CLASS__, 'handle_license_clear_key' ) ); // CHANGED:
+			add_action( 'update_option_' . self::OPT_LICENSE_KEY, array( __CLASS__, 'on_license_key_updated' ), 10, 3 ); // CHANGED:
+
 		}
 
 		/**
@@ -266,8 +277,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 		public static function sanitize_license_key( $value ) {
 			$value = is_string( $value ) ? trim( $value ) : '';
-			if ( '' === $value ) {
+
+			// CHANGED: Allow an explicit clear action via checkbox in the Settings form.
+			$clear = ( isset( $_POST['ppa_license_key_clear'] ) && '1' === (string) $_POST['ppa_license_key_clear'] );
+			if ( $clear ) {
 				return '';
+			}
+
+			// CHANGED: If the field is left blank, keep the existing saved key (prevents accidental wipe).
+			if ( '' === $value ) {
+				$existing = (string) get_option( self::OPT_LICENSE_KEY, '' );
+				return is_string( $existing ) ? trim( $existing ) : '';
 			}
 
 			// Strip control characters (invisible paste junk) + whitespace. Keep format permissive.
@@ -296,9 +316,11 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				return;
 			}
 
-			$cls = ( 'ok' === $status ) ? 'ppa-notice ppa-notice--success' : 'ppa-notice ppa-notice--error';
+			// Brave Shields cosmetic filtering can hide elements that use the class token "ppa-notice".
+			// Use Brave-safe class tokens that do NOT include "ppa-notice".
+			$cls = ( 'ok' === $status ) ? 'ppa-banner ppa-banner--success' : 'ppa-banner ppa-banner--error';
 			?>
-			<div class="<?php echo esc_attr( $cls ); ?>">
+			<div class="<?php echo esc_attr( $cls ); ?>" role="status" aria-live="polite">
 				<p><?php echo esc_html( $message ); ?></p>
 			</div>
 			<?php
@@ -920,6 +942,83 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			self::handle_license_action_common( 'deactivate' );
 		}
 
+		/**
+		 * CHANGED: Reveal the saved license key briefly (admin-only).
+		 *
+		 * This avoids showing the full key by default in the UI/HTML.
+		 */
+		public static function handle_license_reveal_key() { // CHANGED:
+			if ( ! current_user_can( self::cap() ) ) {
+				wp_die( esc_html__( 'You are not allowed to perform this action.', 'postpress-ai' ) );
+			}
+
+			check_admin_referer( 'ppa-license-reveal' );
+
+			$uid = (int) get_current_user_id();
+			set_transient( self::TRANSIENT_REVEAL_KEY, $uid, self::REVEAL_KEY_TTL_SECONDS );
+
+			wp_safe_redirect( admin_url( 'admin.php?page=postpress-ai-settings' ) );
+			exit;
+		}
+
+		/**
+		 * CHANGED: Clear the saved license key + all local activation markers (admin-only).
+		 */
+		public static function handle_license_clear_key() { // CHANGED:
+			if ( ! current_user_can( self::cap() ) ) {
+				wp_die( esc_html__( 'You are not allowed to perform this action.', 'postpress-ai' ) );
+			}
+
+			check_admin_referer( 'ppa-license-clear' );
+
+			delete_option( self::OPT_LICENSE_KEY );
+			delete_option( self::OPT_ACTIVE_SITE );
+			update_option( self::OPT_LICENSE_STATE, 'unknown', false );
+			update_option( self::OPT_LICENSE_LAST_ERROR_CODE, '', false );
+			update_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0, false );
+			delete_transient( self::TRANSIENT_LAST_LIC );
+			delete_transient( self::TRANSIENT_REVEAL_KEY );
+			update_option( self::OPT_BANNER_MSG, '', false );
+			update_option( self::OPT_BANNER_TYPE, 'ok', false );
+			update_option( self::OPT_BANNER_LAST_AT, time(), false );
+
+			self::save_settings_banner( 'ok', __( 'License key removed. Paste your license key, then click Save.', 'postpress-ai' ) );
+
+			wp_safe_redirect( admin_url( 'admin.php?page=postpress-ai-settings' ) );
+			exit;
+		}
+
+		/**
+		 * CHANGED: When the saved license key changes, reset local activation markers.
+		 *
+		 * This forces an explicit Activate step for the new key, and prevents stale “active” UI.
+		 */
+		public static function on_license_key_updated( $old_value, $value, $option ) { // CHANGED:
+			$old_value = is_string( $old_value ) ? trim( $old_value ) : '';
+			$value     = is_string( $value ) ? trim( $value ) : '';
+
+			// Normalize whitespace/control chars for comparison (don’t mutate stored value here).
+			$old_norm = preg_replace( '/\s+/', '', preg_replace( '/[\x00-\x1F\x7F]/', '', $old_value ) );
+			$new_norm = preg_replace( '/\s+/', '', preg_replace( '/[\x00-\x1F\x7F]/', '', $value ) );
+
+			if ( (string) $old_norm === (string) $new_norm ) {
+				return;
+			}
+
+			// Clear ALL local activation markers so UI + enforcement can’t go stale.
+			delete_option( self::OPT_ACTIVE_SITE );
+			update_option( self::OPT_LICENSE_STATE, ( '' !== $new_norm ) ? 'inactive' : 'unknown', false );
+			update_option( self::OPT_LICENSE_LAST_ERROR_CODE, '', false );
+			update_option( self::OPT_LICENSE_LAST_CHECKED_AT, 0, false );
+			delete_transient( self::TRANSIENT_LAST_LIC );
+			delete_transient( self::TRANSIENT_REVEAL_KEY );
+
+			// Clear any sticky banner message from the prior key so the page reflects the new state.
+			update_option( self::OPT_BANNER_MSG, '', false );
+			update_option( self::OPT_BANNER_TYPE, 'ok', false );
+			update_option( self::OPT_BANNER_LAST_AT, time(), false );
+		}
+
 		private static function handle_license_action_common( $action ) {
 			if ( ! current_user_can( self::cap() ) ) {
 				wp_die( esc_html__( 'You are not allowed to perform this action.', 'postpress-ai' ) );
@@ -956,7 +1055,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			$endpoint = trailingslashit( $base ) . 'license/' . $action . '/';
 
-			$site = esc_url_raw( home_url( '/' ) );                                                                          // CHANGED:
+			$site = untrailingslashit( home_url( '/' ) );                                                             // CHANGED:
+			$site = esc_url_raw( $site );                                                                               // CHANGED:
 
 			$headers = array(
 				'Accept'           => 'application/json; charset=utf-8',
@@ -965,13 +1065,15 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 				'X-PPA-Key'        => $key,
 				'Authorization'    => 'Bearer ' . $key,                                                                      // CHANGED:
 				'X-PPA-Site'       => $site,                                                                                // CHANGED:
+				'Origin'           => $site, // CHANGED:
+				'Referer'          => $site . '/', // CHANGED:
 				'X-PPA-View'       => 'settings_license',
 				'X-Requested-With' => 'XMLHttpRequest',
 			);
 
 			$payload = array(
 				'license_key' => $lic,
-				'site_url'    => home_url( '/' ),
+				'site_url'    => $site,                                                                            // CHANGED:
 			);
 
 			$response = wp_remote_post(
@@ -984,6 +1086,37 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			);
 
 			$result = self::normalize_django_response( $response );
+
+			// CHANGED: Some server stacks (or middleware) may reject JSON POSTs and return an HTML 403 page.
+			// If that happens, retry ONCE using form-encoded POST (application/x-www-form-urlencoded).
+			// This is safe + idempotent for verify/activate/deactivate actions.
+			if ( self::should_retry_license_action_form_encoded( $action, $result ) ) {                                           // CHANGED:
+				self::log( 'license_action retry form_encoded: action=' . $action );                                         // CHANGED:
+				$headers2 = $headers;                                                                               // CHANGED:
+				unset( $headers2['Content-Type'] );                                                                  // CHANGED:
+				$payload2 = array(                                                                                // CHANGED:
+					'license_key' => $lic,                                                                           // CHANGED:
+					'site_url'    => $site,                                                                          // CHANGED:
+				);                                                                                                 // CHANGED:
+				$response2 = wp_remote_post(                                                                        // CHANGED:
+					$endpoint,                                                                                       // CHANGED:
+					array(                                                                                           // CHANGED:
+						'headers' => $headers2,                                                                       // CHANGED:
+						'timeout' => 20,                                                                             // CHANGED:
+						'body'    => $payload2,                                                                       // CHANGED:
+					)                                                                                                // CHANGED:
+				);                                                                                                 // CHANGED:
+				$result2 = self::normalize_django_response( $response2 );                                            // CHANGED:
+				// Prefer the retry result if it is readable JSON (even if ok=false, we want structured errors).
+				if ( self::is_readable_json_result( $result2 ) ) {                                                            // CHANGED:
+					$result = $result2;                                                                             // CHANGED:
+					$response = $response2;                                                                         // CHANGED:
+					$result['_wp_retry_form_encoded'] = true;                                                       // CHANGED:
+				} else {                                                                                           // CHANGED:
+					// Keep the original result (most specific parse error snapshot).
+					self::log( 'license_action retry form_encoded failed: action=' . $action );                                // CHANGED:
+				}                                                                                                  // CHANGED:
+			}                                                                                                      // CHANGED:
 
 			// Bullet-proof: if server response is bound to a different site, force a local error snapshot.
 			if ( self::is_site_mismatch_result( $result ) ) {                                                               // CHANGED:
@@ -1037,7 +1170,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$code = (int) wp_remote_retrieve_response_code( $response );
 			$body = (string) wp_remote_retrieve_body( $response );
 
-			$json = json_decode( $body, true );
+			// CHANGED: Trim whitespace + strip UTF-8 BOM so valid JSON never fails decoding.
+			$body_trim = trim( $body );
+			if ( '' !== $body_trim && 0 === strpos( $body_trim, "\xEF\xBB\xBF" ) ) {
+				$body_trim = substr( $body_trim, 3 );
+			}
+
+			$json = json_decode( $body_trim, true );
 			if ( ! is_array( $json ) ) {
 				return array(
 					'ok'    => false,
@@ -1046,7 +1185,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 						'code'        => 'invalid_json',
 						'hint'        => 'PostPress AI did not return readable data.',
 						'http_status' => $code,
-						'body_prefix' => substr( $body, 0, 300 ),
+						'body_prefix' => substr( $body_trim, 0, 300 ),                                                                // CHANGED:
 					),
 					'ver'   => 'wp.ppa.v1',
 				);
@@ -1055,6 +1194,66 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			$json['_http_status'] = $code;
 			return $json;
 		}
+
+
+		/**
+		 * CHANGED: Determine if we should retry a license action using form-encoded POST.
+		 *
+		 * We only retry when the first attempt produced a JSON parse error AND looks like an HTML 403 page.
+		 * This protects against middleware stacks that reject JSON POST bodies or return HTML on permission errors.
+		 *
+		 * @param string $action
+		 * @param mixed  $result
+		 * @return bool
+		 */
+		private static function should_retry_license_action_form_encoded( $action, $result ) {                              // CHANGED:
+			$action = is_string( $action ) ? strtolower( trim( $action ) ) : '';                                   // CHANGED:
+			if ( ! in_array( $action, array( 'verify', 'activate', 'deactivate' ), true ) ) {                       // CHANGED:
+				return false;                                                                                    // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			if ( ! is_array( $result ) || ! isset( $result['error']['code'] ) ) {                                // CHANGED:
+				return false;                                                                                    // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			$code = strtolower( trim( (string) $result['error']['code'] ) );                                     // CHANGED:
+			if ( 'invalid_json' !== $code ) {                                                                     // CHANGED:
+				return false;                                                                                    // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			$http = 0;                                                                                        // CHANGED:
+			if ( isset( $result['error']['http_status'] ) ) {                                                      // CHANGED:
+				$http = (int) $result['error']['http_status'];                                                    // CHANGED:
+			} elseif ( isset( $result['_http_status'] ) ) {                                                       // CHANGED:
+				$http = (int) $result['_http_status'];                                                           // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			// Retry only on likely HTML 403.                                                                  // CHANGED:
+			if ( 403 !== $http ) {                                                                               // CHANGED:
+				return false;                                                                                    // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			$prefix = '';                                                                                      // CHANGED:
+			if ( isset( $result['error']['body_prefix'] ) && is_string( $result['error']['body_prefix'] ) ) {      // CHANGED:
+				$prefix = strtolower( $result['error']['body_prefix'] );                                          // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			if ( false !== strpos( $prefix, '<!doctype html' ) || false !== strpos( $prefix, '<html' ) || false !== strpos( $prefix, '<title>403' ) ) { // CHANGED:
+				return true;                                                                                     // CHANGED:
+			}                                                                                                    // CHANGED:
+
+			return false;                                                                                      // CHANGED:
+		}                                                                                                        // CHANGED:
+
+		/**
+		 * CHANGED: True if the normalized result is a readable JSON object payload (array).
+		 *
+		 * @param mixed $result
+		 * @return bool
+		 */
+		private static function is_readable_json_result( $result ) {                                                      // CHANGED:
+			return ( is_array( $result ) && ( array_key_exists( 'ok', $result ) || array_key_exists( 'data', $result ) || array_key_exists( 'error', $result ) ) ); // CHANGED:
+		}                                                                                                        // CHANGED:
 
 		private static function cache_last_license_result( $result ) {
 			set_transient( self::TRANSIENT_LAST_LIC, $result, self::LAST_LIC_TTL_SECONDS );
@@ -1065,6 +1264,16 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 			if ( is_array( $result ) && isset( $result['error']['code'] ) && 'site_mismatch' === (string) $result['error']['code'] ) { // CHANGED:
 				return __( 'This license is activated for a different site. Deactivate it there, then click “Check License” here.', 'postpress-ai' ); // CHANGED:
 			}                                                                                                              // CHANGED:
+
+			// CHANGED: If upstream returned an HTML 403 page (shows up as invalid_json), surface the real problem.
+			if ( is_array( $result )
+				&& isset( $result['error']['code'], $result['error']['http_status'] )
+				&& 'invalid_json' === (string) $result['error']['code']
+				&& 403 === (int) $result['error']['http_status']
+			) {
+				return __( 'Something blocked this request (403 Forbidden). Click “Check License” and try again.', 'postpress-ai' );
+			}
+
 
 			if ( is_array( $result ) && isset( $result['ok'] ) && true === $result['ok'] ) {
 				if ( 'Verify' === $label ) {
@@ -1549,37 +1758,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 		// === END: Plan/Usage helpers ===
 
-		private static function redirect_with_test_result( $status, $message ) {
-			$status  = ( 'ok' === $status ) ? 'ok' : 'error';
-			$message = is_string( $message ) ? $message : '';
-
-			$url = add_query_arg(
-				array(
-					'page'         => 'postpress-ai-settings',
-					'ppa_test'     => $status,
-					'ppa_test_msg' => rawurlencode( $message ),
-				),
-				admin_url( 'admin.php' )
-			);
-
-			wp_safe_redirect( $url );
+				private static function redirect_with_test_result( $status, $message ) {
+			// CHANGED: Do not rely on query-string messages (some browsers/extensions strip params).
+			// We persist the banner message via save_settings_banner(), then redirect cleanly.
+			wp_safe_redirect( admin_url( 'admin.php?page=postpress-ai-settings' ) );
 			exit;
 		}
 
-		private static function redirect_with_license_result( $status, $message, $result ) {
-			$status  = ( 'ok' === $status ) ? 'ok' : 'error';
-			$message = is_string( $message ) ? $message : '';
-
-			$url = add_query_arg(
-				array(
-					'page'        => 'postpress-ai-settings',
-					'ppa_lic'     => $status,
-					'ppa_lic_msg' => rawurlencode( $message ),
-				),
-				admin_url( 'admin.php' )
-			);
-
-			wp_safe_redirect( $url );
+				private static function redirect_with_license_result( $status, $message, $result ) {
+			// CHANGED: Do not rely on query-string messages (some browsers/extensions strip params).
+			// We persist the banner message via save_settings_banner(), then redirect cleanly.
+			wp_safe_redirect( admin_url( 'admin.php?page=postpress-ai-settings' ) );
 			exit;
 		}
 
@@ -1612,6 +1801,37 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 			?>
 			<div class="wrap ppa-admin ppa-settings">
+				<style id="ppa-brave-safe-notice-css">
+					/*
+					 * Brave Shields can apply cosmetic filtering like:
+					 *   .ppa-notice { display:none !important; }
+					 *
+					 * We render a Brave-safe banner class that does NOT include "ppa-notice".
+					 * Scoped ONLY to the Settings page wrapper.
+					 */
+					.wrap.ppa-settings .ppa-banner{
+						display:block;
+						margin:0 0 18px 0;
+						padding:12px 14px;
+						border-radius:12px;
+						border:1px solid rgba(255,255,255,.16);
+						background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.06));
+						color:var(--ppa-text,#f4f4f4);
+						box-shadow:0 8px 20px rgba(0,0,0,.45);
+						position:relative;
+					}
+					.wrap.ppa-settings .ppa-banner:before{
+						content:"";
+						position:absolute;
+						left:0;top:0;bottom:0;
+						width:6px;
+						border-radius:12px 0 0 12px;
+						background:var(--ppa-accent,#ff6c00);
+					}
+					.wrap.ppa-settings .ppa-banner p{margin:0;}
+					.wrap.ppa-settings .ppa-banner--error:before{background:#d63638;}
+				</style>
+
 				<h1><?php esc_html_e( 'PostPress AI Settings', 'postpress-ai' ); ?></h1>
 
 				<div class="ppa-card ppa-card--setup">
@@ -1641,13 +1861,21 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 										<label for="<?php echo esc_attr( self::OPT_LICENSE_KEY ); ?>"><?php esc_html_e( 'License Key', 'postpress-ai' ); ?></label>
 									</th>
 									<td>
-										<input type="text"
-										       name="<?php echo esc_attr( self::OPT_LICENSE_KEY ); ?>"
-										       id="<?php echo esc_attr( self::OPT_LICENSE_KEY ); ?>"
-										       class="regular-text"
-										       value="<?php echo esc_attr( $val_license ); ?>"
-										       autocomplete="off"
-										       placeholder="ppa_live_***************" />
+										<input type="password"
+							       name="<?php echo esc_attr( self::OPT_LICENSE_KEY ); ?>"
+							       id="<?php echo esc_attr( self::OPT_LICENSE_KEY ); ?>"
+							       class="regular-text"
+							       value=""
+							       autocomplete="new-password"
+							       spellcheck="false"
+							       placeholder="<?php echo esc_attr( $has_key ? self::mask_secret( $val_license ) : 'ppa_live_***************' ); ?>" />
+							<p class="description"><?php esc_html_e( 'Leave blank to keep your current key. Paste a new key to replace it.', 'postpress-ai' ); ?></p>
+							<?php if ( $has_key ) : ?>
+								<label style="display:block;margin-top:6px;">
+									<input type="checkbox" name="ppa_license_key_clear" value="1" />
+									<?php esc_html_e( 'Remove saved key when I click Save', 'postpress-ai' ); ?>
+								</label>
+							<?php endif; ?>
 										<p class="description">
 											<?php esc_html_e( 'Saved key:', 'postpress-ai' ); ?>
 											<code><?php echo esc_html( self::mask_secret( $val_license ) ); ?></code>
@@ -1659,16 +1887,53 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
 						<?php submit_button( __( 'Save', 'postpress-ai' ) ); ?>
 					</form>
+
+					<!-- CHANGED: Check License moved into Setup card -->
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form" style="margin-top:10px;">
+						<?php wp_nonce_field( 'ppa-license-verify' ); ?>
+						<input type="hidden" name="action" value="ppa_license_verify" />
+						<?php
+						$disable_verify = ( ! $has_key );
+						$attrs_verify   = $disable_verify ? array( 'disabled' => 'disabled' ) : array();
+						submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false, $attrs_verify );
+						?>
+						<?php if ( $disable_verify ) : ?>
+							<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first.', 'postpress-ai' ); ?></p>
+						<?php elseif ( ! $is_active_here ) : ?>
+							<p class="description ppa-inline-help"><?php esc_html_e( 'Next step: click “Activate This Site” below to turn this site on.', 'postpress-ai' ); ?></p>
+						<?php endif; ?>
+					</form>
+
+					<?php if ( $has_key ) : ?>
+						<?php
+						$reveal_url = wp_nonce_url( admin_url( 'admin-post.php?action=ppa_license_reveal_key' ), 'ppa-license-reveal' );
+						$clear_url  = wp_nonce_url( admin_url( 'admin-post.php?action=ppa_license_clear_key' ), 'ppa-license-clear' );
+						?>
+						<div style="margin-top:10px;">
+							<a class="button" href="<?php echo esc_url( $reveal_url ); ?>"><?php esc_html_e( 'Reveal key (30s)', 'postpress-ai' ); ?></a>
+							<a class="button button-link-delete" href="<?php echo esc_url( $clear_url ); ?>" style="margin-left:8px;"><?php esc_html_e( 'Remove key', 'postpress-ai' ); ?></a>
+						</div>
+
+						<?php
+						$reveal_uid = (int) get_transient( self::TRANSIENT_REVEAL_KEY );
+						if ( $reveal_uid > 0 && $reveal_uid === (int) get_current_user_id() ) :
+						?>
+							<p class="description" style="margin-top:10px;">
+								<strong><?php esc_html_e( 'Full key:', 'postpress-ai' ); ?></strong>
+								<code><?php echo esc_html( $val_license ); ?></code>
+							</p>
+						<?php endif; ?>
+					<?php endif; ?>
 				</div>
 
 				<div class="ppa-card ppa-card--license">
 					<h2 class="title"><?php esc_html_e( 'License Actions', 'postpress-ai' ); ?></h2>
 					<p class="ppa-help">
-						<?php esc_html_e( 'Use these buttons to check or activate this site.', 'postpress-ai' ); ?>
+						<?php esc_html_e( 'Use these buttons to activate or deactivate this site.', 'postpress-ai' ); ?>
 					</p>
 
 					<?php if ( $is_active_here ) : ?>
-						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--active"><?php esc_html_e( 'Active on this site', 'postpress-ai' ); ?></span></p>
+						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--active" style="background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.35); color: #86efac;"><?php esc_html_e( 'Active on this site', 'postpress-ai' ); ?></span></p>
 					<?php elseif ( $is_inactive_here ) : ?>
 						<p class="ppa-help"><strong><?php esc_html_e( 'Status:', 'postpress-ai' ); ?></strong> <span class="ppa-badge ppa-badge--inactive"><?php esc_html_e( 'Not active', 'postpress-ai' ); ?></span></p>
 					<?php else : ?>
@@ -1676,19 +1941,6 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 					<?php endif; ?>
 
 					<div class="ppa-actions-row">
-						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
-							<?php wp_nonce_field( 'ppa-license-verify' ); ?>
-							<input type="hidden" name="action" value="ppa_license_verify" />
-							<?php
-							$disable_verify = ( ! $has_key );
-							$attrs_verify   = $disable_verify ? array( 'disabled' => 'disabled' ) : array();
-							submit_button( __( 'Check License', 'postpress-ai' ), 'secondary', 'ppa_license_verify_btn', false, $attrs_verify );
-							?>
-							<?php if ( $disable_verify ) : ?>
-								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first.', 'postpress-ai' ); ?></p>
-							<?php endif; ?>
-						</form>
-
 						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-action-form">
 							<?php wp_nonce_field( 'ppa-license-activate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_activate" />
@@ -1710,13 +1962,13 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 							<?php wp_nonce_field( 'ppa-license-deactivate' ); ?>
 							<input type="hidden" name="action" value="ppa_license_deactivate" />
 							<?php
-							$disable_deactivate = ( ! $has_key ) || $is_inactive_here;
+							$disable_deactivate = ( ! $has_key ) || ( ! $is_active_here ); // CHANGED:
 							$attrs_deactivate   = $disable_deactivate ? array( 'disabled' => 'disabled' ) : array();
 							submit_button( __( 'Deactivate This Site', 'postpress-ai' ), 'delete', 'ppa_license_deactivate_btn', false, $attrs_deactivate );
 							?>
 							<?php if ( ! $has_key ) : ?>
 								<p class="description ppa-inline-help"><?php esc_html_e( 'Save your license key first.', 'postpress-ai' ); ?></p>
-							<?php elseif ( $is_inactive_here ) : ?>
+							<?php elseif ( ! $is_active_here ) : ?>
 								<p class="description ppa-inline-help"><?php esc_html_e( 'This site is not active right now.', 'postpress-ai' ); ?></p>
 							<?php endif; ?>
 						</form>
