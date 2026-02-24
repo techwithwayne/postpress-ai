@@ -34,6 +34,7 @@ PostPress AI — Admin Account Screen (Isolated)
                      the button is currently disabled (server decides).                                       // CHANGED:
 
 2026-02-22: FIX: SITES: Render Active/Site Limit/Remaining from license.sites.* (∞ when unlimited).          // CHANGED:
+2026-02-23: ADD: Support Chat modal on Account page + WP AJAX action ppa_support_chat (server-side proxy to Django /support/chat/). // CHANGED:
 */
 
 (function () {
@@ -775,11 +776,326 @@ PostPress AI — Admin Account Screen (Isolated)
     }, true);
   }
 
+
+  // ----------------------------
+  // Support Chat (WP AJAX -> PHP proxy -> Django)
+  // ----------------------------
+  function ensureSupportChatUI() {
+    // Create a Support Chat button next to the Refresh button (Account page header).
+    var refreshBtn = $('ppa-account-refresh');
+    var existing = $('ppa-support-chat-open');
+
+    if (!existing) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'ppa-support-chat-open';
+      btn.className = 'button';
+      btn.textContent = 'Support Chat';
+
+      if (refreshBtn && refreshBtn.parentNode) {
+        // Insert right after Refresh
+        if (refreshBtn.nextSibling) refreshBtn.parentNode.insertBefore(btn, refreshBtn.nextSibling);
+        else refreshBtn.parentNode.appendChild(btn);
+      } else {
+        // Fallback: try actions area, else append to body (rare edge cases)
+        var actions = document.querySelector('#ppa-account-actions, .ppa-actions, .ppa-account-actions, .ppa-card--actions, .ppa-actions-card, #ppa-actions');
+        if (actions) actions.appendChild(btn);
+        else document.body.appendChild(btn);
+      }
+    }
+
+    // Modal container (once)
+    if (!$('ppa-support-chat-modal')) {
+      var modal = document.createElement('div');
+      modal.id = 'ppa-support-chat-modal';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.style.display = 'none';
+
+      modal.innerHTML =
+        '<div class="ppa-support-chat__backdrop" data-ppa-chat-close="1"></div>' +
+        '<div class="ppa-support-chat__panel" role="dialog" aria-modal="true" aria-label="PostPress AI Support Chat">' +
+          '<div class="ppa-support-chat__head">' +
+            '<div class="ppa-support-chat__title">Support Chat</div>' +
+            '<button type="button" class="button" id="ppa-support-chat-close" data-ppa-chat-close="1">Close</button>' +
+          '</div>' +
+          '<div class="ppa-support-chat__log" id="ppa-support-chat-log" aria-live="polite"></div>' +
+          '<div class="ppa-support-chat__composer">' +
+            '<textarea id="ppa-support-chat-input" rows="2" placeholder="Type your message…"></textarea>' +
+            '<button type="button" class="button button-primary" id="ppa-support-chat-send">Send</button>' +
+          '</div>' +
+          '<div class="ppa-support-chat__hint">Note: no secrets are sent from your browser. This goes WP → server → Django.</div>' +
+        '</div>';
+
+      document.body.appendChild(modal);
+      ensureSupportChatStyles();
+    }
+
+    // Seed a hello once (only if empty)
+    var log = $('ppa-support-chat-log');
+    if (log && !log.__ppaSeeded) {
+      log.__ppaSeeded = true;
+      appendChatLine('agent', 'Hi — I’m Support. What’s going on?');
+    }
+  }
+
+  function ensureSupportChatStyles() {
+    if (document.getElementById('ppa-support-chat-style')) return;
+
+    var css =
+      '#ppa-support-chat-modal{position:fixed;inset:0;z-index:100000;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55);}' +
+      '#ppa-support-chat-modal .ppa-support-chat__panel{position:absolute;right:18px;bottom:18px;width:min(520px, calc(100vw - 36px));max-height:min(720px, calc(100vh - 36px));background:#0f0f10;border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__head{display:flex;align-items:center;justify-content:space-between;padding:12px 12px;border-bottom:1px solid rgba(255,255,255,.08);}' +
+      '#ppa-support-chat-modal .ppa-support-chat__title{font-size:14px;font-weight:700;color:#f2f2f2;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__log{padding:12px;display:flex;flex-direction:column;gap:10px;overflow:auto;flex:1;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__composer{display:flex;gap:10px;padding:12px;border-top:1px solid rgba(255,255,255,.08);}' +
+      '#ppa-support-chat-modal textarea{flex:1;resize:none;min-height:42px;max-height:140px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#151518;color:#f2f2f2;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__hint{padding:10px 12px;font-size:12px;opacity:.8;color:#e9e9e9;border-top:1px solid rgba(255,255,255,.06);}' +
+      '#ppa-support-chat-modal .ppa-chatline{display:flex;}' +
+      '#ppa-support-chat-modal .ppa-chatline--user{justify-content:flex-end;}' +
+      '#ppa-support-chat-modal .ppa-chatline__bubble{max-width:88%;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.35;white-space:pre-wrap;word-break:break-word;}' +
+      '#ppa-support-chat-modal .ppa-chatline--user .ppa-chatline__bubble{background:#2b2b30;color:#fff;border:1px solid rgba(255,255,255,.10);}' +
+      '#ppa-support-chat-modal .ppa-chatline--agent .ppa-chatline__bubble{background:#121214;color:#f2f2f2;border:1px solid rgba(255,255,255,.08);}' +
+      '#ppa-support-chat-modal .ppa-chatline--system .ppa-chatline__bubble{background:transparent;color:#d9d9d9;border:1px dashed rgba(255,255,255,.20);opacity:.95;}' +
+      '#ppa-support-chat-modal .ppa-chatline__meta{font-size:11px;opacity:.7;margin-top:4px;}' +
+      '#ppa-support-chat-modal .ppa-chatline__wrap{display:flex;flex-direction:column;}' +
+      '#ppa-support-chat-modal .ppa-chatbusy{opacity:.6;pointer-events:none;}' +
+      '@media (max-width:640px){#ppa-support-chat-modal .ppa-support-chat__panel{right:10px;left:10px;bottom:10px;width:auto;}}';
+
+    var style = document.createElement('style');
+    style.id = 'ppa-support-chat-style';
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  var chatState = {
+    open: false,
+    busy: false,
+    threadId: null
+  };
+
+  function showSupportChat(open) {
+    var modal = $('ppa-support-chat-modal');
+    if (!modal) return;
+
+    chatState.open = !!open;
+    modal.style.display = chatState.open ? 'block' : 'none';
+    modal.setAttribute('aria-hidden', chatState.open ? 'false' : 'true');
+
+    if (chatState.open) {
+      var input = $('ppa-support-chat-input');
+      if (input) {
+        setTimeout(function () { try { input.focus(); } catch (e) {} }, 40);
+      }
+      scrollChatToBottom();
+    }
+  }
+
+  function scrollChatToBottom() {
+    var log = $('ppa-support-chat-log');
+    if (!log) return;
+    try { log.scrollTop = log.scrollHeight + 9999; } catch (e) {}
+  }
+
+  function setChatBusy(isBusy) {
+    chatState.busy = !!isBusy;
+    var modal = $('ppa-support-chat-modal');
+    if (!modal) return;
+    if (chatState.busy) modal.classList.add('ppa-chatbusy');
+    else modal.classList.remove('ppa-chatbusy');
+
+    var send = $('ppa-support-chat-send');
+    var input = $('ppa-support-chat-input');
+    if (send) send.disabled = chatState.busy;
+    if (input) input.disabled = chatState.busy;
+  }
+
+  function appendChatLine(kind, text) {
+    var log = $('ppa-support-chat-log');
+    if (!log) return;
+
+    var k = (kind === 'user' || kind === 'agent' || kind === 'system') ? kind : 'system';
+    var line = document.createElement('div');
+    line.className = 'ppa-chatline ppa-chatline--' + k;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'ppa-chatline__wrap';
+
+    var bubble = document.createElement('div');
+    bubble.className = 'ppa-chatline__bubble';
+    bubble.textContent = toSafeStr(text) || '—';
+
+    wrap.appendChild(bubble);
+    line.appendChild(wrap);
+    log.appendChild(line);
+
+    scrollChatToBottom();
+  }
+
+  function extractChatCore(payload) {
+    var p = payload && typeof payload === 'object' ? payload : null;
+    if (!p) return null;
+    if (p.data && typeof p.data === 'object') return p.data;
+    if (p.result && typeof p.result === 'object') return p.result;
+    return p;
+  }
+
+  function extractChatThreadId(core) {
+    if (!core || typeof core !== 'object') return null;
+    var v = core.thread_id || core.threadId || core.thread || core.session_id || core.sessionId || null;
+    v = toSafeStr(v).trim();
+    return v ? v : null;
+  }
+
+  function extractChatReply(core) {
+    if (!core) return null;
+    if (typeof core === 'string') return core;
+    if (typeof core !== 'object') return null;
+
+    var v =
+      core.reply ||
+      core.response ||
+      core.message ||
+      (core.data && (core.data.reply || core.data.response || core.data.message)) ||
+      (core.output && (core.output.reply || core.output.text)) ||
+      core.text ||
+      null;
+
+    v = toSafeStr(v).trim();
+    return v ? v : null;
+  }
+
+  function extractChatError(payload) {
+    var p = payload && typeof payload === 'object' ? payload : null;
+    if (!p) return 'Support chat failed.';
+    if (p.error) {
+      if (typeof p.error === 'string') return p.error;
+      if (p.error && typeof p.error === 'object') return p.error.message || p.error.code || 'Support chat failed.';
+    }
+    if (p.message) return toSafeStr(p.message);
+    if (p.data && p.data.error) return toSafeStr(p.data.error);
+    return 'Support chat failed.';
+  }
+
+  async function sendSupportChatMessage(message) {
+    var msg = toSafeStr(message).trim();
+    if (!msg) return;
+
+    // Browser sends ONLY: message + thread_id (optional). No shared secret ever leaves the server.
+    var params = { message: msg };
+    if (chatState.threadId) params.thread_id = chatState.threadId;
+
+    setChatBusy(true);
+
+    // IMPORTANT: This must hit WP admin-ajax.php with action=ppa_support_chat
+    var payload = await postAjax(params, false, 'ppa_support_chat');
+
+    if (!payload) {
+      // If the WP AJAX handler is not installed yet, admin-ajax.php returns "0".
+      var missing = false;
+      try { missing = !!(window.__ppaMissingActions && window.__ppaMissingActions['ppa_support_chat']); } catch (e0) { missing = false; }
+      if (missing) {
+        appendChatLine('system', 'Support chat handler missing on this install. Next step: add wp_ajax_ppa_support_chat (PHP proxy).');
+      } else {
+        appendChatLine('system', 'Could not send. Reload this page, then try again.');
+      }
+      setChatBusy(false);
+      return;
+    }
+
+    var core = extractChatCore(payload);
+
+    // If it returns an ok/envelope shape, respect it.
+    var ok = (typeof payload.ok === 'boolean') ? payload.ok : ((typeof core.ok === 'boolean') ? core.ok : null);
+    if (ok === false) {
+      appendChatLine('system', extractChatError(payload) || 'Support chat failed.');
+      setChatBusy(false);
+      return;
+    }
+
+    // Thread tracking
+    var tid = extractChatThreadId(core);
+    if (tid) chatState.threadId = tid;
+
+    var reply = extractChatReply(core);
+    if (!reply) {
+      // fallback: some handlers may return {ok:true,data:{reply:""}} or raw envelope
+      var core2 = extractChatCore(core);
+      reply = extractChatReply(core2);
+    }
+
+    if (reply) appendChatLine('agent', reply);
+    else appendChatLine('system', 'Sent. (No reply payload returned.)');
+
+    setChatBusy(false);
+  }
+
+  function bindSupportChatEventsOnce() {
+    if (document.__ppaSupportChatBound) return;
+    document.__ppaSupportChatBound = true;
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t) return;
+
+      // Open button
+      if (t.closest && t.closest('#ppa-support-chat-open')) {
+        try { e.preventDefault(); } catch (err) {}
+        ensureSupportChatUI();
+        showSupportChat(true);
+        return;
+      }
+
+      // Close / backdrop click
+      var closeEl = (t.closest && t.closest('[data-ppa-chat-close="1"]')) ? t.closest('[data-ppa-chat-close="1"]') : null;
+      if (closeEl) {
+        try { e.preventDefault(); } catch (err2) {}
+        showSupportChat(false);
+        return;
+      }
+
+      // Send button
+      if (t.closest && t.closest('#ppa-support-chat-send')) {
+        try { e.preventDefault(); } catch (err3) {}
+        var input = $('ppa-support-chat-input');
+        var val = input ? input.value : '';
+        if (input) input.value = '';
+        appendChatLine('user', val);
+        sendSupportChatMessage(val);
+        return;
+      }
+    }, true);
+
+    document.addEventListener('keydown', function (e) {
+      if (!chatState.open) return;
+
+      // ESC closes
+      if (e.key === 'Escape') {
+        showSupportChat(false);
+        return;
+      }
+
+      // Enter to send (Shift+Enter = newline)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        var input = e.target && e.target.id === 'ppa-support-chat-input' ? e.target : null;
+        if (!input) return;
+        try { e.preventDefault(); } catch (err) {}
+
+        var val = toSafeStr(input.value);
+        input.value = '';
+        appendChatLine('user', val);
+        sendSupportChatMessage(val);
+      }
+    }, true);
+  }
+
   // ----------------------------
   // Bind
   // ----------------------------
   function bind() {
     bindDelegatedPopupsOnce();
+    bindSupportChatEventsOnce();
+    ensureSupportChatUI();
 
     var btn = $('ppa-account-refresh');
     if (btn) {

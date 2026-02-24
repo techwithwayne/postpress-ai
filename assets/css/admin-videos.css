@@ -566,3 +566,76 @@ body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .button-primary:h
     padding: 0 0 12px;
   }
 }
+/* -----------------------------
+   8) YouTube thumbnail image support (per-card IDs)                                           
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos {
+  --ppa-thumb-h: 132px; /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb { /* CHANGED: */
+  position: relative; /* CHANGED: */
+  height: var(--ppa-thumb-h); /* CHANGED: */
+  padding: 0; /* CHANGED: */
+  display: block; /* CHANGED: */
+  overflow: hidden; /* CHANGED: */
+}
+
+/* Actual thumbnail image */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb-img { /* CHANGED: */
+  width: 100%; /* CHANGED: */
+  height: 100%; /* CHANGED: */
+  display: block; /* CHANGED: */
+  object-fit: cover; /* CHANGED: */
+  filter: saturate(.98) contrast(1.03); /* CHANGED: */
+}
+
+/* Cinematic overlay to keep your orange/ink vibe on top of real thumbnails */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb::after { /* CHANGED: */
+  content: ""; /* CHANGED: */
+  position: absolute; /* CHANGED: */
+  inset: 0; /* CHANGED: */
+  background:
+    radial-gradient(1200px 300px at 30% 20%, rgba(255,108,0,.14), rgba(0,0,0,0)),
+    linear-gradient(180deg, rgba(0,0,0,.10), rgba(0,0,0,.42));
+  pointer-events: none; /* CHANGED: */
+}
+
+/* Badges move to overlay corners */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb-label { /* CHANGED: */
+  position: absolute; /* CHANGED: */
+  top: 12px; /* CHANGED: */
+  left: 12px; /* CHANGED: */
+  z-index: 2; /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-dur { /* CHANGED: */
+  position: absolute; /* CHANGED: */
+  top: 12px; /* CHANGED: */
+  right: 12px; /* CHANGED: */
+  z-index: 2; /* CHANGED: */
+}
+
+@media (max-width: 640px) {
+  body.postpress-ai_page_postpress-ai-videos {
+    --ppa-thumb-h: 124px; /* CHANGED: */
+  }
+}
+
+/* -----------------------------
+   9) Thickbox (WP modal) minor polish for this page only
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos #TB_window { /* CHANGED: */
+  border-radius: 16px; /* CHANGED: */
+  overflow: hidden; /* CHANGED: */
+  box-shadow: 0 18px 60px rgba(0,0,0,.55); /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-videos #TB_title { /* CHANGED: */
+  background: #111; /* CHANGED: */
+  border-bottom: 1px solid rgba(255,255,255,.12); /* CHANGED: */
+}
+
+body.postpress-ai_page_postpress-ai-videos #TB_closeWindowButton { /* CHANGED: */
+  color: #fff; /* CHANGED: */
+}

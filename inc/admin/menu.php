@@ -402,15 +402,15 @@ if ( ! function_exists( 'ppa_videos_normalize_yt_id' ) ) {                      
 			return '';                                                                                        // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		// If it looks like a plain ID already (typical YouTube IDs are 11 chars).                             // CHANGED:
+		// Plain ID already (YouTube video IDs are 11 chars).                                                  // CHANGED:
 		if ( preg_match( '/^[A-Za-z0-9_-]{11}$/', $raw ) ) {                                                  // CHANGED:
 			return $raw;                                                                                      // CHANGED:
 		}                                                                                                     // CHANGED:
 
 		$u = function_exists( 'wp_parse_url' ) ? wp_parse_url( $raw ) : parse_url( $raw );                    // CHANGED:
 		if ( ! is_array( $u ) || empty( $u['host'] ) ) {                                                       // CHANGED:
-			// Last chance: extract 11-char token from the string.                                             // CHANGED:
-			if ( preg_match( '/([A-Za-z0-9_-]{11})/', $raw, $m ) ) {                                          // CHANGED:
+			// Last chance: pull an 11-char token from the string.                                            // CHANGED:
+			if ( preg_match( '/\b([A-Za-z0-9_-]{11})\b/', $raw, $m ) ) {                                   // CHANGED:
 				return (string) $m[1];                                                                        // CHANGED:
 			}                                                                                                 // CHANGED:
 			return '';                                                                                         // CHANGED:
@@ -419,37 +419,53 @@ if ( ! function_exists( 'ppa_videos_normalize_yt_id' ) ) {                      
 		$host = strtolower( (string) $u['host'] );                                                            // CHANGED:
 		$path = isset( $u['path'] ) ? trim( (string) $u['path'], '/' ) : '';                                  // CHANGED:
 
-		// youtu.be/VIDEOID                                                                                    // CHANGED:
+		// youtu.be/VIDEOID                                                                                   // CHANGED:
 		if ( strpos( $host, 'youtu.be' ) !== false && $path ) {                                               // CHANGED:
 			$seg   = explode( '/', $path );                                                                   // CHANGED:
 			$maybe = isset( $seg[0] ) ? (string) $seg[0] : '';                                                 // CHANGED:
 			return preg_match( '/^[A-Za-z0-9_-]{11}$/', $maybe ) ? $maybe : '';                                // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		// youtube.com/watch?v=VIDEOID  OR  youtube-nocookie.com/watch?v=VIDEOID                               // CHANGED:
+		// youtube.com/* patterns                                                                              // CHANGED:
 		if ( strpos( $host, 'youtube.com' ) !== false || strpos( $host, 'youtube-nocookie.com' ) !== false ) { // CHANGED:
 			$q = array();                                                                                      // CHANGED:
 			if ( ! empty( $u['query'] ) ) {                                                                    // CHANGED:
 				parse_str( (string) $u['query'], $q );                                                         // CHANGED:
 			}                                                                                                  // CHANGED:
+
+			// watch?v=VIDEOID                                                                                 // CHANGED:
 			if ( isset( $q['v'] ) && preg_match( '/^[A-Za-z0-9_-]{11}$/', (string) $q['v'] ) ) {              // CHANGED:
 				return (string) $q['v'];                                                                       // CHANGED:
 			}                                                                                                  // CHANGED:
 
-			// youtube.com/embed/VIDEOID                                                                        // CHANGED:
+			// embed/VIDEOID                                                                                    // CHANGED:
 			if ( $path && strpos( $path, 'embed/' ) === 0 ) {                                                   // CHANGED:
 				$maybe = substr( $path, 6 );                                                                    // CHANGED:
 				$maybe = explode( '/', (string) $maybe )[0];                                                    // CHANGED:
 				return preg_match( '/^[A-Za-z0-9_-]{11}$/', (string) $maybe ) ? (string) $maybe : '';           // CHANGED:
 			}                                                                                                  // CHANGED:
+
+			// shorts/VIDEOID                                                                                   // CHANGED:
+			if ( $path && strpos( $path, 'shorts/' ) === 0 ) {                                                  // CHANGED:
+				$maybe = substr( $path, 7 );                                                                    // CHANGED:
+				$maybe = explode( '/', (string) $maybe )[0];                                                    // CHANGED:
+				return preg_match( '/^[A-Za-z0-9_-]{11}$/', (string) $maybe ) ? (string) $maybe : '';           // CHANGED:
+			}                                                                                                  // CHANGED:
+
+			// live/VIDEOID                                                                                     // CHANGED:
+			if ( $path && strpos( $path, 'live/' ) === 0 ) {                                                    // CHANGED:
+				$maybe = substr( $path, 5 );                                                                    // CHANGED:
+				$maybe = explode( '/', (string) $maybe )[0];                                                    // CHANGED:
+				return preg_match( '/^[A-Za-z0-9_-]{11}$/', (string) $maybe ) ? (string) $maybe : '';           // CHANGED:
+			}                                                                                                  // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		// Final fallback: extract any 11-char ID from the URL.                                                // CHANGED:
-		if ( preg_match( '/([A-Za-z0-9_-]{11})/', $raw, $m ) ) {                                              // CHANGED:
+		// Final fallback: pick an 11-char token that looks like a video ID.                                    // CHANGED:
+		if ( preg_match( '/\b([A-Za-z0-9_-]{11})\b/', $raw, $m ) ) {                                       // CHANGED:
 			return (string) $m[1];                                                                             // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		return '';                                                                                             // CHANGED:
+		return '';                                                                                            // CHANGED:
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
@@ -566,6 +582,11 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 		if ( ! current_user_can( 'manage_options' ) ) {                                                         // CHANGED:
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );           // CHANGED:
 		}                                                                                                       // CHANGED:
+
+		// Use WP native Thickbox for modal playback (no new tab).                                                 // CHANGED:
+		if ( function_exists( 'add_thickbox' ) ) {                                                                // CHANGED:
+			add_thickbox();                                                                                         // CHANGED:
+		}                                                                                                         // CHANGED:
 
 		$playlists = ppa_videos_get_playlists();                                                                // CHANGED:
 
@@ -696,7 +717,17 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 							if ( $v['pl'] !== $active ) { continue; }
 							$shown++;
 
-							$watch = 'https://www.youtube.com/watch?v=' . rawurlencode( (string) $v['yt'] );
+							$yt_id = (string) $v['yt'];                                                                    // CHANGED:
+							$thumb = 'https://i.ytimg.com/vi/' . rawurlencode( $yt_id ) . '/hqdefault.jpg';                 // CHANGED:
+							$embed = 'https://www.youtube-nocookie.com/embed/' . rawurlencode( $yt_id ) . '?autoplay=1&rel=0'; // CHANGED:
+							$watch = add_query_arg(                                                                          // CHANGED:
+								array(                                                                                         // CHANGED:
+									'TB_iframe' => 'true',                                                                       // CHANGED:
+									'width'     => 960,                                                                          // CHANGED:
+									'height'    => 540,                                                                          // CHANGED:
+								),                                                                                            // CHANGED:
+								$embed                                                                                        // CHANGED:
+							);                                                                                               // CHANGED:
 
 							$del_url = add_query_arg(
 								array(
@@ -710,6 +741,7 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 							?>
 							<div class="ppa-video-card">
 								<div class="ppa-video-thumb">
+									<img class="ppa-video-thumb-img" src="<?php echo esc_url( $thumb ); ?>" alt="" loading="lazy" /> <!-- CHANGED: -->
 									<span class="ppa-video-thumb-label"><?php echo esc_html__( 'YouTube', 'postpress-ai' ); ?></span>
 									<span class="ppa-video-dur"><?php echo esc_html( $v['dur'] ? $v['dur'] : '—' ); ?></span>
 								</div>
@@ -717,7 +749,7 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 									<div class="ppa-video-title"><?php echo esc_html( $v['title'] ); ?></div>
 									<div class="ppa-video-row">
 										<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>
-										<a class="button button-secondary ppa-video-watch" href="<?php echo esc_url( $watch ); ?>" target="_blank" rel="noopener"><?php echo esc_html__( 'Watch', 'postpress-ai' ); ?></a>
+										<a class="button button-secondary ppa-video-watch thickbox" href="<?php echo esc_url( $watch ); ?>"><?php echo esc_html__( 'Watch', 'postpress-ai' ); ?></a> <!-- CHANGED: -->
 									</div>
 									<p class="ppa-video-remove"><a class="button-link-delete" href="<?php echo esc_url( $del ); ?>"><?php echo esc_html__( 'Remove', 'postpress-ai' ); ?></a></p>
 								</div>

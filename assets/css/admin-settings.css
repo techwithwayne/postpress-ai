@@ -28,6 +28,10 @@
  * 2025-12-25 — POLISH: Button height parity, calmer spacing, smaller debug box, better disabled styling.   // CHANGED:
  *
  * 2025-12-26 — FINAL POLISH: Subtle hover/focus transitions + calmer card hover, without changing layout.  // CHANGED:
+ *
+ * 2026-02-23 — LAYOUT: Place “Check License” to the right of “Save” in Setup actions row.          // CHANGED:
+ * 2026-02-23 — POLISH: Success banner left stripe is green (matches active status).                 // CHANGED:
+ * 2026-02-23 — POLISH: Active status badge dot is green (matches active status border).            // CHANGED:
  */
 
 body.postpress-ai_page_postpress-ai-settings {
@@ -46,6 +50,9 @@ body.postpress-ai_page_postpress-ai-settings {
   --ppa-accent: #ff6c00;
   --ppa-accent-2: #ff8228;
   --ppa-danger: #d63638;
+
+  --ppa-success: #00a32a; /* CHANGED: 2026-02-23 */
+  --ppa-success-soft: rgba(0,163,42,.12); /* CHANGED: 2026-02-23 */
 
   --ppa-radius-xl: 18px;
   --ppa-radius: 14px;
@@ -117,7 +124,7 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
   bottom: 8px;
   width: 4px;
   border-radius: 4px;
-  background: var(--ppa-accent);
+  background: var(--ppa-success) !important; /* CHANGED: 2026-02-23 */
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-notice--error::before { /* CHANGED: */
@@ -125,6 +132,42 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-c
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-notice p { /* CHANGED: */
+  margin: 0 !important;
+  padding-left: 6px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05px !important;
+}
+
+/* ===================================================================== */
+/* Brave-safe banners (settings.php uses: .ppa-banner / --success/--error) */
+/* ===================================================================== */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-banner { /* CHANGED: 2026-02-23 */
+  margin: 0 0 14px !important;
+  padding: 12px 14px 12px 14px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255,255,255,.16) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.06)) !important;
+  color: var(--ppa-text) !important;
+  box-shadow: 0 8px 20px rgba(0,0,0,.45) !important;
+  position: relative; /* CHANGED: 2026-02-23 */
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-banner::before { /* CHANGED: 2026-02-23 */
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--ppa-success) !important; /* CHANGED: 2026-02-23 */
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-banner--error::before { /* CHANGED: 2026-02-23 */
+  background: var(--ppa-danger) !important;
+}
+
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-card .ppa-banner p { /* CHANGED: 2026-02-23 */
   margin: 0 !important;
   padding-left: 6px !important;
   font-weight: 700 !important;
@@ -333,6 +376,55 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings p.subm
   padding: 0 !important;
 }
 
+/* ===================================================================== */
+/* Setup actions row (Save + Check License side-by-side)                   */
+/* ===================================================================== */
+/*
+  Goal: place the “Check License” button to the right of “Save” without changing behavior.
+  This relies on both controls being rendered inside the same <p class="submit"> on the Setup form.
+  If markup changes later, this block becomes a no-op (it won’t break other panels).
+*/
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit { /* CHANGED: 2026-02-23 */
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-wrap: nowrap !important;
+}
+
+/* Keep Save on the left; push Check License to the right when present */
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit #ppa-check-license,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit #ppa_check_license,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit .ppa-check-license,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit .ppa-btn-check-license,
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit button[name="ppa_check_license"],
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit input[name="ppa_check_license"],
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit [data-ppa-action="check-license"] { /* CHANGED: 2026-02-23 */
+  margin-left: auto !important;
+  width: auto !important;
+  min-width: 220px !important;
+  white-space: nowrap !important;
+  flex: 0 0 auto !important;
+}
+
+/* Mobile: allow the row to stack naturally */
+@media (max-width: 782px) {
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit { /* CHANGED: 2026-02-23 */
+    flex-wrap: wrap !important;
+  }
+
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit #ppa-check-license,
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit #ppa_check_license,
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit .ppa-check-license,
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit .ppa-btn-check-license,
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit button[name="ppa_check_license"],
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit input[name="ppa_check_license"],
+  body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings > .ppa-card form:not(.ppa-action-form) p.submit [data-ppa-action="check-license"] { /* CHANGED: 2026-02-23 */
+    margin-left: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+
 /* Hover feel (only when enabled) */
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not([disabled]):hover,
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .button:not([disabled]):focus {
@@ -446,13 +538,13 @@ body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-b
   background: rgba(255,255,255,.40);
 }
 
-body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--active {
-  border-color: rgba(255,108,0,.42);
-  background: rgba(255,108,0,.10);
+body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--active { /* CHANGED: 2026-02-23 */
+  border-color: rgba(0,163,42,.55) !important; /* CHANGED: 2026-02-23 */
+  background: var(--ppa-success-soft) !important; /* CHANGED: 2026-02-23 */
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--active::before {
-  background: var(--ppa-accent);
+  background: var(--ppa-success) !important; /* CHANGED: 2026-02-23 */
 }
 
 body.postpress-ai_page_postpress-ai-settings .wrap.ppa-admin.ppa-settings .ppa-badge--inactive {
