@@ -1,0 +1,568 @@
+/**
+ * PostPress AI — Admin Videos
+ *
+ * File: assets/css/admin-videos.css
+ *
+ * ========= CHANGE LOG =========
+ * 2026-02-23 • FIX: Show + style the “Add Video” UI form (was present in DOM but not visible).  # CHANGED:
+ * 2026-02-23 • ADD: Cinematic spacing + card grid styling for Videos admin page.               # CHANGED:
+ * 2026-02-23 • SCOPE: Only affects body.postpress-ai_page_postpress-ai-videos.                 # CHANGED:
+ *
+ * Notes:
+ * - Matches the Settings page design language (dark, premium, orange accent)
+ * - Slightly more "media" spacing (breathing room)
+ */
+
+/* -----------------------------
+   1) Scope + tokens (match Settings)
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos {
+  --ppa-bg: #111111;
+  --ppa-panel: #1b1b1b;
+  --ppa-panel-top: #1e1e1e;
+  --ppa-field: #2a2a2a;
+  --ppa-border: rgba(255,255,255,.10);
+  --ppa-border-2: rgba(255,255,255,.14);
+  --ppa-text: #f5f5f5;
+  --ppa-muted: rgba(245,245,245,.82);
+  --ppa-muted-2: rgba(245,245,245,.62);
+  --ppa-accent: #ff6c00;
+  --ppa-accent-2: #ff8228;
+  --ppa-danger: #d63638;
+  --ppa-success: #00a32a;
+  --ppa-success-soft: rgba(0,163,42,.12);
+  --ppa-radius-xl: 18px;
+  --ppa-radius: 14px;
+  --ppa-radius-sm: 10px;
+  --ppa-shadow: 0 12px 34px rgba(0,0,0,.40);
+  --ppa-shadow-soft: 0 4px 16px rgba(0,0,0,.38);
+  --ppa-max: 1220px;
+  --ppa-gutter: 22px;
+
+  background: #0f0f0f;
+}
+
+/* Keep WP admin chrome normal; only darken the content area for this page */
+body.postpress-ai_page_postpress-ai-videos #wpcontent,
+body.postpress-ai_page_postpress-ai-videos #wpbody,
+body.postpress-ai_page_postpress-ai-videos #wpbody-content {
+  background: #0f0f0f;
+}
+
+/* WP admin default wrap spacing can be weird; normalize just for this page */
+body.postpress-ai_page_postpress-ai-videos .wrap.ppa-videos-wrap {
+  max-width: var(--ppa-max);
+  margin: 18px auto 40px;
+  padding: 0 var(--ppa-gutter);
+  color: var(--ppa-text);
+  box-sizing: border-box;
+}
+
+/* -----------------------------
+   2) Header
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-h1 {
+  margin: 6px 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--ppa-accent);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-sub {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ppa-muted);
+}
+
+/* -----------------------------
+   3) Toolbar (cinematic: more space, softer inputs)
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  margin: 0 0 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius-xl);
+  box-shadow: var(--ppa-shadow-soft);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-search,
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-category {
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--ppa-border);
+  background: rgba(0,0,0,.26);
+  color: var(--ppa-text);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03);
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-search:focus,
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-category:focus {
+  border-color: rgba(255,108,0,.70);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.03),
+    0 0 0 3px rgba(255,108,0,.12);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-search {
+  flex: 1 1 auto;
+  padding: 0 12px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-search::placeholder {
+  color: rgba(245,245,245,.45);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-category {
+  flex: 0 0 210px;
+  padding: 0 10px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-pills {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ppa-border);
+  background: rgba(0,0,0,.22);
+  color: var(--ppa-muted);
+  font-size: 12px;
+  user-select: none;
+  transition: background .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-pill:hover {
+  border-color: rgba(255,255,255,.18);
+  background: rgba(0,0,0,.28);
+  transform: translateY(-1px);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-pill.is-active {
+  border-color: rgba(255,108,0,.85);
+  background: rgba(255,108,0,.10);
+  color: var(--ppa-text);
+}
+
+/* -----------------------------
+   4) Layout: rail + grid
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Rail */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail {
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03));
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius-xl);
+  box-shadow: var(--ppa-shadow-soft);
+  padding: 14px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-title {
+  margin: 6px 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ppa-muted-2);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-item {
+  margin: 0;
+  padding: 0;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-item a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--ppa-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  background: rgba(0,0,0,.10);
+  transition: background .12s ease, border-color .12s ease, transform .12s ease, color .12s ease;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-item a:hover {
+  color: var(--ppa-text);
+  border-color: var(--ppa-border);
+  background: rgba(0,0,0,.18);
+  transform: translateY(-1px);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-item a:focus {
+  outline: none;
+  border-color: rgba(255,108,0,.70);
+  box-shadow: 0 0 0 3px rgba(255,108,0,.12);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-rail-item.is-active a {
+  border-color: rgba(255,108,0,.85);
+  background: rgba(255,108,0,.10);
+  color: var(--ppa-text);
+}
+
+/* Grid wrapper */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid {
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03));
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius-xl);
+  box-shadow: var(--ppa-shadow-soft);
+  padding: 18px;
+}
+
+/* Grid header */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid-head {
+  margin: 2px 0 14px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--ppa-text);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid-sub {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ppa-muted);
+}
+
+/* -----------------------------
+   5) Cards + responsive embeds
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-cards {
+  display: grid;
+  /* auto-fit prevents “crunched 3 columns” and adapts cleanly */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-card {
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius-xl);
+  background: rgba(0,0,0,.20);
+  box-shadow: 0 10px 26px rgba(0,0,0,.28);
+  overflow: hidden;
+  transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+  will-change: transform;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,108,0,.35);
+  box-shadow: 0 16px 40px rgba(0,0,0,.36);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-card:focus-within {
+  border-color: rgba(255,108,0,.50);
+  box-shadow: 0 16px 40px rgba(0,0,0,.36), 0 0 0 3px rgba(255,108,0,.10);
+}
+
+/* If you embed iframes directly in the card, make them responsive */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-card iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  height: auto;
+}
+
+/* If you have an explicit embed wrapper, support it too */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-embed {
+  width: 100%;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  position: relative;
+}
+body.postpress-ai_page_postpress-ai-videos .ppa-video-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Fallback if aspect-ratio isn’t supported */
+@supports not (aspect-ratio: 16 / 9) {
+  body.postpress-ai_page_postpress-ai-videos .ppa-video-card iframe {
+    height: 220px;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-video-embed {
+    height: 0;
+    padding-top: 56.25%;
+  }
+}
+
+/* Thumb header (if you’re using the non-iframe cinematic thumb) */
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb {
+  position: relative;
+  height: 132px;
+  background:
+    radial-gradient(1200px 300px at 30% 20%, rgba(255,108,0,.10), rgba(0,0,0,0)),
+    linear-gradient(180deg, rgba(0,0,0,.10), rgba(0,0,0,.35));
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  padding: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb-label {
+  font-size: 11px;
+  color: rgba(245,245,245,.55);
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-dur {
+  font-size: 11px;
+  color: rgba(245,245,245,.78);
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.10);
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-meta {
+  padding: 14px 14px 16px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--ppa-text);
+  margin: 0 0 10px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-video-tag {
+  font-size: 11px;
+  color: var(--ppa-muted);
+  background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* Watch button: match WP button but nudge it into your brand */
+body.postpress-ai_page_postpress-ai-videos a.button.ppa-video-watch,
+body.postpress-ai_page_postpress-ai-videos button.button.ppa-video-watch {
+  border-radius: 12px;
+  border-color: rgba(255,108,0,.65);
+  background: rgba(255,108,0,.10);
+  color: var(--ppa-text);
+  box-shadow: none;
+  transition: background .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+body.postpress-ai_page_postpress-ai-videos a.button.ppa-video-watch:hover,
+body.postpress-ai_page_postpress-ai-videos button.button.ppa-video-watch:hover {
+  border-color: rgba(255,108,0,.95);
+  background: rgba(255,108,0,.16);
+  color: var(--ppa-text);
+  transform: translateY(-1px);
+}
+
+body.postpress-ai_page_postpress-ai-videos a.button.ppa-video-watch:focus,
+body.postpress-ai_page_postpress-ai-videos button.button.ppa-video-watch:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255,108,0,.12);
+}
+
+/* -----------------------------
+   6) Responsive
+------------------------------ */
+@media (max-width: 900px) {
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-toolbar {
+    flex-wrap: wrap;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-category {
+    flex: 1 1 220px;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-pills {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  body.postpress-ai_page_postpress-ai-videos .wrap.ppa-videos-wrap {
+    padding: 0 14px;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid {
+    padding: 14px;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-cards {
+    gap: 12px;
+  }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-video-thumb {
+    height: 124px;
+  }
+}
+
+/* -----------------------------
+   7) “Add Video” UI form (make it visible + premium)
+------------------------------ */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform { /* CHANGED: */
+  display: block !important;         /* CHANGED: force visible */
+  visibility: visible !important;    /* CHANGED: force visible */
+  opacity: 1 !important;             /* CHANGED: force visible */
+
+  margin: 12px 0 16px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius-xl);
+  box-shadow: var(--ppa-shadow-soft);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform h3, /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform h2 { /* CHANGED: */
+  margin: 2px 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  color: var(--ppa-text);
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform p { /* CHANGED: */
+  margin: 0 0 12px;
+  color: var(--ppa-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Make common WP form layouts look good */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .form-table { /* CHANGED: */
+  margin: 0;
+}
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .form-table th { /* CHANGED: */
+  width: 160px;
+  padding: 10px 10px 10px 0;
+  color: var(--ppa-muted);
+  font-weight: 800;
+  font-size: 12px;
+}
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .form-table td { /* CHANGED: */
+  padding: 10px 0;
+}
+
+/* Inputs */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="text"],  /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="url"],   /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="search"],/* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform select,              /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform textarea {           /* CHANGED: */
+  width: 100%;
+  max-width: none;
+  border-radius: 12px;
+  border: 1px solid var(--ppa-border);
+  background: rgba(0,0,0,.26);
+  color: var(--ppa-text);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03);
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="text"],  /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="url"],   /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input[type="search"],/* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform select {             /* CHANGED: */
+  height: 40px;
+  padding: 0 12px;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform textarea { /* CHANGED: */
+  min-height: 92px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform input:focus, /* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform select:focus,/* CHANGED: */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform textarea:focus { /* CHANGED: */
+  border-color: rgba(255,108,0,.70);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.03),
+    0 0 0 3px rgba(255,108,0,.12);
+}
+
+/* Submit row */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .submit { /* CHANGED: */
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+/* Primary button that matches your orange vibe */
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .button-primary { /* CHANGED: */
+  border-radius: 12px;
+  border-color: rgba(255,108,0,.85);
+  background: rgba(255,108,0,.16);
+  color: var(--ppa-text);
+  box-shadow: none;
+}
+
+body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .button-primary:hover { /* CHANGED: */
+  border-color: rgba(255,108,0,.95);
+  background: rgba(255,108,0,.22);
+  color: var(--ppa-text);
+}
+
+@media (max-width: 900px) {
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .form-table th { /* CHANGED: */
+    width: auto;
+    display: block;
+    padding: 10px 0 6px;
+  }
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .form-table td { /* CHANGED: */
+    display: block;
+    padding: 0 0 12px;
+  }
+}
