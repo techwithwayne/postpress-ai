@@ -834,7 +834,8 @@ PostPress AI — Admin Account Screen (Isolated)
     var log = $('ppa-support-chat-log');
     if (log && !log.__ppaSeeded) {
       log.__ppaSeeded = true;
-      appendChatLine('agent', 'Hi — I’m Support. What’s going on?');
+      appendChatLine('agent', 'Hi, Yukia here. What’s going on?');
+      chatState.hasGreeting = true;
     }
   }
 
@@ -871,7 +872,8 @@ PostPress AI — Admin Account Screen (Isolated)
   var chatState = {
     open: false,
     busy: false,
-    threadId: null
+    threadId: null,
+    hasGreeting: false
   };
 
   function showSupportChat(open) {
@@ -910,6 +912,34 @@ PostPress AI — Admin Account Screen (Isolated)
     if (input) input.disabled = chatState.busy;
   }
 
+  // CHANGED: Agent output sanitizer (no Markdown tokens; avoid repeated "Yukia here" intro)
+  function stripMarkdownLite(s) {
+    var t = toSafeStr(s);
+    if (!t) return '';
+    // Remove common Markdown formatting markers but keep the words.
+    t = t.replace(/\*\*/g, '').replace(/__/g, '').replace(/`/g, '');
+    // Convert markdown links: [text](url) -> text (url)
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+    return t;
+  }
+
+  function stripRedundantAgentIntro(s) {
+    var t = toSafeStr(s).trim();
+    if (!t) return '';
+    if (chatState && chatState.hasGreeting) {
+      // If we've already greeted, don’t re-introduce on every reply.
+      t = t.replace(/^yukia\s+here\s*(?:—|-|:|,)\s*/i, '');
+      t = t.replace(/^yukia\s+here\.\s*/i, '');
+    }
+    return t;
+  }
+
+  function sanitizeAgentText(s) {
+    var t = stripMarkdownLite(s);
+    t = stripRedundantAgentIntro(t);
+    return t;
+  }
+
   function appendChatLine(kind, text) {
     var log = $('ppa-support-chat-log');
     if (!log) return;
@@ -923,7 +953,11 @@ PostPress AI — Admin Account Screen (Isolated)
 
     var bubble = document.createElement('div');
     bubble.className = 'ppa-chatline__bubble';
-    bubble.textContent = toSafeStr(text) || '—';
+    var out = toSafeStr(text) || '—';
+
+    if (k === 'agent') out = sanitizeAgentText(out);
+
+    bubble.textContent = out || '—';
 
     wrap.appendChild(bubble);
     line.appendChild(wrap);
