@@ -7,12 +7,14 @@
  * /wp-content/plugins/postpress-ai/inc/class-ppa-controller.php
  *
  * CHANGE LOG
+ * 2026-02-23 • FIX: Support chat proxy now maps Django 'agent_message' into a top-level 'reply' so the WP admin chat UI always displays the response. // CHANGED:
  * 2026-02-19 • FIX: Forward whitelisted Account intent params (billing_portal) from WP → Django so Django can return a one-time Stripe Billing Portal session URL (no email login). // CHANGED:
  *            • HARDEN: Add a short WP transient cache for account_status to prevent Django rate-limit 'too many requests' during UI refresh/popup workflows (bypassed for billing_portal intent). // CHANGED:
  * 2026-02-22 • FIX: Save Draft (Store) now forces WP draft title to use Composer Subject/Title (original saves) via last-subject capture on Generate + final post_title enforce (no outline/H1 bleed). // CHANGED:
  * 2026-02-20 • FIX: Accept PPA admin nonce via headers (X-PPA-Nonce / X-WP-Nonce) and support legacy 'ppa-admin' nonce action string for customer installs. // CHANGED:
  *            • FIX: Treat x-www-form-urlencoded POSTs with a JSON 'payload' field as valid JSON bodies (back-compat across JS bundles). // CHANGED:
  *            • FIX: Update default Django base URL fallback to apps.techwithwayne.com to prevent WP-theme 404 HTML being returned from postpressai.com when the base option is unset. // CHANGED:
+ * 2026-02-23 • FIX: Support chat proxy normalizes Django replies into stable {reply, thread_id} fields for the WP admin modal UI. Secrets remain server-side. // CHANGED:
  *
  *
  * 2026-01-26 • FIX: Account verify now forcibly bypasses Django verify caching (URL _ts + no-store headers). // CHANGED:
@@ -53,6 +55,10 @@ if ( ! class_exists( 'PPA_Controller' ) ) {
 			add_action( 'wp_ajax_ppa_generate',       array( __CLASS__, 'ajax_generate' ) );
 			add_action( 'wp_ajax_ppa_account_status', array( __CLASS__, 'ajax_account_status' ) ); // CHANGED:
 			add_action( 'wp_ajax_ppa_billing_portal_session', array( __CLASS__, 'ajax_billing_portal_session' ) ); // CHANGED:
+
+			// 2026-02-23 • ADD: Support proxies (WP → admin-ajax → PHP → Django /support/*) using X-PPA-Shared-Secret. // CHANGED:
+			add_action( 'wp_ajax_ppa_support_chat', array( __CLASS__, 'ajax_support_chat' ) ); // CHANGED:
+			add_action( 'wp_ajax_ppa_support_account_status', array( __CLASS__, 'ajax_support_account_status' ) ); // CHANGED:
 		}
 
 		private static function error_payload( $error_code, $http_status, $meta_extra = array() ) {
@@ -254,6 +260,65 @@ private static function normalize_base_candidate( $base ) {
 			return $key;
 		}
 
+		// --------------------------
+		// Support auth (WP → Django)
+		// --------------------------
+
+		/**
+		 * Shared secret lookup for Support endpoints.
+		 *
+		 * IMPORTANT
+		 * - Server-side only. Never expose this value to browser JS.
+		 * - We try multiple sources (constant/env/option) to be resilient across installs.
+		 *
+		 * Expected primary source on SiteGround:
+		 * - wp-config.php constant: PPA_SHARED_KEY
+		 *
+		 * @return string
+		 */
+		private static function shared_secret() { // CHANGED:
+			$candidates = array(); // CHANGED:
+
+			// 1) Constants (preferred). // CHANGED:
+			if ( defined( 'PPA_SHARED_KEY' ) ) { $candidates[] = (string) PPA_SHARED_KEY; } // CHANGED:
+			if ( defined( 'PPA_WP_SHARED_SECRET' ) ) { $candidates[] = (string) PPA_WP_SHARED_SECRET; } // CHANGED:
+
+			// 2) Environment variables (best-effort; may be unavailable depending on PHP-FPM config). // CHANGED:
+			$env = getenv( 'PPA_SHARED_KEY' ); // CHANGED:
+			if ( false !== $env && '' !== (string) $env ) { $candidates[] = (string) $env; } // CHANGED:
+			$env = getenv( 'PPA_WP_SHARED_SECRET' ); // CHANGED:
+			if ( false !== $env && '' !== (string) $env ) { $candidates[] = (string) $env; } // CHANGED:
+
+			// 3) Options (legacy/compat). // CHANGED:
+			$opt = (string) get_option( 'ppa_shared_key', '' ); // CHANGED:
+			if ( '' !== trim( $opt ) ) { $candidates[] = $opt; } // CHANGED:
+			$opt = (string) get_option( 'ppa_shared_secret', '' ); // CHANGED:
+			if ( '' !== trim( $opt ) ) { $candidates[] = $opt; } // CHANGED:
+			$opt = (string) get_option( 'ppa_wp_shared_secret', '' ); // CHANGED:
+			if ( '' !== trim( $opt ) ) { $candidates[] = $opt; } // CHANGED:
+
+			foreach ( $candidates as $v ) { // CHANGED:
+				$s = trim( (string) $v ); // CHANGED:
+				if ( '' !== $s ) { return $s; } // CHANGED:
+			} // CHANGED:
+
+			return ''; // CHANGED:
+		} // CHANGED:
+
+		/**
+		 * Ensure we have a shared secret configured for Support endpoints.
+		 *
+		 * @return string
+		 */
+		private static function require_shared_secret_or_403() { // CHANGED:
+			$secret = self::shared_secret(); // CHANGED:
+			if ( '' === $secret ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'missing_shared_secret' ) ), 403 ); // CHANGED:
+			} // CHANGED:
+			return $secret; // CHANGED:
+		} // CHANGED:
+
+
 		private static function require_activation_key_or_403() {
 			$key = self::activation_key();
 			if ( '' === $key ) {
@@ -280,6 +345,16 @@ private static function normalize_base_candidate( $base ) {
 			if ( '' !== $key ) {
 				$headers['X-PPA-Key'] = $key; // CHANGED:
 			}
+
+			// 2026-02-23 • ADD: Support endpoints auth header (server-side only).
+			// When self::$endpoint starts with 'support_', we include X-PPA-Shared-Secret.
+			// This value must come from server-side config (constant/env/option) and must NEVER be exposed to browser JS. // CHANGED:
+			if ( '' !== $view && 0 === strpos( (string) $view, 'support_' ) ) { // CHANGED:
+				$secret = self::shared_secret(); // CHANGED:
+				if ( '' !== $secret ) { // CHANGED:
+					$headers['X-PPA-Shared-Secret'] = $secret; // CHANGED:
+				}
+			} // CHANGED:
 
 			// CHANGED: Helpful for backend logging / routing parity (safe, no secrets).
 			if ( '' !== $view ) {
@@ -1086,6 +1161,254 @@ private static function normalize_base_candidate( $base ) {
 
 			wp_send_json_success( $json, $code );
 		}
+
+		
+		// --------------------------
+		// Support proxies (WP → Django)
+		// --------------------------
+
+		/**
+		 * Support Chat proxy
+		 *
+		 * Route:
+		 * - WP admin-ajax action: ppa_support_chat
+		 * - Django endpoint:      /support/chat/
+		 *
+		 * Auth:
+		 * - X-PPA-Shared-Secret (server-side only)
+		 *
+		 * Payload:
+		 * - Pass through browser JSON, but inject license_key + site_url when available (same helper as other endpoints).
+		 */
+		public static function ajax_support_chat() { // CHANGED:
+			self::$endpoint = 'support_chat'; // CHANGED:
+
+			// Conservative: same capability gate as Composer/Account. // CHANGED:
+			if ( ! current_user_can( 'edit_posts' ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 ); // CHANGED:
+			} // CHANGED:
+
+			self::must_post(); // CHANGED:
+			self::verify_nonce_or_forbid(); // CHANGED:
+
+			// Ensure secret exists (fails fast with 403). // CHANGED:
+			self::require_shared_secret_or_403(); // CHANGED:
+
+						// Build a clean, minimal body for Django.																					// CHANGED:
+			// IMPORTANT: Do NOT forward nonce/site fields from the browser.																			// CHANGED:
+
+			$message = ''; // CHANGED:
+			if ( isset( $_POST['message'] ) ) { $message = (string) wp_unslash( $_POST['message'] ); } // CHANGED:
+			elseif ( isset( $_REQUEST['message'] ) ) { $message = (string) wp_unslash( $_REQUEST['message'] ); } // CHANGED:
+			elseif ( isset( $_POST['text'] ) ) { $message = (string) wp_unslash( $_POST['text'] ); } // CHANGED:
+			elseif ( isset( $_POST['prompt'] ) ) { $message = (string) wp_unslash( $_POST['prompt'] ); } // CHANGED:
+			$message = sanitize_textarea_field( (string) $message ); // CHANGED:
+			$message = trim( (string) $message ); // CHANGED:
+
+			$thread_id = ''; // CHANGED:
+			if ( isset( $_POST['thread_id'] ) ) { $thread_id = (string) wp_unslash( $_POST['thread_id'] ); } // CHANGED:
+			elseif ( isset( $_REQUEST['thread_id'] ) ) { $thread_id = (string) wp_unslash( $_REQUEST['thread_id'] ); } // CHANGED:
+			elseif ( isset( $_POST['thread'] ) ) { $thread_id = (string) wp_unslash( $_POST['thread'] ); } // CHANGED:
+			$thread_id = sanitize_text_field( (string) $thread_id ); // CHANGED:
+			$thread_id = trim( (string) $thread_id ); // CHANGED:
+
+			if ( '' === $message ) { // CHANGED:
+				// Return a friendly, UI-readable error without breaking the AJAX plumbing. // CHANGED:
+				wp_send_json_success( array( 'ok' => false, 'error' => array( 'message' => 'Message is required.' ) ), 200 ); // CHANGED:
+			} // CHANGED:
+
+			$body_arr = array( // CHANGED:
+				'message'  => (string) $message, // CHANGED:
+				'site_url' => (string) self::site_url_for_auth(), // CHANGED:
+			); // CHANGED:
+
+			$key = self::activation_key(); // CHANGED:
+			if ( '' !== $key ) { $body_arr['license_key'] = (string) $key; } // CHANGED:
+			if ( '' !== $thread_id ) { $body_arr['thread_id'] = (string) $thread_id; } // CHANGED:
+
+			$raw = wp_json_encode( $body_arr ); // CHANGED:
+			if ( ! is_string( $raw ) || '' === $raw ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'invalid_payload', 500, array( 'reason' => 'json_encode_failed' ) ), 500 ); // CHANGED:
+			} // CHANGED:
+
+			$base       = self::django_base(); // CHANGED:
+			$django_url = $base . '/support/chat/'; // CHANGED:
+
+			$response = wp_remote_post( $django_url, self::build_args( $raw ) ); // CHANGED:
+
+
+			if ( is_wp_error( $response ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'request_failed', 500, array( 'detail' => $response->get_error_message() ) ), 500 ); // CHANGED:
+			} // CHANGED:
+
+			$code      = (int) wp_remote_retrieve_response_code( $response ); // CHANGED:
+			$resp_body = (string) wp_remote_retrieve_body( $response ); // CHANGED:
+
+			// Normalize Django responses into a stable WP AJAX shape:
+			//   { success: true, data: { reply: "...", thread_id: "...", raw: {...} } }
+			// This prevents UI breakage when Django nests reply under {data:{...}} or returns {ok:true,data:{...}}. // CHANGED:
+			$normalized = array( // CHANGED:
+				'reply'     => '', // CHANGED:
+				'thread_id' => '', // CHANGED:
+				'raw'       => null, // CHANGED:
+			); // CHANGED:
+
+			$json = json_decode( $resp_body, true ); // CHANGED:
+			if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $json ) ) { // CHANGED:
+				// Non-JSON response (HTML, plain text, etc). Return as raw for debugging. // CHANGED:
+				$normalized['raw'] = array( 'raw' => $resp_body ); // CHANGED:
+
+				if ( $code >= 400 ) { // CHANGED:
+					wp_send_json_error( $normalized, $code ); // CHANGED:
+				} // CHANGED:
+				wp_send_json_success( $normalized, $code ); // CHANGED:
+			} // CHANGED:
+
+			// Store full JSON for debugging (safe: shared secret is never returned by Django, and is never sent from JS). // CHANGED:
+			$normalized['raw'] = $json; // CHANGED:
+
+			// 1) Extract reply + thread_id from common shapes. // CHANGED:
+			// Root-level keys. // CHANGED:
+			if ( isset( $json['reply'] ) && is_string( $json['reply'] ) ) { $normalized['reply'] = trim( (string) $json['reply'] ); } // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['assistant_reply'] ) && is_string( $json['assistant_reply'] ) ) { $normalized['reply'] = trim( (string) $json['assistant_reply'] ); } // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['message'] ) && is_string( $json['message'] ) ) { $normalized['reply'] = trim( (string) $json['message'] ); } // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['text'] ) && is_string( $json['text'] ) ) { $normalized['reply'] = trim( (string) $json['text'] ); } // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['agent_message'] ) && is_string( $json['agent_message'] ) ) { $normalized['reply'] = trim( (string) $json['agent_message'] ); } // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['assistant_message'] ) && is_string( $json['assistant_message'] ) ) { $normalized['reply'] = trim( (string) $json['assistant_message'] ); } // CHANGED:
+
+			if ( isset( $json['thread_id'] ) && is_string( $json['thread_id'] ) ) { $normalized['thread_id'] = trim( (string) $json['thread_id'] ); } // CHANGED:
+			if ( '' === $normalized['thread_id'] && isset( $json['thread'] ) && is_string( $json['thread'] ) ) { $normalized['thread_id'] = trim( (string) $json['thread'] ); } // CHANGED:
+
+			// Meta fallback (sometimes thread id is provided under meta). // CHANGED:
+			if ( '' === $normalized['thread_id'] && isset( $json['meta'] ) && is_array( $json['meta'] ) ) { // CHANGED:
+				$meta = $json['meta']; // CHANGED:
+				if ( isset( $meta['thread_id'] ) && is_string( $meta['thread_id'] ) ) { $normalized['thread_id'] = trim( (string) $meta['thread_id'] ); } // CHANGED:
+				if ( '' === $normalized['thread_id'] && isset( $meta['thread'] ) && is_string( $meta['thread'] ) ) { $normalized['thread_id'] = trim( (string) $meta['thread'] ); } // CHANGED:
+			} // CHANGED:
+
+			// Nested containers: data/result. // CHANGED:
+			$container = null; // CHANGED:
+			if ( isset( $json['data'] ) && is_array( $json['data'] ) ) { $container = $json['data']; } // CHANGED:
+			elseif ( isset( $json['result'] ) && is_array( $json['result'] ) ) { $container = $json['result']; } // CHANGED:
+			elseif ( isset( $json['payload'] ) && is_array( $json['payload'] ) ) { $container = $json['payload']; } // CHANGED:
+
+			if ( is_array( $container ) ) { // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['reply'] ) && is_string( $container['reply'] ) ) { $normalized['reply'] = trim( (string) $container['reply'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['assistant_reply'] ) && is_string( $container['assistant_reply'] ) ) { $normalized['reply'] = trim( (string) $container['assistant_reply'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['message'] ) && is_string( $container['message'] ) ) { $normalized['reply'] = trim( (string) $container['message'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['text'] ) && is_string( $container['text'] ) ) { $normalized['reply'] = trim( (string) $container['text'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['agent_message'] ) && is_string( $container['agent_message'] ) ) { $normalized['reply'] = trim( (string) $container['agent_message'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['assistant_message'] ) && is_string( $container['assistant_message'] ) ) { $normalized['reply'] = trim( (string) $container['assistant_message'] ); } // CHANGED:
+
+				if ( '' === $normalized['thread_id'] && isset( $container['thread_id'] ) && is_string( $container['thread_id'] ) ) { $normalized['thread_id'] = trim( (string) $container['thread_id'] ); } // CHANGED:
+				if ( '' === $normalized['thread_id'] && isset( $container['thread'] ) && is_string( $container['thread'] ) ) { $normalized['thread_id'] = trim( (string) $container['thread'] ); } // CHANGED:
+
+				// Messages list fallback (common in thread-based support chat). // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $container['messages'] ) && is_array( $container['messages'] ) ) { // CHANGED:
+					$messages = $container['messages']; // CHANGED:
+					for ( $i = count( $messages ) - 1; $i >= 0; $i-- ) { // CHANGED:
+						$msg = $messages[ $i ]; // CHANGED:
+						if ( ! is_array( $msg ) ) { continue; } // CHANGED:
+						$role = isset( $msg['role'] ) ? (string) $msg['role'] : ''; // CHANGED:
+						if ( '' !== $role && 'assistant' !== $role && 'support' !== $role ) { continue; } // CHANGED:
+						if ( isset( $msg['content'] ) && is_string( $msg['content'] ) ) { // CHANGED:
+							$normalized['reply'] = trim( (string) $msg['content'] ); // CHANGED:
+							break; // CHANGED:
+						} // CHANGED:
+						if ( isset( $msg['text'] ) && is_string( $msg['text'] ) ) { // CHANGED:
+							$normalized['reply'] = trim( (string) $msg['text'] ); // CHANGED:
+							break; // CHANGED:
+						} // CHANGED:
+					} // CHANGED:
+				} // CHANGED:
+			} // CHANGED:
+
+			// Fallback: sometimes reply is nested one more level (data.output.reply, etc). // CHANGED:
+			if ( '' === $normalized['reply'] && isset( $json['data'] ) && is_array( $json['data'] ) && isset( $json['data']['output'] ) && is_array( $json['data']['output'] ) ) { // CHANGED:
+				$out = $json['data']['output']; // CHANGED:
+				if ( isset( $out['reply'] ) && is_string( $out['reply'] ) ) { $normalized['reply'] = trim( (string) $out['reply'] ); } // CHANGED:
+				if ( '' === $normalized['reply'] && isset( $out['text'] ) && is_string( $out['text'] ) ) { $normalized['reply'] = trim( (string) $out['text'] ); } // CHANGED:
+			} // CHANGED:
+
+			if ( $code >= 400 ) { // CHANGED:
+				wp_send_json_error( $normalized, $code ); // CHANGED:
+			} // CHANGED:
+
+			wp_send_json_success( $normalized, $code ); // CHANGED:
+		} // CHANGED:
+
+		/**
+		 * Support Account Status proxy
+		 *
+		 * Route:
+		 * - WP admin-ajax action: ppa_support_account_status
+		 * - Django endpoint:      /postpress-ai/support/account_status/
+		 *
+		 * Auth:
+		 * - X-PPA-Shared-Secret (server-side only)
+		 *
+		 * Payload:
+		 * - Always includes stored license_key + site_url.
+		 */
+		public static function ajax_support_account_status() { // CHANGED:
+			self::$endpoint = 'support_account_status'; // CHANGED:
+
+			if ( ! current_user_can( 'edit_posts' ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'forbidden', 403, array( 'reason' => 'capability_missing' ) ), 403 ); // CHANGED:
+			} // CHANGED:
+
+			self::must_post_or_get(); // CHANGED:
+			self::verify_nonce_or_forbid(); // CHANGED:
+
+			// Ensure secret exists (fails fast with 403). // CHANGED:
+			self::require_shared_secret_or_403(); // CHANGED:
+
+			$license_key = self::require_activation_key_or_403(); // CHANGED:
+			$site_url    = (string) self::site_url_for_auth(); // CHANGED:
+
+			$base       = self::django_base(); // CHANGED:
+			$django_url = $base . '/support/account_status/'; // CHANGED:
+
+			$body_arr = array( // CHANGED:
+				'license_key' => (string) $license_key, // CHANGED:
+				'site_url'    => (string) $site_url,    // CHANGED:
+			); // CHANGED:
+
+			// Optional: allow a minimal screen/context marker from the browser (safe). // CHANGED:
+			if ( isset( $_REQUEST['screen'] ) ) { // CHANGED:
+				$screen = trim( (string) wp_unslash( $_REQUEST['screen'] ) ); // CHANGED:
+				if ( '' !== $screen ) { $body_arr['screen'] = sanitize_text_field( $screen ); } // CHANGED:
+			} // CHANGED:
+
+			$raw = wp_json_encode( $body_arr ); // CHANGED:
+			if ( ! is_string( $raw ) || '' === $raw ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'invalid_payload', 500, array( 'reason' => 'json_encode_failed' ) ), 500 ); // CHANGED:
+			} // CHANGED:
+
+			$response = wp_remote_post( $django_url, self::build_args( $raw ) ); // CHANGED:
+
+			if ( is_wp_error( $response ) ) { // CHANGED:
+				wp_send_json_error( self::error_payload( 'request_failed', 500, array( 'detail' => $response->get_error_message() ) ), 500 ); // CHANGED:
+			} // CHANGED:
+
+			$code      = (int) wp_remote_retrieve_response_code( $response ); // CHANGED:
+			$resp_body = (string) wp_remote_retrieve_body( $response ); // CHANGED:
+
+			$json = json_decode( $resp_body, true ); // CHANGED:
+			if ( json_last_error() !== JSON_ERROR_NONE ) { // CHANGED:
+				if ( $code >= 400 ) { // CHANGED:
+					wp_send_json_error( array( 'raw' => $resp_body ), $code ); // CHANGED:
+				} // CHANGED:
+				wp_send_json_success( array( 'raw' => $resp_body ), $code ); // CHANGED:
+			} // CHANGED:
+
+			if ( $code >= 400 ) { // CHANGED:
+				wp_send_json_error( $json, $code ); // CHANGED:
+			} // CHANGED:
+
+			wp_send_json_success( $json, $code ); // CHANGED:
+		} // CHANGED:
+
 
 		public static function ajax_account_status() { // CHANGED:
 			self::$endpoint = 'account_status'; // CHANGED:
