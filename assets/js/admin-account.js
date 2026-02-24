@@ -834,8 +834,10 @@ PostPress AI — Admin Account Screen (Isolated)
     var log = $('ppa-support-chat-log');
     if (log && !log.__ppaSeeded) {
       log.__ppaSeeded = true;
-      appendChatLine('agent', 'Hi, Yukia here. What’s going on?');
+      appendChatLine('agent', 'Hi, I’m Yukia — PostPress AI support. What’s going on?');
       chatState.hasGreeting = true;
+      // New chat session log seeded: prevent stale pending state from a past page load.
+      clearPending();
     }
   }
 
@@ -860,6 +862,7 @@ PostPress AI — Admin Account Screen (Isolated)
       '#ppa-support-chat-modal .ppa-chatline--system .ppa-chatline__bubble{background:transparent;color:#d9d9d9;border:1px dashed rgba(255,255,255,.20);opacity:.95;}' +
       '#ppa-support-chat-modal .ppa-chatline__meta{font-size:11px;opacity:.7;margin-top:4px;}' +
       '#ppa-support-chat-modal .ppa-chatline__wrap{display:flex;flex-direction:column;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__ctas{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}#ppa-support-chat-modal .ppa-support-chat__ctas .button{height:auto;line-height:1.1;padding:8px 10px;}' +
       '#ppa-support-chat-modal .ppa-chatbusy{opacity:.6;pointer-events:none;}' +
       '@media (max-width:640px){#ppa-support-chat-modal .ppa-support-chat__panel{right:10px;left:10px;bottom:10px;width:auto;}}';
 
@@ -873,8 +876,79 @@ PostPress AI — Admin Account Screen (Isolated)
     open: false,
     busy: false,
     threadId: null,
-    hasGreeting: false
+    hasGreeting: false,
+    pending: null
   };
+
+  // ----------------------------
+  // Support Chat memory (30 min) + billing flow
+  // ----------------------------
+  var CHAT_MEM_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  var CHAT_MEM_KEY = 'ppa_support_chat_state_v1::' + (window.location && window.location.host ? window.location.host : 'site');
+
+  function nowMs() { return Date.now ? Date.now() : (new Date()).getTime(); }
+
+  function loadChatMemory() {
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem(CHAT_MEM_KEY) : null;
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || typeof obj !== 'object') return null;
+
+      // Expire pending state if too old
+      if (obj.pending && obj.pending.asked_at) {
+        var age = nowMs() - Number(obj.pending.asked_at);
+        if (!isFinite(age) || age > CHAT_MEM_TTL_MS) obj.pending = null;
+      }
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveChatMemory() {
+    try {
+      if (!window.localStorage) return;
+      var obj = {
+        threadId: chatState.threadId || null,
+        pending: chatState.pending || null
+      };
+      window.localStorage.setItem(CHAT_MEM_KEY, JSON.stringify(obj));
+    } catch (e) {}
+  }
+
+  function clearPending() {
+    chatState.pending = null;
+    saveChatMemory();
+  }
+
+  function setPending(kind) {
+    chatState.pending = { kind: String(kind || ''), asked_at: nowMs() };
+    saveChatMemory();
+  }
+
+  function pendingActive() {
+    if (!chatState.pending || !chatState.pending.asked_at) return false;
+    var age = nowMs() - Number(chatState.pending.asked_at);
+    return isFinite(age) && age <= CHAT_MEM_TTL_MS;
+  }
+
+  function looksLikeBilling(msg) {
+    var m = toSafeStr(msg).trim().toLowerCase();
+    if (!m) return false;
+    return /(^|\b)(renew|upgrade|billing|invoice|subscription|subscribe|plan|portal)(\b|$)/i.test(m);
+  }
+
+  function yukiaAskRenewClarifier() {
+    // C2
+    return "Got you. Let’s get you unstuck.\n\nQuick question: are you renewing because a payment failed, or are you just updating your plan?\n\nNext step: reply with “payment failed” or “updating.”";
+  }
+
+  function yukiaOfferUpgradeCta() {
+    return "Perfect — thanks.\n\nClick the button below to open Upgrade Plan.\n\nNext step: did the upgrade popup open?";
+  }
+
+
 
   function showSupportChat(open) {
     var modal = $('ppa-support-chat-modal');
@@ -912,13 +986,12 @@ PostPress AI — Admin Account Screen (Isolated)
     if (input) input.disabled = chatState.busy;
   }
 
-  // CHANGED: Agent output sanitizer (no Markdown tokens; avoid repeated "Yukia here" intro)
   function stripMarkdownLite(s) {
     var t = toSafeStr(s);
     if (!t) return '';
-    // Remove common Markdown formatting markers but keep the words.
+    // Remove common markdown tokens (bold/italics/inline code). Keep line breaks.
     t = t.replace(/\*\*/g, '').replace(/__/g, '').replace(/`/g, '');
-    // Convert markdown links: [text](url) -> text (url)
+    // Convert [text](url) into "text (url)" so it stays readable in plain text UI.
     t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
     return t;
   }
@@ -926,8 +999,8 @@ PostPress AI — Admin Account Screen (Isolated)
   function stripRedundantAgentIntro(s) {
     var t = toSafeStr(s).trim();
     if (!t) return '';
+    // If we already greeted as Yukia, don’t keep re-introducing in every reply.
     if (chatState && chatState.hasGreeting) {
-      // If we've already greeted, don’t re-introduce on every reply.
       t = t.replace(/^yukia\s+here\s*(?:—|-|:|,)\s*/i, '');
       t = t.replace(/^yukia\s+here\.\s*/i, '');
     }
@@ -940,7 +1013,46 @@ PostPress AI — Admin Account Screen (Isolated)
     return t;
   }
 
-  function appendChatLine(kind, text) {
+  function normalizeChatActions(actions) {
+    var out = [];
+    if (!Array.isArray(actions)) return out;
+
+    for (var i = 0; i < actions.length; i++) {
+      var a = actions[i] || {};
+      var id = toSafeStr(a.id).trim();
+      var label = toSafeStr(a.label).trim();
+      var kind = toSafeStr(a.kind).trim();
+
+      // Allowlist: only show Upgrade Plan CTA for now (per your rules).
+      if (id === 'open_upgrade_plan' || id === 'go_to_upgrade_plan') {
+        out.push({ id: 'open_upgrade_plan', label: label || 'Open Upgrade Plan', kind: 'cta', intent: 'upgrade' });
+      }
+      // Ignore everything else until we wire more actions safely.
+    }
+    return out;
+  }
+
+  function renderChatActions(wrapEl, actions) {
+    var arr = normalizeChatActions(actions);
+    if (!wrapEl || !arr.length) return;
+
+    var row = document.createElement('div');
+    row.className = 'ppa-support-chat__ctas';
+
+    for (var i = 0; i < arr.length; i++) {
+      var a = arr[i];
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'button button-primary ppa-support-chat__cta';
+      btn.setAttribute('data-ppa-chat-intent', a.intent || '');
+      btn.textContent = a.label || 'Open';
+      row.appendChild(btn);
+    }
+
+    wrapEl.appendChild(row);
+  }
+
+  function appendChatLine(kind, text, actions) {
     var log = $('ppa-support-chat-log');
     if (!log) return;
 
@@ -953,13 +1065,16 @@ PostPress AI — Admin Account Screen (Isolated)
 
     var bubble = document.createElement('div');
     bubble.className = 'ppa-chatline__bubble';
+
     var out = toSafeStr(text) || '—';
-
     if (k === 'agent') out = sanitizeAgentText(out);
-
     bubble.textContent = out || '—';
 
     wrap.appendChild(bubble);
+
+    // Agent CTA buttons (only if provided and allowlisted)
+    if (k === 'agent') renderChatActions(wrap, actions);
+
     line.appendChild(wrap);
     log.appendChild(line);
 
@@ -998,6 +1113,25 @@ PostPress AI — Admin Account Screen (Isolated)
     v = toSafeStr(v).trim();
     return v ? v : null;
   }
+
+  function extractSuggestedActions(core) {
+    // Admin-ajax payload shape: { reply, thread_id, raw: { ok, data: { suggested_actions: [...] } } }
+    try {
+      if (!core || typeof core !== 'object') return [];
+      if (Array.isArray(core.suggested_actions)) return core.suggested_actions;
+      if (core.raw && typeof core.raw === 'object') {
+        if (core.raw.data && typeof core.raw.data === 'object' && Array.isArray(core.raw.data.suggested_actions)) {
+          return core.raw.data.suggested_actions;
+        }
+        // Some envelopes may nest deeper: raw.data.data.suggested_actions
+        if (core.raw.data && core.raw.data.data && Array.isArray(core.raw.data.data.suggested_actions)) {
+          return core.raw.data.data.suggested_actions;
+        }
+      }
+    } catch (e) {}
+    return [];
+  }
+
 
   function extractChatError(payload) {
     var p = payload && typeof payload === 'object' ? payload : null;
@@ -1049,7 +1183,10 @@ PostPress AI — Admin Account Screen (Isolated)
 
     // Thread tracking
     var tid = extractChatThreadId(core);
-    if (tid) chatState.threadId = tid;
+    if (tid) {
+      chatState.threadId = tid;
+      saveChatMemory();
+    }
 
     var reply = extractChatReply(core);
     if (!reply) {
@@ -1058,11 +1195,60 @@ PostPress AI — Admin Account Screen (Isolated)
       reply = extractChatReply(core2);
     }
 
-    if (reply) appendChatLine('agent', reply);
+    if (reply) {
+      var acts = extractSuggestedActions(core);
+      appendChatLine('agent', reply, acts);
+    }
     else appendChatLine('system', 'Sent. (No reply payload returned.)');
 
     setChatBusy(false);
   }
+  function hrefForChatIntent(intent) {
+    var it = toSafeStr(intent).trim().toLowerCase();
+    if (!it) return '';
+    if (it === 'upgrade') {
+      var up = $('ppa-account-upgrade');
+      return getHref(up);
+    }
+    if (it === 'buy_tokens') {
+      var bt = $('ppa-account-buy-tokens');
+      return getHref(bt);
+    }
+    if (it === 'billing_portal') {
+      var bp = $('ppa-account-billing-portal');
+      return getHref(bp);
+    }
+    return '';
+  }
+
+  function handleSupportChatUserSend(rawVal) {
+    var val = toSafeStr(rawVal).trim();
+    if (!val) return;
+
+    // User line
+    appendChatLine('user', val);
+
+    // If Yukia asked a clarifying question and we're waiting on the answer:
+    if (pendingActive()) {
+      clearPending();
+      appendChatLine('agent', yukiaOfferUpgradeCta(), [
+        { id: 'open_upgrade_plan', label: 'Open Upgrade Plan', kind: 'cta', intent: 'upgrade' }
+      ]);
+      return;
+    }
+
+    // Billing / plan flow: ask ONE clarifying question first (no CTA yet).
+    if (looksLikeBilling(val)) {
+      appendChatLine('agent', yukiaAskRenewClarifier());
+      setPending('billing_renew_clarify');
+      return;
+    }
+
+    // Default: send to server router
+    sendSupportChatMessage(val);
+  }
+
+
 
   function bindSupportChatEventsOnce() {
     if (document.__ppaSupportChatBound) return;
@@ -1088,14 +1274,24 @@ PostPress AI — Admin Account Screen (Isolated)
         return;
       }
 
+      // CTA button inside chat bubble
+      var ctaBtn = (t.closest && t.closest('.ppa-support-chat__cta')) ? t.closest('.ppa-support-chat__cta') : null;
+      if (ctaBtn) {
+        try { e.preventDefault(); } catch (errCta) {}
+        var intent = toSafeStr(ctaBtn.getAttribute('data-ppa-chat-intent')).trim();
+        if (intent) {
+          openIntentPopup(intent, hrefForChatIntent(intent));
+        }
+        return;
+      }
+
       // Send button
       if (t.closest && t.closest('#ppa-support-chat-send')) {
         try { e.preventDefault(); } catch (err3) {}
         var input = $('ppa-support-chat-input');
         var val = input ? input.value : '';
         if (input) input.value = '';
-        appendChatLine('user', val);
-        sendSupportChatMessage(val);
+        handleSupportChatUserSend(val);
         return;
       }
     }, true);
@@ -1117,8 +1313,7 @@ PostPress AI — Admin Account Screen (Isolated)
 
         var val = toSafeStr(input.value);
         input.value = '';
-        appendChatLine('user', val);
-        sendSupportChatMessage(val);
+        handleSupportChatUserSend(val);
       }
     }, true);
   }
@@ -1127,6 +1322,11 @@ PostPress AI — Admin Account Screen (Isolated)
   // Bind
   // ----------------------------
   function bind() {
+    // Restore short-lived chat state (thread id / pending question) for up to 30 minutes.
+    var mem = loadChatMemory();
+    if (mem && mem.threadId) chatState.threadId = mem.threadId;
+    if (mem && mem.pending) chatState.pending = mem.pending;
+
     bindDelegatedPopupsOnce();
     bindSupportChatEventsOnce();
     ensureSupportChatUI();
