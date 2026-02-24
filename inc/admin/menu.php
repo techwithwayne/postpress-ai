@@ -10,6 +10,7 @@
  * 2026-02-23: ADD: Videos submenu + renderer with dummy playlists/cards (no behavior change elsewhere).     // CHANGED:
  * 2026-02-23: FIX: Videos page now uses YouTube Unlisted IDs + real thumbnails + empty state.         // CHANGED:
  * 2026-02-24: CHANGE: Videos page is now read-only + playlist-fed via YouTube playlist feeds (no API key). // CHANGED:
+ * 2026-02-24: FIX: Add refresh + clearer empty-feed handling (YouTube may omit unlisted/private).   // CHANGED:
  * 2026-02-24: FIX: Robust YouTube playlist parsing (yt:videoId tags + XML fallback) so cards reliably populate. // CHANGED:
  * 2026-02-24: FIX: Cache-bust playlist transient keys (v2 prefix) so fixes apply immediately. // CHANGED:
  *
@@ -486,6 +487,21 @@ if ( ! function_exists( 'ppa_videos_admin_url' ) ) {                            
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
+
+if ( ! function_exists( 'ppa_videos_playlist_url' ) ) {                                                     // CHANGED:
+	/**
+	 * Build the public playlist URL for a given playlist id.                                                   // CHANGED:
+	 * NOTE: YouTube may still restrict items based on privacy settings.                                        // CHANGED:
+	 */                                                                                                        // CHANGED:
+	function ppa_videos_playlist_url( $playlist_id ) {                                                        // CHANGED:
+		$playlist_id = trim( (string) $playlist_id );                                                          // CHANGED:
+		if ( $playlist_id === '' ) {                                                                           // CHANGED:
+			return '';                                                                                           // CHANGED:
+		}                                                                                                      // CHANGED:
+		return 'https://www.youtube.com/playlist?list=' . rawurlencode( $playlist_id );                        // CHANGED:
+	}                                                                                                         // CHANGED:
+}                                                                                                            // CHANGED:
+
 if ( ! function_exists( 'ppa_videos_fetch_playlist_videos' ) ) {                                              // CHANGED:
 	/**
 	 * Fetch + parse a YouTube playlist feed into a small, UI-ready array.
@@ -494,7 +510,7 @@ if ( ! function_exists( 'ppa_videos_fetch_playlist_videos' ) ) {                
 	 * @param int    $max_items   Max entries to return.
 	 * @return array {items: array, error: string, cached: bool}
 	 */
-	function ppa_videos_fetch_playlist_videos( $playlist_id, $max_items = 30 ) {                                // CHANGED:
+	function ppa_videos_fetch_playlist_videos( $playlist_id, $max_items = 30, $force_refresh = false ) {                                // CHANGED:
 		$playlist_id = trim( (string) $playlist_id );                                                          // CHANGED:
 		$max_items   = (int) $max_items;                                                                       // CHANGED:
 		if ( $max_items < 1 ) { $max_items = 30; }                                                             // CHANGED:
@@ -504,7 +520,10 @@ if ( ! function_exists( 'ppa_videos_fetch_playlist_videos' ) ) {                
 			return array( 'items' => array(), 'error' => 'Missing playlist id.', 'cached' => false );            // CHANGED:
 		}                                                                                                      // CHANGED:
 
-		$cache_key = 'ppa_videos_feed_v2_' . md5( $playlist_id . '|' . (string) $max_items );                    // CHANGED:                    // CHANGED:
+		$cache_key = 'ppa_videos_feed_v3_' . md5( $playlist_id . '|' . (string) $max_items );                    // CHANGED:
+		if ( $force_refresh ) {                                                                             // CHANGED:
+			delete_transient( $cache_key );                                                                     // CHANGED:
+		}
 		$cached    = get_transient( $cache_key );                                                              // CHANGED:
 		if ( is_array( $cached ) && isset( $cached['items'] ) && is_array( $cached['items'] ) ) {              // CHANGED:
 			$cached['cached'] = true;                                                                            // CHANGED:
@@ -699,8 +718,10 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 			$active = 'start-here';                                                                              // CHANGED:
 		}                                                                                                       // CHANGED:
 
-		$active_pl_id = isset( $playlist_ids[ $active ] ) ? (string) $playlist_ids[ $active ] : '';           // CHANGED:
-		$feed_data    = ppa_videos_fetch_playlist_videos( $active_pl_id, 40 );                                   // CHANGED:
+		$active_pl_id  = isset( $playlist_ids[ $active ] ) ? (string) $playlist_ids[ $active ] : '';          // CHANGED:
+		$do_refresh   = isset( $_GET['ppa_videos_refresh'] ) && '1' === (string) $_GET['ppa_videos_refresh'];    // CHANGED:
+		$feed_data    = ppa_videos_fetch_playlist_videos( $active_pl_id, 40, $do_refresh );                      // CHANGED:
+		$playlist_url = ppa_videos_playlist_url( $active_pl_id );                                               // CHANGED:
 		$feed_error   = isset( $feed_data['error'] ) ? (string) $feed_data['error'] : '';                       // CHANGED:
 		$items        = isset( $feed_data['items'] ) && is_array( $feed_data['items'] ) ? $feed_data['items'] : array(); // CHANGED:
 		$is_cached    = ! empty( $feed_data['cached'] );                                                        // CHANGED:
@@ -747,6 +768,14 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 						<p class="ppa-videos-grid-sub">
 							<?php echo esc_html__( 'These videos are pulled from the official playlist. No manual updates needed.', 'postpress-ai' ); ?>
 						</p>
+
+						<div class="ppa-videos-refresh-row"> <!-- CHANGED: -->
+							<a class="button button-secondary ppa-videos-refresh" href="<?php echo esc_url( add_query_arg( array( 'page' => 'postpress-ai-videos', 'playlist' => $active, 'ppa_videos_refresh' => '1' ), admin_url( 'admin.php' ) ) ); ?>"><?php echo esc_html__( 'Refresh', 'postpress-ai' ); ?></a> <!-- CHANGED: -->
+							<?php if ( $playlist_url !== '' ) : ?> <!-- CHANGED: -->
+								<a class="button button-link ppa-videos-open" href="<?php echo esc_url( $playlist_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html__( 'Open playlist on YouTube', 'postpress-ai' ); ?></a> <!-- CHANGED: -->
+							<?php endif; ?> <!-- CHANGED: -->
+						</div> <!-- CHANGED: -->
+
 					</header>
 
 					<div class="ppa-videos-cards">
@@ -757,7 +786,7 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 									<span class="ppa-video-dur">—</span>
 								</div>
 								<div class="ppa-video-meta">
-									<div class="ppa-video-title"><?php echo esc_html__( 'This playlist has no videos (yet).', 'postpress-ai' ); ?></div>
+									<div class="ppa-video-title"><?php echo esc_html__( 'YouTube returned no videos for this playlist feed.', 'postpress-ai' ); ?></div>
 									<div class="ppa-video-row">
 										<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>
 										<span class="button ppa-video-watch" aria-disabled="true"><?php echo esc_html__( 'Coming soon', 'postpress-ai' ); ?></span>
@@ -802,7 +831,7 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 				</section>
 			</div>
 
-			<p class="ppa-videos-tip"><?php echo esc_html__( 'Tip: If you don’t see a new upload right away, refresh in a bit — this page caches to stay fast.', 'postpress-ai' ); ?></p>
+			<p class="ppa-videos-tip"><?php echo esc_html__( 'Tip: If a playlist is Unlisted/Private, YouTube may not include videos in the feed. Try making the playlist Public, then click Refresh.', 'postpress-ai' ); ?></p>
 		</div>
 		<?php
 	}                                                                                                            // CHANGED:
