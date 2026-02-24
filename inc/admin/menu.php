@@ -9,6 +9,9 @@
  * 2026-01-21: CLEAN: Remove success/noise logs; log only on failures.                                          // CHANGED:
  * 2026-02-23: ADD: Videos submenu + renderer with dummy playlists/cards (no behavior change elsewhere).     // CHANGED:
  * 2026-02-23: FIX: Videos page now uses YouTube Unlisted IDs + real thumbnails + empty state.         // CHANGED:
+ * 2026-02-24: CHANGE: Videos page is now read-only + playlist-fed via YouTube playlist feeds (no API key). // CHANGED:
+ * 2026-02-24: FIX: Robust YouTube playlist parsing (yt:videoId tags + XML fallback) so cards reliably populate. // CHANGED:
+ * 2026-02-24: FIX: Cache-bust playlist transient keys (v2 prefix) so fixes apply immediately. // CHANGED:
  *
  * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
  * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
@@ -353,17 +356,14 @@ if ( ! function_exists( 'ppa_render_account' ) ) {                              
 /**
  * Videos renderer (submenu).
  *
- * IMPORTANT (WHY THIS FIX EXISTS):
- * - The WP admin header outputs HTML BEFORE this page callback runs.
- * - If we try to wp_safe_redirect() inside the callback after a POST, headers are already sent.
- * - Result: "blank page" (admin chrome renders, content area is empty).
+ * v2 (READ-ONLY, PLAYLIST-FED):                                                                          // CHANGED:
+ * - No "Add Video" form. No option storage. No admin-post add/delete handlers.                           // CHANGED:
+ * - Videos are pulled from YouTube playlist feeds (no API key).                                          // CHANGED:
+ * - Each left-rail category maps to a playlist_id and renders cards from the Atom feed.                  // CHANGED:
+ * - Cached via transient per playlist to keep the page fast and avoid rate-limiting.                     // CHANGED:
  *
- * FIX:
- * - Handle Add/Delete via admin-post.php actions (runs before output), then redirect back safely.          // CHANGED:
- * - Store the video list in a WP option so Wayne can manage videos in the UI (no code edits).            // CHANGED:
- *
- * Storage option:
- * - ppa_admin_videos  (array of {uuid,title,dur,pl,yt,fav,created})
+ * Feed format (no key):
+ *   https://www.youtube.com/feeds/videos.xml?playlist_id=PLAYLIST_ID                                     // CHANGED:
  */
 if ( ! function_exists( 'ppa_videos_get_playlists' ) ) {                                                     // CHANGED:
 	function ppa_videos_get_playlists() {                                                                    // CHANGED:
@@ -377,17 +377,24 @@ if ( ! function_exists( 'ppa_videos_get_playlists' ) ) {                        
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
-if ( ! function_exists( 'ppa_videos_opt_key' ) ) {                                                           // CHANGED:
-	function ppa_videos_opt_key() {                                                                          // CHANGED:
-		return 'ppa_admin_videos';                                                                            // CHANGED:
-	}                                                                                                         // CHANGED:
-}                                                                                                             // CHANGED:
-
-if ( ! function_exists( 'ppa_videos_get_stored' ) ) {                                                        // CHANGED:
-	function ppa_videos_get_stored() {                                                                       // CHANGED:
-		$opt_key = ppa_videos_opt_key();                                                                      // CHANGED:
-		$stored  = get_option( $opt_key, array() );                                                           // CHANGED:
-		return is_array( $stored ) ? $stored : array();                                                       // CHANGED:
+if ( ! function_exists( 'ppa_videos_get_playlist_ids' ) ) {                                                   // CHANGED:
+	/**
+	 * Map playlist keys -> YouTube playlist IDs (Wayne-managed in YouTube).                                 // CHANGED:
+	 */                                                                                                       // CHANGED:
+	function ppa_videos_get_playlist_ids() {                                                                   // CHANGED:
+		$ids = array(                                                                                           // CHANGED:
+			'start-here'        => 'PLcsv-jPYfbsUztarZkce_uZZx9zge2UEs',                                        // CHANGED:
+			'composer'          => 'PLcsv-jPYfbsUNU5BP1WO3BViHQ8qOmWza',                                        // CHANGED:
+			'license-account'   => 'PLcsv-jPYfbsXFpn43vsvc8j314-kozxok',                                        // CHANGED:
+			'troubleshooting'   => 'PLcsv-jPYfbsXg4s-Gl1Mf-_U1656uuseM',                                        // CHANGED:
+			'whats-new'         => 'PLcsv-jPYfbsVIdu6DAjgmJm7-jZ5kytHt',                                        // CHANGED:
+		);                                                                                                      // CHANGED:
+		/**
+		 * Filter: allow overrides without editing core files.
+		 *
+		 * @param array $ids key => playlist_id
+		 */
+		return apply_filters( 'ppa_videos_playlist_ids', $ids );                                             // CHANGED:
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
@@ -460,12 +467,12 @@ if ( ! function_exists( 'ppa_videos_normalize_yt_id' ) ) {                      
 			}                                                                                                  // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		// Final fallback: pick an 11-char token that looks like a video ID.                                    // CHANGED:
+		// Final fallback: pick an 11-char token that looks like a video ID.                               // CHANGED:
 		if ( preg_match( '/\b([A-Za-z0-9_-]{11})\b/', $raw, $m ) ) {                                       // CHANGED:
-			return (string) $m[1];                                                                             // CHANGED:
+			return (string) $m[1];                                                                            // CHANGED:
 		}                                                                                                     // CHANGED:
 
-		return '';                                                                                            // CHANGED:
+		return '';                                                                                             // CHANGED:
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
@@ -479,103 +486,198 @@ if ( ! function_exists( 'ppa_videos_admin_url' ) ) {                            
 	}                                                                                                         // CHANGED:
 }                                                                                                             // CHANGED:
 
-/**
- * admin-post.php handler: Add video                                                                           // CHANGED:
- */
-if ( ! function_exists( 'ppa_videos_adminpost_add' ) ) {                                                      // CHANGED:
-	function ppa_videos_adminpost_add() {                                                                     // CHANGED:
-		if ( ! current_user_can( 'manage_options' ) ) {                                                        // CHANGED:
-			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );          // CHANGED:
+if ( ! function_exists( 'ppa_videos_fetch_playlist_videos' ) ) {                                              // CHANGED:
+	/**
+	 * Fetch + parse a YouTube playlist feed into a small, UI-ready array.
+	 *
+	 * @param string $playlist_id YouTube playlist id (PL...).
+	 * @param int    $max_items   Max entries to return.
+	 * @return array {items: array, error: string, cached: bool}
+	 */
+	function ppa_videos_fetch_playlist_videos( $playlist_id, $max_items = 30 ) {                                // CHANGED:
+		$playlist_id = trim( (string) $playlist_id );                                                          // CHANGED:
+		$max_items   = (int) $max_items;                                                                       // CHANGED:
+		if ( $max_items < 1 ) { $max_items = 30; }                                                             // CHANGED:
+		if ( $max_items > 80 ) { $max_items = 80; }                                                            // CHANGED:
+
+		if ( $playlist_id === '' ) {                                                                          // CHANGED:
+			return array( 'items' => array(), 'error' => 'Missing playlist id.', 'cached' => false );            // CHANGED:
 		}                                                                                                      // CHANGED:
 
-		check_admin_referer( 'ppa_videos_manage', 'ppa_videos_nonce' );                                        // CHANGED:
+		$cache_key = 'ppa_videos_feed_v2_' . md5( $playlist_id . '|' . (string) $max_items );                    // CHANGED:                    // CHANGED:
+		$cached    = get_transient( $cache_key );                                                              // CHANGED:
+		if ( is_array( $cached ) && isset( $cached['items'] ) && is_array( $cached['items'] ) ) {              // CHANGED:
+			$cached['cached'] = true;                                                                            // CHANGED:
+			return $cached;                                                                                      // CHANGED:
+		}                                                                                                      // CHANGED:
 
-		$playlists = ppa_videos_get_playlists();                                                               // CHANGED:
+		// Load WP feed tools on-demand (admin safe).                                                         // CHANGED:
+		if ( ! function_exists( 'fetch_feed' ) ) {                                                             // CHANGED:
+			require_once ABSPATH . WPINC . '/feed.php';                                                         // CHANGED:
+		}                                                                                                      // CHANGED:
 
-		$title_raw = isset( $_POST['ppa_video_title'] ) ? wp_unslash( (string) $_POST['ppa_video_title'] ) : ''; // CHANGED:
-		$yt_raw    = isset( $_POST['ppa_video_yt'] ) ? wp_unslash( (string) $_POST['ppa_video_yt'] ) : '';       // CHANGED:
-		$pl_raw    = isset( $_POST['ppa_video_pl'] ) ? wp_unslash( (string) $_POST['ppa_video_pl'] ) : '';       // CHANGED:
-		$dur_raw   = isset( $_POST['ppa_video_dur'] ) ? wp_unslash( (string) $_POST['ppa_video_dur'] ) : '';     // CHANGED:
-		$fav_raw   = isset( $_POST['ppa_video_fav'] ) ? wp_unslash( (string) $_POST['ppa_video_fav'] ) : '';     // CHANGED:
+		$url  = 'https://www.youtube.com/feeds/videos.xml?playlist_id=' . rawurlencode( $playlist_id );       // CHANGED:
+		$feed = fetch_feed( $url );                                                                            // CHANGED:
 
-		$title = sanitize_text_field( $title_raw );                                                             // CHANGED:
-		$yt    = ppa_videos_normalize_yt_id( sanitize_text_field( $yt_raw ) );                                  // CHANGED:
-		$pl    = sanitize_key( $pl_raw );                                                                        // CHANGED:
-		$dur   = sanitize_text_field( $dur_raw );                                                                // CHANGED:
-		$fav   = ( $fav_raw !== '' ) ? 1 : 0;                                                                    // CHANGED:
+		if ( is_wp_error( $feed ) ) {                                                                         // CHANGED:
+			$data = array(                                                                                       // CHANGED:
+				'items'  => array(),                                                                               // CHANGED:
+				'error'  => (string) $feed->get_error_message(),                                                   // CHANGED:
+				'cached' => false,                                                                                 // CHANGED:
+			);                                                                                                   // CHANGED:
+			// Short cache on error so we don't hammer YouTube when outbound is blocked.                          // CHANGED:
+			set_transient( $cache_key, $data, 5 * MINUTE_IN_SECONDS );                                           // CHANGED:
+			return $data;                                                                                        // CHANGED:
+		}                                                                                                      // CHANGED:
 
-		if ( ! isset( $playlists[ $pl ] ) ) {                                                                    // CHANGED:
-			$pl = 'start-here';                                                                                 // CHANGED:
-		}                                                                                                        // CHANGED:
+		$items = $feed->get_items( 0, $max_items );                                                          // CHANGED:
+		$out   = array();                                                                                      // CHANGED:
 
-		$back = ppa_videos_admin_url( $pl );                                                                     // CHANGED:
+		if ( is_array( $items ) ) {                                                                           // CHANGED:
+			foreach ( $items as $it ) {                                                                           // CHANGED:
+				if ( ! is_object( $it ) ) {                                                                        // CHANGED:
+					continue;                                                                                       // CHANGED:
+				}                                                                                                  // CHANGED:
 
-		if ( $title === '' || $yt === '' ) {                                                                     // CHANGED:
-			wp_safe_redirect( add_query_arg( array( 'ppa_videos_notice' => 'missing' ), $back ) );               // CHANGED:
-			exit;                                                                                                // CHANGED:
-		}                                                                                                        // CHANGED:
+				$title = (string) $it->get_title();                                                               // CHANGED:
+				$link  = (string) $it->get_permalink();                                                            // CHANGED:
+				$yt_id = ppa_videos_normalize_yt_id( $link );                                                      // CHANGED:
 
-		$stored = ppa_videos_get_stored();                                                                       // CHANGED:
-		$uuid   = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : md5( uniqid( '', true ) );      // CHANGED:
+				// Some feed parsers expose the tag ID like: tag:youtube.com,2008:video:VIDEOID                    // CHANGED:
+				if ( $yt_id === '' && method_exists( $it, 'get_id' ) ) {                                           // CHANGED:
+					$raw_id = (string) $it->get_id();                                                               // CHANGED:
+					if ( preg_match( '/video:([A-Za-z0-9_-]{11})/', $raw_id, $m ) ) {                              // CHANGED:
+						$yt_id = (string) $m[1];                                                                     // CHANGED:
+					}                                                                                               // CHANGED:
+				// Try explicit yt:videoId tag (most reliable for playlist feeds).                                 // CHANGED:
+				if ( $yt_id === '' && method_exists( $it, 'get_item_tags' ) ) {                                    // CHANGED:
+					$tags = $it->get_item_tags( 'http://www.youtube.com/xml/schemas/2015', 'videoId' );            // CHANGED:
+					if ( is_array( $tags ) && isset( $tags[0]['data'] ) ) {                                        // CHANGED:
+						$maybe = trim( (string) $tags[0]['data'] );                                                // CHANGED:
+						if ( preg_match( '/^[A-Za-z0-9_-]{11}$/', $maybe ) ) {                                    // CHANGED:
+							$yt_id = $maybe;                                                                       // CHANGED:
+						}                                                                                           // CHANGED:
+					}                                                                                               // CHANGED:
+				}                                                                                                   // CHANGED:
 
-		$stored[] = array(                                                                                       // CHANGED:
-			'uuid'    => (string) $uuid,                                                                         // CHANGED:
-			'title'   => (string) $title,                                                                        // CHANGED:
-			'dur'     => (string) $dur,                                                                          // CHANGED:
-			'pl'      => (string) $pl,                                                                           // CHANGED:
-			'yt'      => (string) $yt,                                                                           // CHANGED:
-			'fav'     => (int) $fav,                                                                             // CHANGED:
-			'created' => (int) time(),                                                                           // CHANGED:
-		);                                                                                                       // CHANGED:
+				}                                                                                                  // CHANGED:
 
-		update_option( ppa_videos_opt_key(), $stored, false );                                                   // CHANGED:
-		wp_safe_redirect( add_query_arg( array( 'ppa_videos_notice' => 'added' ), $back ) );                     // CHANGED:
-		exit;                                                                                                     // CHANGED:
-	}                                                                                                            // CHANGED:
-	add_action( 'admin_post_ppa_videos_add', 'ppa_videos_adminpost_add' );                                      // CHANGED:
-}                                                                                                                // CHANGED:
+				if ( $yt_id === '' ) {                                                                            // CHANGED:
+					continue;                                                                                       // CHANGED:
+				}                                                                                                  // CHANGED:
 
-/**
- * admin-post.php handler: Delete video                                                                        // CHANGED:
- */
-if ( ! function_exists( 'ppa_videos_adminpost_delete' ) ) {                                                    // CHANGED:
-	function ppa_videos_adminpost_delete() {                                                                   // CHANGED:
-		if ( ! current_user_can( 'manage_options' ) ) {                                                         // CHANGED:
-			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );           // CHANGED:
-		}                                                                                                       // CHANGED:
+				$ts = 0;                                                                                          // CHANGED:
+				if ( method_exists( $it, 'get_date' ) ) {                                                          // CHANGED:
+					$maybe = $it->get_date( 'U' );                                                                  // CHANGED:
+					$ts    = $maybe ? (int) $maybe : 0;                                                             // CHANGED:
+				}                                                                                                  // CHANGED:
 
-		check_admin_referer( 'ppa_videos_manage' );                                                             // CHANGED:
+				$out[] = array(                                                                                   // CHANGED:
+					'yt'    => $yt_id,                                                                               // CHANGED:
+					'title' => $title !== '' ? wp_strip_all_tags( $title ) : __( 'Video', 'postpress-ai' ),         // CHANGED:
+					'ts'    => $ts,                                                                                 // CHANGED:
+					'url'   => $link,                                                                               // CHANGED:
+				);                                                                                                 // CHANGED:
+			}                                                                                                      // CHANGED:
+		}                                                                                                      // CHANGED:
 
-		$uuid = isset( $_GET['uuid'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['uuid'] ) ) : '';       // CHANGED:
-		$pl   = isset( $_GET['playlist'] ) ? sanitize_key( wp_unslash( (string) $_GET['playlist'] ) ) : 'start-here'; // CHANGED:
+		// If SimplePie produced zero parsable items, fallback to direct XML parse.                          // CHANGED:
+		// YouTube feeds sometimes expose the video id only via namespaces, which can be finicky in SimplePie. // CHANGED:
+		$final_error = '';                                                                                    // CHANGED:
+		if ( empty( $out ) ) {                                                                                 // CHANGED:
+			$fallback_err = '';                                                                                // CHANGED:
+			$resp = wp_safe_remote_get(                                                                          // CHANGED:
+				$url,                                                                                             // CHANGED:
+				array(                                                                                            // CHANGED:
+					'timeout'     => 12,                                                                           // CHANGED:
+					'redirection' => 5,                                                                            // CHANGED:
+					'headers'     => array(                                                                        // CHANGED:
+						'User-Agent' => 'Mozilla/5.0 (WordPress; PostPress AI Videos)',                               // CHANGED:
+					),                                                                                             // CHANGED:
+				)                                                                                                 // CHANGED:
+			);                                                                                                   // CHANGED:
+			if ( is_wp_error( $resp ) ) {                                                                        // CHANGED:
+				$fallback_err = (string) $resp->get_error_message();                                              // CHANGED:
+			} else {                                                                                             // CHANGED:
+				$code = (int) wp_remote_retrieve_response_code( $resp );                                          // CHANGED:
+				$body = (string) wp_remote_retrieve_body( $resp );                                                // CHANGED:
+				if ( $code !== 200 || $body === '' ) {                                                            // CHANGED:
+					$fallback_err = 'HTTP ' . (string) $code;                                                       // CHANGED:
+				} else {                                                                                          // CHANGED:
+					// Parse Atom XML (yt:videoId, title, published, link href).                                    // CHANGED:
+					if ( function_exists( 'simplexml_load_string' ) ) {                                             // CHANGED:
+						$prev = libxml_use_internal_errors( true );                                                   // CHANGED:
+						$xml  = @simplexml_load_string( $body );                                                      // CHANGED:
+						if ( $xml instanceof SimpleXMLElement ) {                                                     // CHANGED:
+							$ns = $xml->getNamespaces( true );                                                          // CHANGED:
+							$count = 0;                                                                                // CHANGED:
+							if ( isset( $xml->entry ) ) {                                                               // CHANGED:
+								foreach ( $xml->entry as $entry ) {                                                       // CHANGED:
+									if ( $count >= $max_items ) { break; }                                                  // CHANGED:
+									$title = isset( $entry->title ) ? (string) $entry->title : '';                          // CHANGED:
+									$yt_id = '';                                                                            // CHANGED:
+									$link  = '';                                                                            // CHANGED:
+									$ts    = 0;                                                                             // CHANGED:
+									if ( isset( $entry->published ) ) {                                                     // CHANGED:
+										$ts = (int) strtotime( (string) $entry->published );                                  // CHANGED:
+									}                                                                                       // CHANGED:
+									// yt:videoId                                                                            // CHANGED:
+									if ( isset( $ns['yt'] ) ) {                                                             // CHANGED:
+										$yt = $entry->children( $ns['yt'] );                                                  // CHANGED:
+										if ( isset( $yt->videoId ) ) {                                                        // CHANGED:
+											$maybe = trim( (string) $yt->videoId );                                             // CHANGED:
+											if ( preg_match( '/^[A-Za-z0-9_-]{11}$/', $maybe ) ) {                              // CHANGED:
+												$yt_id = $maybe;                                                                  // CHANGED:
+											}                                                                                   // CHANGED:
+										}                                                                                      // CHANGED:
+									}                                                                                       // CHANGED:
+									// link href fallback                                                                    // CHANGED:
+									if ( $yt_id === '' && isset( $entry->link ) ) {                                         // CHANGED:
+										foreach ( $entry->link as $lnk ) {                                                    // CHANGED:
+											$attrs = $lnk->attributes();                                                       // CHANGED:
+											$href  = isset( $attrs['href'] ) ? (string) $attrs['href'] : '';                   // CHANGED:
+											$maybe = ppa_videos_normalize_yt_id( $href );                                      // CHANGED:
+											if ( $maybe !== '' ) {                                                             // CHANGED:
+												$link  = $href;                                                                  // CHANGED:
+												$yt_id = $maybe;                                                                 // CHANGED:
+												break;                                                                           // CHANGED:
+											}                                                                                  // CHANGED:
+										}                                                                                      // CHANGED:
+									}                                                                                       // CHANGED:
+									if ( $yt_id === '' ) { continue; }                                                      // CHANGED:
+									if ( $link === '' ) { $link = 'https://www.youtube.com/watch?v=' . rawurlencode( $yt_id ); } // CHANGED:
+									$out[] = array(                                                                         // CHANGED:
+										'yt'    => $yt_id,                                                                    // CHANGED:
+										'title' => $title !== '' ? wp_strip_all_tags( $title ) : __( 'Video', 'postpress-ai' ), // CHANGED:
+										'ts'    => $ts,                                                                       // CHANGED:
+										'url'   => $link,                                                                     // CHANGED:
+									);                                                                                      // CHANGED:
+									$count++;                                                                               // CHANGED:
+								}                                                                                          // CHANGED:
+							}                                                                                              // CHANGED:
+						} else {                                                                                         // CHANGED:
+							$fallback_err = 'Unable to parse playlist feed XML.';                                         // CHANGED:
+						}                                                                                               // CHANGED:
+						libxml_clear_errors();                                                                         // CHANGED:
+						libxml_use_internal_errors( $prev );                                                           // CHANGED:
+					} else {                                                                                           // CHANGED:
+						// No SimpleXML — last resort: keep empty and report a gentle error.                           // CHANGED:
+						$fallback_err = 'SimpleXML not available on server.';                                          // CHANGED:
+					}                                                                                                  // CHANGED:
+				}                                                                                                   // CHANGED:
+			}                                                                                                       // CHANGED:
+			if ( empty( $out ) && $fallback_err !== '' ) {                                                        // CHANGED:
+				$final_error = $fallback_err;                                                                      // CHANGED:
+			}                                                                                                       // CHANGED:
+		}                                                                                                         // CHANGED:
 
-		$playlists = ppa_videos_get_playlists();                                                                // CHANGED:
-		if ( ! isset( $playlists[ $pl ] ) ) {                                                                   // CHANGED:
-			$pl = 'start-here';                                                                                // CHANGED:
-		}                                                                                                       // CHANGED:
-
-		$back  = ppa_videos_admin_url( $pl );                                                                   // CHANGED:
-		$stored = ppa_videos_get_stored();                                                                      // CHANGED:
-
-		if ( $uuid !== '' ) {                                                                                   // CHANGED:
-			$new = array();                                                                                     // CHANGED:
-			foreach ( $stored as $item ) {                                                                      // CHANGED:
-				if ( ! is_array( $item ) ) {                                                                    // CHANGED:
-					continue;                                                                                   // CHANGED:
-				}                                                                                               // CHANGED:
-				$u = isset( $item['uuid'] ) ? (string) $item['uuid'] : '';                                       // CHANGED:
-				if ( $u !== $uuid ) {                                                                           // CHANGED:
-					$new[] = $item;                                                                             // CHANGED:
-				}                                                                                               // CHANGED:
-			}                                                                                                   // CHANGED:
-			update_option( ppa_videos_opt_key(), $new, false );                                                  // CHANGED:
-		}                                                                                                       // CHANGED:
-
-		wp_safe_redirect( add_query_arg( array( 'ppa_videos_notice' => 'deleted' ), $back ) );                  // CHANGED:
-		exit;                                                                                                    // CHANGED:
-	}                                                                                                            // CHANGED:
-	add_action( 'admin_post_ppa_videos_delete', 'ppa_videos_adminpost_delete' );                                // CHANGED:
-}                                                                                                                // CHANGED:
+		$data = array( 'items' => $out, 'error' => $final_error, 'cached' => false );                          // CHANGED:
+		// Normal cache: keep the UI fast but reasonably fresh.                                                 // CHANGED:
+		$ttl = empty( $out ) ? ( 5 * MINUTE_IN_SECONDS ) : ( 30 * MINUTE_IN_SECONDS );                         // CHANGED:
+		set_transient( $cache_key, $data, $ttl );                                                                  // CHANGED:
+		return $data;                                                                                           // CHANGED:
+	}                                                                                                         // CHANGED:
+}                                                                                                             // CHANGED:
 
 if ( ! function_exists( 'ppa_render_videos' ) ) {                                                              // CHANGED:
 	function ppa_render_videos() {                                                                             // CHANGED:
@@ -583,59 +685,32 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'postpress-ai' ) );           // CHANGED:
 		}                                                                                                       // CHANGED:
 
-		// Use WP native Thickbox for modal playback (no new tab).                                                 // CHANGED:
-		if ( function_exists( 'add_thickbox' ) ) {                                                                // CHANGED:
-			add_thickbox();                                                                                         // CHANGED:
-		}                                                                                                         // CHANGED:
+		// Use WP native Thickbox for modal playback (no new tab).                                             // CHANGED:
+		if ( function_exists( 'add_thickbox' ) ) {                                                              // CHANGED:
+			add_thickbox();                                                                                       // CHANGED:
+		}                                                                                                       // CHANGED:
 
-		$playlists = ppa_videos_get_playlists();                                                                // CHANGED:
+		$playlists     = ppa_videos_get_playlists();                                                          // CHANGED:
+		$playlist_ids   = ppa_videos_get_playlist_ids();                                                        // CHANGED:
 
-		// Active playlist (from UI rail).                                                                      // CHANGED:
+		// Active playlist (from UI rail).                                                                     // CHANGED:
 		$active = isset( $_GET['playlist'] ) ? sanitize_key( (string) $_GET['playlist'] ) : 'start-here';       // CHANGED:
 		if ( ! isset( $playlists[ $active ] ) ) {                                                               // CHANGED:
-			$active = 'start-here';                                                                             // CHANGED:
+			$active = 'start-here';                                                                              // CHANGED:
 		}                                                                                                       // CHANGED:
 
-		// Build the active list from stored videos.                                                             // CHANGED:
-		$stored = ppa_videos_get_stored();                                                                      // CHANGED:
-		$videos = array();                                                                                      // CHANGED:
-		foreach ( $stored as $item ) {                                                                          // CHANGED:
-			if ( ! is_array( $item ) ) {                                                                        // CHANGED:
-				continue;                                                                                       // CHANGED:
-			}                                                                                                   // CHANGED:
-			$yt = isset( $item['yt'] ) ? ppa_videos_normalize_yt_id( (string) $item['yt'] ) : '';                // CHANGED:
-			if ( $yt === '' ) {                                                                                 // CHANGED:
-				continue;                                                                                       // CHANGED:
-			}                                                                                                   // CHANGED:
-			$pl = isset( $item['pl'] ) ? sanitize_key( (string) $item['pl'] ) : 'start-here';                   // CHANGED:
-			if ( ! isset( $playlists[ $pl ] ) ) {                                                               // CHANGED:
-				$pl = 'start-here';                                                                            // CHANGED:
-			}                                                                                                   // CHANGED:
-			$videos[] = array(                                                                                  // CHANGED:
-				'uuid'  => isset( $item['uuid'] ) ? (string) $item['uuid'] : '',                                // CHANGED:
-				'title' => isset( $item['title'] ) ? (string) $item['title'] : '',                              // CHANGED:
-				'dur'   => isset( $item['dur'] ) ? (string) $item['dur'] : '',                                  // CHANGED:
-				'pl'    => (string) $pl,                                                                        // CHANGED:
-				'yt'    => (string) $yt,                                                                        // CHANGED:
-				'fav'   => ! empty( $item['fav'] ) ? 1 : 0,                                                     // CHANGED:
-			);                                                                                                  // CHANGED:
-		}                                                                                                       // CHANGED:
-
-		// Notice banner (added/deleted/missing).                                                                // CHANGED:
-		$notice = isset( $_GET['ppa_videos_notice'] ) ? sanitize_key( (string) $_GET['ppa_videos_notice'] ) : ''; // CHANGED:
-
-		$base_url = ppa_videos_admin_url( $active );                                                            // CHANGED:
+		$active_pl_id = isset( $playlist_ids[ $active ] ) ? (string) $playlist_ids[ $active ] : '';           // CHANGED:
+		$feed_data    = ppa_videos_fetch_playlist_videos( $active_pl_id, 40 );                                   // CHANGED:
+		$feed_error   = isset( $feed_data['error'] ) ? (string) $feed_data['error'] : '';                       // CHANGED:
+		$items        = isset( $feed_data['items'] ) && is_array( $feed_data['items'] ) ? $feed_data['items'] : array(); // CHANGED:
+		$is_cached    = ! empty( $feed_data['cached'] );                                                        // CHANGED:
 		?>
 		<div class="wrap ppa-videos-wrap">
 			<h1 class="ppa-videos-h1"><?php echo esc_html__( 'PostPress AI Videos', 'postpress-ai' ); ?></h1>
 			<p class="ppa-videos-sub"><?php echo esc_html__( 'Short, clear videos to help you use the plugin without guessing.', 'postpress-ai' ); ?></p>
 
-			<?php if ( $notice === 'added' ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php echo esc_html__( 'Video added.', 'postpress-ai' ); ?></p></div>
-			<?php elseif ( $notice === 'deleted' ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php echo esc_html__( 'Video removed.', 'postpress-ai' ); ?></p></div>
-			<?php elseif ( $notice === 'missing' ) : ?>
-				<div class="notice notice-error"><p><?php echo esc_html__( 'Missing Title or YouTube ID/URL. Please try again.', 'postpress-ai' ); ?></p></div>
+			<?php if ( $feed_error !== '' ) : ?>
+				<div class="notice notice-error"><p><?php echo esc_html__( 'Video feed error:', 'postpress-ai' ) . ' ' . esc_html( $feed_error ); ?></p></div>
 			<?php endif; ?>
 
 			<div class="ppa-videos-toolbar">
@@ -669,121 +744,71 @@ if ( ! function_exists( 'ppa_render_videos' ) ) {                               
 				<section class="ppa-videos-grid">
 					<header class="ppa-videos-grid-head">
 						<h2 class="ppa-videos-grid-title"><?php echo esc_html( $playlists[ $active ] ); ?></h2>
-						<p class="ppa-videos-grid-sub"><?php echo esc_html__( 'Add videos using the form below. Paste a full YouTube link or just the ID.', 'postpress-ai' ); ?></p>
+						<p class="ppa-videos-grid-sub">
+							<?php echo esc_html__( 'These videos are pulled from the official playlist. No manual updates needed.', 'postpress-ai' ); ?>
+						</p>
 					</header>
 
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="ppa-videos-addform">
-						<?php wp_nonce_field( 'ppa_videos_manage', 'ppa_videos_nonce' ); ?>
-						<input type="hidden" name="action" value="ppa_videos_add" />
-
-						<table class="form-table" role="presentation">
-							<tbody>
-								<tr>
-									<th scope="row"><label for="ppa_video_title"><?php echo esc_html__( 'Title', 'postpress-ai' ); ?></label></th>
-									<td><input id="ppa_video_title" name="ppa_video_title" type="text" class="regular-text" value="" /></td>
-								</tr>
-								<tr>
-									<th scope="row"><label for="ppa_video_yt"><?php echo esc_html__( 'YouTube URL or ID', 'postpress-ai' ); ?></label></th>
-									<td><input id="ppa_video_yt" name="ppa_video_yt" type="text" class="regular-text" value="" /></td>
-								</tr>
-								<tr>
-									<th scope="row"><label for="ppa_video_pl"><?php echo esc_html__( 'Playlist', 'postpress-ai' ); ?></label></th>
-									<td>
-										<select id="ppa_video_pl" name="ppa_video_pl">
-											<?php foreach ( $playlists as $k => $lbl ) : ?>
-												<option value="<?php echo esc_attr( $k ); ?>" <?php selected( $k, $active ); ?>><?php echo esc_html( $lbl ); ?></option>
-											<?php endforeach; ?>
-										</select>
-									</td>
-								</tr>
-								<tr>
-									<th scope="row"><label for="ppa_video_dur"><?php echo esc_html__( 'Duration (optional)', 'postpress-ai' ); ?></label></th>
-									<td><input id="ppa_video_dur" name="ppa_video_dur" type="text" class="regular-text" value="" placeholder="2:41" /></td>
-								</tr>
-								<tr>
-									<th scope="row"><?php echo esc_html__( 'Favorite', 'postpress-ai' ); ?></th>
-									<td><label><input type="checkbox" name="ppa_video_fav" value="1" /> <?php echo esc_html__( 'Mark as favorite', 'postpress-ai' ); ?></label></td>
-								</tr>
-							</tbody>
-						</table>
-
-						<p class="submit"><button type="submit" class="button button-primary"><?php echo esc_html__( 'Add Video', 'postpress-ai' ); ?></button></p>
-					</form>
-
 					<div class="ppa-videos-cards">
-						<?php
-						$shown = 0;
-						foreach ( $videos as $v ) :
-							if ( $v['pl'] !== $active ) { continue; }
-							$shown++;
-
-							$yt_id = (string) $v['yt'];                                                                    // CHANGED:
-							$thumb = 'https://i.ytimg.com/vi/' . rawurlencode( $yt_id ) . '/hqdefault.jpg';                 // CHANGED:
-							$embed = 'https://www.youtube-nocookie.com/embed/' . rawurlencode( $yt_id ) . '?autoplay=1&rel=0'; // CHANGED:
-							$watch = add_query_arg(                                                                          // CHANGED:
-								array(                                                                                         // CHANGED:
-									'TB_iframe' => 'true',                                                                       // CHANGED:
-									'width'     => 960,                                                                          // CHANGED:
-									'height'    => 540,                                                                          // CHANGED:
-								),                                                                                            // CHANGED:
-								$embed                                                                                        // CHANGED:
-							);                                                                                               // CHANGED:
-
-							$del_url = add_query_arg(
-								array(
-									'action'   => 'ppa_videos_delete',
-									'uuid'     => (string) $v['uuid'],
-									'playlist' => (string) $active,
-								),
-								admin_url( 'admin-post.php' )
-							);
-							$del = wp_nonce_url( $del_url, 'ppa_videos_manage' );
-							?>
-							<div class="ppa-video-card">
-								<div class="ppa-video-thumb">
-									<img class="ppa-video-thumb-img" src="<?php echo esc_url( $thumb ); ?>" alt="" loading="lazy" /> <!-- CHANGED: -->
-									<span class="ppa-video-thumb-label"><?php echo esc_html__( 'YouTube', 'postpress-ai' ); ?></span>
-									<span class="ppa-video-dur"><?php echo esc_html( $v['dur'] ? $v['dur'] : '—' ); ?></span>
-								</div>
-								<div class="ppa-video-meta">
-									<div class="ppa-video-title"><?php echo esc_html( $v['title'] ); ?></div>
-									<div class="ppa-video-row">
-										<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>
-										<a class="button button-secondary ppa-video-watch thickbox" href="<?php echo esc_url( $watch ); ?>"><?php echo esc_html__( 'Watch', 'postpress-ai' ); ?></a> <!-- CHANGED: -->
-									</div>
-									<p class="ppa-video-remove"><a class="button-link-delete" href="<?php echo esc_url( $del ); ?>"><?php echo esc_html__( 'Remove', 'postpress-ai' ); ?></a></p>
-								</div>
-							</div>
-						<?php endforeach; ?>
-
-						<?php if ( $shown === 0 ) : ?>
+						<?php if ( empty( $items ) ) : ?>
 							<div class="ppa-video-card">
 								<div class="ppa-video-thumb">
 									<span class="ppa-video-thumb-label"><?php echo esc_html__( 'No videos yet', 'postpress-ai' ); ?></span>
 									<span class="ppa-video-dur">—</span>
 								</div>
 								<div class="ppa-video-meta">
-									<div class="ppa-video-title"><?php echo esc_html__( 'Use the “Add Video” form above.', 'postpress-ai' ); ?></div>
+									<div class="ppa-video-title"><?php echo esc_html__( 'This playlist has no videos (yet).', 'postpress-ai' ); ?></div>
 									<div class="ppa-video-row">
 										<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>
 										<span class="button ppa-video-watch" aria-disabled="true"><?php echo esc_html__( 'Coming soon', 'postpress-ai' ); ?></span>
 									</div>
 								</div>
 							</div>
+						<?php else : ?>
+							<?php foreach ( $items as $v ) : ?>
+								<?php
+									$yt_id = isset( $v['yt'] ) ? (string) $v['yt'] : '';
+									if ( $yt_id === '' ) { continue; }
+									$thumb = 'https://i.ytimg.com/vi/' . rawurlencode( $yt_id ) . '/hqdefault.jpg';
+									$embed = 'https://www.youtube-nocookie.com/embed/' . rawurlencode( $yt_id ) . '?autoplay=1&rel=0';
+									$watch = add_query_arg(
+										array(
+											'TB_iframe' => 'true',
+											'width'     => 960,
+											'height'    => 540,
+										),
+										$embed
+									);
+									$ts  = isset( $v['ts'] ) ? (int) $v['ts'] : 0;
+									$dur = $ts ? date_i18n( 'M j, Y', $ts ) : '—';
+								?>
+								<div class="ppa-video-card">
+									<div class="ppa-video-thumb">
+										<img class="ppa-video-thumb-img" src="<?php echo esc_url( $thumb ); ?>" alt="" loading="lazy" />
+										<span class="ppa-video-thumb-label"><?php echo esc_html__( 'YouTube', 'postpress-ai' ); ?></span>
+										<span class="ppa-video-dur"><?php echo esc_html( $dur ); ?></span>
+									</div>
+									<div class="ppa-video-meta">
+										<div class="ppa-video-title"><?php echo esc_html( isset( $v['title'] ) ? (string) $v['title'] : '' ); ?></div>
+										<div class="ppa-video-row">
+											<span class="ppa-video-tag"><?php echo esc_html( $playlists[ $active ] ); ?></span>
+											<a class="button button-secondary ppa-video-watch thickbox" href="<?php echo esc_url( $watch ); ?>"><?php echo esc_html__( 'Watch', 'postpress-ai' ); ?></a>
+										</div>
+									</div>
+								</div>
+							<?php endforeach; ?>
 						<?php endif; ?>
 					</div>
 				</section>
 			</div>
 
-			<p class="ppa-videos-tip"><?php echo esc_html__( 'Next step: use the “Add Video” form above — no code edits required.', 'postpress-ai' ); ?></p>
+			<p class="ppa-videos-tip"><?php echo esc_html__( 'Tip: If you don’t see a new upload right away, refresh in a bit — this page caches to stay fast.', 'postpress-ai' ); ?></p>
 		</div>
 		<?php
 	}                                                                                                            // CHANGED:
-}                                                                                                                // CHANGED:
-/**
- * Testbed renderer (submenu).
- * Looks for one of the known filenames, falls back to minimal stub if absent.
- */
+}                                                                                                              // CHANGED:
+
+
 if ( ! function_exists( 'ppa_render_testbed' ) ) {
 	function ppa_render_testbed() {
 		if ( ! current_user_can( 'manage_options' ) ) {
