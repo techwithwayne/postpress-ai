@@ -375,7 +375,7 @@ PostPress AI — Admin Account Screen (Isolated)
     return (Date.now() - lastFetchAt) > 15000;
   }
 
-  async function postAjax(extraParams, affectUi) {
+  async function postAjax(extraParams, affectUi, actionOverride) {
     var cfg = bestConfig();
 
     if (!cfg.ajaxUrl || !cfg.nonce) {
@@ -384,7 +384,8 @@ PostPress AI — Admin Account Screen (Isolated)
     }
 
     var form = new URLSearchParams();
-    form.set('action', cfg.action);
+    var action = actionOverride || cfg.action;
+    form.set('action', action);
     form.set('_ts', String(Date.now()));
     addNonceFields(form, cfg.nonce);
     addSiteFields(form, cfg.site);
@@ -419,8 +420,18 @@ PostPress AI — Admin Account Screen (Isolated)
       var text = await resp.text();
       var trimmed = (text || '').trim();
 
-      if (trimmed === '-1' || trimmed === '0') {
+      if (trimmed === '-1') {
         if (affectUi) setStatus('bad', 'Nonce failed. Reload this page, then try again.');
+        return null;
+      }
+
+      if (trimmed === '0') {
+        try {
+          window.__ppaMissingActions = window.__ppaMissingActions || {};
+          window.__ppaMissingActions[action] = true;
+        } catch (e0) {}
+
+        if (affectUi) setStatus('bad', 'Handler missing. Refresh the page, then try again.');
         return null;
       }
 
@@ -456,7 +467,33 @@ PostPress AI — Admin Account Screen (Isolated)
     lastFetchAt = Date.now();
     setStatus('', 'Refreshing…');
 
-    var payload = await postAjax(null, true);
+    var payload = null;
+
+    // CHANGED: Prefer Support account_status if available (server-side shared secret), but fall back
+    // to the legacy account_status bridge (license/verify) to keep the Account page stable.
+    var supportAction = 'ppa_support_account_status';
+    var missingSupport = false;
+    try {
+      missingSupport = !!(window.__ppaMissingActions && window.__ppaMissingActions[supportAction]);
+    } catch (e0) { missingSupport = false; }
+
+    var supportPayload = null;
+    if (!missingSupport) {
+      supportPayload = await postAjax(null, false, supportAction);
+      if (supportPayload && typeof supportPayload === 'object' && supportPayload.ok === true) {
+        payload = supportPayload;
+      }
+    }
+
+    if (!payload) {
+      payload = await postAjax(null, true);
+    }
+
+    // If both failed but Support gave us an error envelope, prefer showing that rather than nothing.
+    if (!payload && supportPayload && typeof supportPayload === 'object') {
+      payload = supportPayload;
+    }
+
     if (payload) {
       lastPayload = payload;
       renderFromData(payload);
