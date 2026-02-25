@@ -460,7 +460,43 @@ PostPress AI — Admin Account Screen (Isolated)
     }
   }
 
-  async function fetchAccount(force) {
+  
+  function payloadLooksLikeFullAccountSnapshot(p) {
+    // We only use the Support account_status endpoint if it includes the same rich license snapshot
+    // as the legacy account_status bridge. Otherwise, we fall back to the stable legacy payload.
+    if (!p || typeof p !== 'object') return false;
+
+    var core = (p.data && typeof p.data === 'object') ? p.data :
+               (p.result && typeof p.result === 'object') ? p.result :
+               p;
+
+    var license = (core.license && typeof core.license === 'object') ? core.license :
+                  (core.license_snapshot && typeof core.license_snapshot === 'object') ? core.license_snapshot :
+                  (core.lic && typeof core.lic === 'object') ? core.lic :
+                  null;
+
+    if (!license || typeof license !== 'object') return false;
+
+    // Require at least tokens + sites to exist somewhere; otherwise it's not the full Account snapshot.
+    var hasTokens = !!((license.tokens && typeof license.tokens === 'object') || (core.tokens && typeof core.tokens === 'object'));
+    var hasSites = !!(license.sites && typeof license.sites === 'object');
+
+    // Require a string-ish plan identifier (label/name/slug) to avoid "[object Object]".
+    var planOk = false;
+    if (license.plan && typeof license.plan === 'object') {
+      planOk = (typeof license.plan.label === 'string' && license.plan.label.trim()) ||
+               (typeof license.plan.name === 'string' && license.plan.name.trim()) ||
+               (typeof license.plan.slug === 'string' && license.plan.slug.trim()) ||
+               (typeof license.plan.plan_slug === 'string' && license.plan.plan_slug.trim());
+    } else {
+      planOk = (typeof license.plan_slug === 'string' && license.plan_slug.trim()) ||
+               (typeof license.plan === 'string' && license.plan.trim());
+    }
+
+    return !!(hasTokens && hasSites && planOk);
+  }
+
+async function fetchAccount(force) {
     if (inflight) return null;
     if (!force && !shouldAutoRefresh() && lastFetchAt > 0) return null;
 
@@ -481,7 +517,7 @@ PostPress AI — Admin Account Screen (Isolated)
     var supportPayload = null;
     if (!missingSupport) {
       supportPayload = await postAjax(null, false, supportAction);
-      if (supportPayload && typeof supportPayload === 'object' && supportPayload.ok === true) {
+      if (supportPayload && typeof supportPayload === 'object' && supportPayload.ok === true && payloadLooksLikeFullAccountSnapshot(supportPayload)) {
         payload = supportPayload;
       }
     }
@@ -490,8 +526,9 @@ PostPress AI — Admin Account Screen (Isolated)
       payload = await postAjax(null, true);
     }
 
-    // If both failed but Support gave us an error envelope, prefer showing that rather than nothing.
-    if (!payload && supportPayload && typeof supportPayload === 'object') {
+    // If both failed but Support gave us an *error* envelope, prefer showing that rather than nothing.
+    // Important: never let an incomplete *ok:true* Support payload override the stable legacy snapshot.
+    if (!payload && supportPayload && typeof supportPayload === 'object' && supportPayload.ok === false) {
       payload = supportPayload;
     }
 
@@ -551,13 +588,24 @@ PostPress AI — Admin Account Screen (Isolated)
     // Plan (avoid [object Object])
     var planName = '—';
     if (license.plan && typeof license.plan === 'object') {
-      planName = license.plan.label || license.plan.name || '—';
+      var _lbl = license.plan.label;
+      var _nm = license.plan.name;
+
+      if (typeof _lbl === 'string' && _lbl.trim()) planName = _lbl.trim();
+      else if (typeof _nm === 'string' && _nm.trim()) planName = _nm.trim();
+      else {
+        // Some envelopes nest slug/id inside license.plan; prefer a string fallback rather than "[object Object]".
+        var _slug2 = license.plan.plan_slug || license.plan.slug || license.plan.id || '';
+        if (typeof _slug2 === 'string' && _slug2.trim()) planName = _slug2.trim();
+        else if (typeof license.plan_slug === 'string' && license.plan_slug.trim()) planName = license.plan_slug.trim();
+      }
     } else {
-      planName = license.plan_slug || license.plan || '—';
+      var _slug = license.plan_slug || license.plan || '—';
+      planName = (typeof _slug === 'string' && _slug.trim()) ? _slug.trim() : '—';
     }
     setText('ppa-plan-name', planName);
 
-    var billingEmail = dig(core, 'account.email') || dig(core, 'account.billing_email') || license.email || license.billing_email || '';
+var billingEmail = dig(core, 'account.email') || dig(core, 'account.billing_email') || license.email || license.billing_email || '';
     setText('ppa-billing-email', billingEmail || '—');
 
     // Tokens
@@ -616,7 +664,8 @@ PostPress AI — Admin Account Screen (Isolated)
     ]));
     if (sitesUnlimited === null) sitesUnlimited = false;
 
-    var sitesUsed = num(firstDefined([
+        // HARDEN: Some backends signal "unlimited" by returning max=0. If sites are in use, treat 0 as unlimited.
+var sitesUsed = num(firstDefined([
       sites.used,
       license.sites_used,
       license.sitesUsed,
@@ -637,7 +686,9 @@ PostPress AI — Admin Account Screen (Isolated)
       license.sitesMax
     ]));
 
-    var sitesRemaining = num(firstDefined([
+        if (!sitesUnlimited && sitesMax === 0 && sitesUsed !== null && sitesUsed > 0) sitesUnlimited = true;
+
+var sitesRemaining = num(firstDefined([
       sites.remaining,
       license.sites_remaining,
       license.sitesRemaining,
@@ -780,6 +831,20 @@ PostPress AI — Admin Account Screen (Isolated)
   // ----------------------------
   // Support Chat (WP AJAX -> PHP proxy -> Django)
   // ----------------------------
+  var chatState = {
+    open: false,
+    busy: false,
+    threadId: null,
+    hasGreeted: false,
+    typingEl: null,
+    lastTypingStartedAt: 0
+  };
+
+  var YUKIA_GREETING = "Hi, I’m Yukia with the PostPress AI support team. How can I help you today?";
+  var YUKIA_NET_FAIL = "I couldn’t reach support right now.";
+  var YUKIA_FAIL_Q = "What did you click, and what did you expect?";
+  var YUKIA_DELAY_MS = 5000;
+
   function ensureSupportChatUI() {
     // Create a Support Chat button next to the Refresh button (Account page header).
     var refreshBtn = $('ppa-account-refresh');
@@ -790,17 +855,13 @@ PostPress AI — Admin Account Screen (Isolated)
       btn.type = 'button';
       btn.id = 'ppa-support-chat-open';
       btn.className = 'button';
-      btn.textContent = 'Support Chat';
+      btn.textContent = 'Support';
 
       if (refreshBtn && refreshBtn.parentNode) {
-        // Insert right after Refresh
         if (refreshBtn.nextSibling) refreshBtn.parentNode.insertBefore(btn, refreshBtn.nextSibling);
         else refreshBtn.parentNode.appendChild(btn);
       } else {
-        // Fallback: try actions area, else append to body (rare edge cases)
-        var actions = document.querySelector('#ppa-account-actions, .ppa-actions, .ppa-account-actions, .ppa-card--actions, .ppa-actions-card, #ppa-actions');
-        if (actions) actions.appendChild(btn);
-        else document.body.appendChild(btn);
+        document.body.appendChild(btn);
       }
     }
 
@@ -815,7 +876,7 @@ PostPress AI — Admin Account Screen (Isolated)
         '<div class="ppa-support-chat__backdrop" data-ppa-chat-close="1"></div>' +
         '<div class="ppa-support-chat__panel" role="dialog" aria-modal="true" aria-label="PostPress AI Support Chat">' +
           '<div class="ppa-support-chat__head">' +
-            '<div class="ppa-support-chat__title">Support Chat</div>' +
+            '<div class="ppa-support-chat__title">Support</div>' +
             '<button type="button" class="button" id="ppa-support-chat-close" data-ppa-chat-close="1">Close</button>' +
           '</div>' +
           '<div class="ppa-support-chat__log" id="ppa-support-chat-log" aria-live="polite"></div>' +
@@ -823,21 +884,10 @@ PostPress AI — Admin Account Screen (Isolated)
             '<textarea id="ppa-support-chat-input" rows="2" placeholder="Type your message…"></textarea>' +
             '<button type="button" class="button button-primary" id="ppa-support-chat-send">Send</button>' +
           '</div>' +
-          '<div class="ppa-support-chat__hint">Note: no secrets are sent from your browser. This goes WP → server → Django.</div>' +
         '</div>';
 
       document.body.appendChild(modal);
       ensureSupportChatStyles();
-    }
-
-    // Seed a hello once (only if empty)
-    var log = $('ppa-support-chat-log');
-    if (log && !log.__ppaSeeded) {
-      log.__ppaSeeded = true;
-      appendChatLine('agent', 'Hi, I’m Yukia — PostPress AI support. What’s going on?');
-      chatState.hasGreeting = true;
-      // New chat session log seeded: prevent stale pending state from a past page load.
-      clearPending();
     }
   }
 
@@ -853,17 +903,19 @@ PostPress AI — Admin Account Screen (Isolated)
       '#ppa-support-chat-modal .ppa-support-chat__log{padding:12px;display:flex;flex-direction:column;gap:10px;overflow:auto;flex:1;}' +
       '#ppa-support-chat-modal .ppa-support-chat__composer{display:flex;gap:10px;padding:12px;border-top:1px solid rgba(255,255,255,.08);}' +
       '#ppa-support-chat-modal textarea{flex:1;resize:none;min-height:42px;max-height:140px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#151518;color:#f2f2f2;}' +
-      '#ppa-support-chat-modal .ppa-support-chat__hint{padding:10px 12px;font-size:12px;opacity:.8;color:#e9e9e9;border-top:1px solid rgba(255,255,255,.06);}' +
       '#ppa-support-chat-modal .ppa-chatline{display:flex;}' +
       '#ppa-support-chat-modal .ppa-chatline--user{justify-content:flex-end;}' +
       '#ppa-support-chat-modal .ppa-chatline__bubble{max-width:88%;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.35;white-space:pre-wrap;word-break:break-word;}' +
       '#ppa-support-chat-modal .ppa-chatline--user .ppa-chatline__bubble{background:#2b2b30;color:#fff;border:1px solid rgba(255,255,255,.10);}' +
       '#ppa-support-chat-modal .ppa-chatline--agent .ppa-chatline__bubble{background:#121214;color:#f2f2f2;border:1px solid rgba(255,255,255,.08);}' +
-      '#ppa-support-chat-modal .ppa-chatline--system .ppa-chatline__bubble{background:transparent;color:#d9d9d9;border:1px dashed rgba(255,255,255,.20);opacity:.95;}' +
-      '#ppa-support-chat-modal .ppa-chatline__meta{font-size:11px;opacity:.7;margin-top:4px;}' +
-      '#ppa-support-chat-modal .ppa-chatline__wrap{display:flex;flex-direction:column;}' +
-      '#ppa-support-chat-modal .ppa-support-chat__ctas{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}#ppa-support-chat-modal .ppa-support-chat__ctas .button{height:auto;line-height:1.1;padding:8px 10px;}' +
-      '#ppa-support-chat-modal .ppa-chatbusy{opacity:.6;pointer-events:none;}' +
+      '#ppa-support-chat-modal .ppa-chatline__wrap{display:flex;flex-direction:column;align-items:flex-start;gap:8px;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__actions{display:flex;gap:8px;flex-wrap:wrap;}' +
+      '#ppa-support-chat-modal .ppa-support-chat__actions .button{height:auto;line-height:1.1;padding:8px 10px;}' +
+      '#ppa-support-chat-modal .ppa-typing{display:inline-flex;gap:6px;align-items:center;}' +
+      '#ppa-support-chat-modal .ppa-typing span{display:inline-block;width:6px;height:6px;border-radius:6px;background:rgba(255,255,255,.65);animation:ppaDot 1.15s infinite ease-in-out;}' +
+      '#ppa-support-chat-modal .ppa-typing span:nth-child(2){animation-delay:.15s;}' +
+      '#ppa-support-chat-modal .ppa-typing span:nth-child(3){animation-delay:.30s;}' +
+      '@keyframes ppaDot{0%,80%,100%{transform:translateY(0);opacity:.55;}40%{transform:translateY(-3px);opacity:1;}}' +
       '@media (max-width:640px){#ppa-support-chat-modal .ppa-support-chat__panel{right:10px;left:10px;bottom:10px;width:auto;}}';
 
     var style = document.createElement('style');
@@ -871,84 +923,6 @@ PostPress AI — Admin Account Screen (Isolated)
     style.textContent = css;
     document.head.appendChild(style);
   }
-
-  var chatState = {
-    open: false,
-    busy: false,
-    threadId: null,
-    hasGreeting: false,
-    pending: null
-  };
-
-  // ----------------------------
-  // Support Chat memory (30 min) + billing flow
-  // ----------------------------
-  var CHAT_MEM_TTL_MS = 30 * 60 * 1000; // 30 minutes
-  var CHAT_MEM_KEY = 'ppa_support_chat_state_v1::' + (window.location && window.location.host ? window.location.host : 'site');
-
-  function nowMs() { return Date.now ? Date.now() : (new Date()).getTime(); }
-
-  function loadChatMemory() {
-    try {
-      var raw = window.localStorage ? window.localStorage.getItem(CHAT_MEM_KEY) : null;
-      if (!raw) return null;
-      var obj = JSON.parse(raw);
-      if (!obj || typeof obj !== 'object') return null;
-
-      // Expire pending state if too old
-      if (obj.pending && obj.pending.asked_at) {
-        var age = nowMs() - Number(obj.pending.asked_at);
-        if (!isFinite(age) || age > CHAT_MEM_TTL_MS) obj.pending = null;
-      }
-      return obj;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function saveChatMemory() {
-    try {
-      if (!window.localStorage) return;
-      var obj = {
-        threadId: chatState.threadId || null,
-        pending: chatState.pending || null
-      };
-      window.localStorage.setItem(CHAT_MEM_KEY, JSON.stringify(obj));
-    } catch (e) {}
-  }
-
-  function clearPending() {
-    chatState.pending = null;
-    saveChatMemory();
-  }
-
-  function setPending(kind) {
-    chatState.pending = { kind: String(kind || ''), asked_at: nowMs() };
-    saveChatMemory();
-  }
-
-  function pendingActive() {
-    if (!chatState.pending || !chatState.pending.asked_at) return false;
-    var age = nowMs() - Number(chatState.pending.asked_at);
-    return isFinite(age) && age <= CHAT_MEM_TTL_MS;
-  }
-
-  function looksLikeBilling(msg) {
-    var m = toSafeStr(msg).trim().toLowerCase();
-    if (!m) return false;
-    return /(^|\b)(renew|upgrade|billing|invoice|subscription|subscribe|plan|portal)(\b|$)/i.test(m);
-  }
-
-  function yukiaAskRenewClarifier() {
-    // C2
-    return "Got you. Let’s get you unstuck.\n\nQuick question: are you renewing because a payment failed, or are you just updating your plan?\n\nNext step: reply with “payment failed” or “updating.”";
-  }
-
-  function yukiaOfferUpgradeCta() {
-    return "Perfect — thanks.\n\nClick the button below to open Upgrade Plan.\n\nNext step: did the upgrade popup open?";
-  }
-
-
 
   function showSupportChat(open) {
     var modal = $('ppa-support-chat-modal');
@@ -959,11 +933,16 @@ PostPress AI — Admin Account Screen (Isolated)
     modal.setAttribute('aria-hidden', chatState.open ? 'false' : 'true');
 
     if (chatState.open) {
+      scrollChatToBottom();
+      // Typing starts when the user initiates chat (opening the panel).
+      if (!chatState.hasGreeted) {
+        yukiaRespond(YUKIA_GREETING, null, true);
+        chatState.hasGreeted = true;
+      }
       var input = $('ppa-support-chat-input');
       if (input) {
         setTimeout(function () { try { input.focus(); } catch (e) {} }, 40);
       }
-      scrollChatToBottom();
     }
   }
 
@@ -975,11 +954,6 @@ PostPress AI — Admin Account Screen (Isolated)
 
   function setChatBusy(isBusy) {
     chatState.busy = !!isBusy;
-    var modal = $('ppa-support-chat-modal');
-    if (!modal) return;
-    if (chatState.busy) modal.classList.add('ppa-chatbusy');
-    else modal.classList.remove('ppa-chatbusy');
-
     var send = $('ppa-support-chat-send');
     var input = $('ppa-support-chat-input');
     if (send) send.disabled = chatState.busy;
@@ -989,74 +963,17 @@ PostPress AI — Admin Account Screen (Isolated)
   function stripMarkdownLite(s) {
     var t = toSafeStr(s);
     if (!t) return '';
-    // Remove common markdown tokens (bold/italics/inline code). Keep line breaks.
     t = t.replace(/\*\*/g, '').replace(/__/g, '').replace(/`/g, '');
-    // Convert [text](url) into "text (url)" so it stays readable in plain text UI.
     t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
     return t;
   }
 
-  function stripRedundantAgentIntro(s) {
-    var t = toSafeStr(s).trim();
-    if (!t) return '';
-    // If we already greeted as Yukia, don’t keep re-introducing in every reply.
-    if (chatState && chatState.hasGreeting) {
-      t = t.replace(/^yukia\s+here\s*(?:—|-|:|,)\s*/i, '');
-      t = t.replace(/^yukia\s+here\.\s*/i, '');
-    }
-    return t;
-  }
-
-  function sanitizeAgentText(s) {
-    var t = stripMarkdownLite(s);
-    t = stripRedundantAgentIntro(t);
-    return t;
-  }
-
-  function normalizeChatActions(actions) {
-    var out = [];
-    if (!Array.isArray(actions)) return out;
-
-    for (var i = 0; i < actions.length; i++) {
-      var a = actions[i] || {};
-      var id = toSafeStr(a.id).trim();
-      var label = toSafeStr(a.label).trim();
-      var kind = toSafeStr(a.kind).trim();
-
-      // Allowlist: only show Upgrade Plan CTA for now (per your rules).
-      if (id === 'open_upgrade_plan' || id === 'go_to_upgrade_plan') {
-        out.push({ id: 'open_upgrade_plan', label: label || 'Open Upgrade Plan', kind: 'cta', intent: 'upgrade' });
-      }
-      // Ignore everything else until we wire more actions safely.
-    }
-    return out;
-  }
-
-  function renderChatActions(wrapEl, actions) {
-    var arr = normalizeChatActions(actions);
-    if (!wrapEl || !arr.length) return;
-
-    var row = document.createElement('div');
-    row.className = 'ppa-support-chat__ctas';
-
-    for (var i = 0; i < arr.length; i++) {
-      var a = arr[i];
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'button button-primary ppa-support-chat__cta';
-      btn.setAttribute('data-ppa-chat-intent', a.intent || '');
-      btn.textContent = a.label || 'Open';
-      row.appendChild(btn);
-    }
-
-    wrapEl.appendChild(row);
-  }
-
-  function appendChatLine(kind, text, actions) {
+  function appendChatLine(kind, text, suggestedActions) {
     var log = $('ppa-support-chat-log');
     if (!log) return;
 
-    var k = (kind === 'user' || kind === 'agent' || kind === 'system') ? kind : 'system';
+    var k = (kind === 'user' || kind === 'agent') ? kind : 'agent';
+
     var line = document.createElement('div');
     line.className = 'ppa-chatline ppa-chatline--' + k;
 
@@ -1067,188 +984,216 @@ PostPress AI — Admin Account Screen (Isolated)
     bubble.className = 'ppa-chatline__bubble';
 
     var out = toSafeStr(text) || '—';
-    if (k === 'agent') out = sanitizeAgentText(out);
-    bubble.textContent = out || '—';
+    out = stripMarkdownLite(out);
+    bubble.textContent = out;
 
     wrap.appendChild(bubble);
 
-    // Agent CTA buttons (only if provided and allowlisted)
-    if (k === 'agent') renderChatActions(wrap, actions);
+    // Buttons render OUTSIDE bubble, directly under it.
+    if (k === 'agent' && Array.isArray(suggestedActions) && suggestedActions.length) {
+      var row = document.createElement('div');
+      row.className = 'ppa-support-chat__actions';
+
+      for (var i = 0; i < suggestedActions.length; i++) {
+        var a = suggestedActions[i] || {};
+        var id = toSafeStr(a.id).trim();
+        var label = toSafeStr(a.label).trim();
+        if (!id || !label) continue;
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'button ppa-support-chat__action';
+        btn.setAttribute('data-ppa-action-id', id);
+        btn.textContent = label;
+        row.appendChild(btn);
+      }
+
+      if (row.childNodes.length) wrap.appendChild(row);
+    }
 
     line.appendChild(wrap);
     log.appendChild(line);
-
     scrollChatToBottom();
   }
 
-  function extractChatCore(payload) {
-    var p = payload && typeof payload === 'object' ? payload : null;
-    if (!p) return null;
-    if (p.data && typeof p.data === 'object') return p.data;
-    if (p.result && typeof p.result === 'object') return p.result;
-    return p;
+  function showTyping() {
+    if (chatState.typingEl) return;
+    var log = $('ppa-support-chat-log');
+    if (!log) return;
+
+    var line = document.createElement('div');
+    line.className = 'ppa-chatline ppa-chatline--agent';
+    line.setAttribute('data-ppa-typing', '1');
+
+    var wrap = document.createElement('div');
+    wrap.className = 'ppa-chatline__wrap';
+
+    var bubble = document.createElement('div');
+    bubble.className = 'ppa-chatline__bubble';
+
+    var dots = document.createElement('div');
+    dots.className = 'ppa-typing';
+    dots.innerHTML = '<span></span><span></span><span></span>';
+
+    bubble.appendChild(dots);
+    wrap.appendChild(bubble);
+    line.appendChild(wrap);
+
+    chatState.typingEl = line;
+    chatState.lastTypingStartedAt = Date.now();
+
+    log.appendChild(line);
+    scrollChatToBottom();
   }
 
-  function extractChatThreadId(core) {
-    if (!core || typeof core !== 'object') return null;
-    var v = core.thread_id || core.threadId || core.thread || core.session_id || core.sessionId || null;
-    v = toSafeStr(v).trim();
-    return v ? v : null;
+  function hideTyping() {
+    if (!chatState.typingEl) return;
+    try { chatState.typingEl.remove(); } catch (e) {}
+    chatState.typingEl = null;
   }
 
-  function extractChatReply(core) {
-    if (!core) return null;
-    if (typeof core === 'string') return core;
-    if (typeof core !== 'object') return null;
-
-    var v =
-      core.reply ||
-      core.response ||
-      core.message ||
-      (core.data && (core.data.reply || core.data.response || core.data.message)) ||
-      (core.output && (core.output.reply || core.output.text)) ||
-      core.text ||
-      null;
-
-    v = toSafeStr(v).trim();
-    return v ? v : null;
+  function afterMinDelay(startAt, fn) {
+    var elapsed = Date.now() - startAt;
+    var wait = Math.max(0, YUKIA_DELAY_MS - elapsed);
+    setTimeout(fn, wait);
   }
 
-  function extractSuggestedActions(core) {
-    // Admin-ajax payload shape: { reply, thread_id, raw: { ok, data: { suggested_actions: [...] } } }
-    try {
-      if (!core || typeof core !== 'object') return [];
-      if (Array.isArray(core.suggested_actions)) return core.suggested_actions;
-      if (core.raw && typeof core.raw === 'object') {
-        if (core.raw.data && typeof core.raw.data === 'object' && Array.isArray(core.raw.data.suggested_actions)) {
-          return core.raw.data.suggested_actions;
-        }
-        // Some envelopes may nest deeper: raw.data.data.suggested_actions
-        if (core.raw.data && core.raw.data.data && Array.isArray(core.raw.data.data.suggested_actions)) {
-          return core.raw.data.data.suggested_actions;
-        }
-      }
-    } catch (e) {}
-    return [];
+  function yukiaRespond(text, suggestedActions, isGreeting) {
+    // Always show typing immediately, then respond after a minimum delay.
+    var startAt = Date.now();
+    showTyping();
+
+    afterMinDelay(startAt, function () {
+      hideTyping();
+      appendChatLine('agent', text, suggestedActions || null);
+      if (isGreeting) chatState.hasGreeted = true;
+    });
   }
 
+  function looksLikeTokensIntent(msg) {
+    var m = toSafeStr(msg).trim().toLowerCase();
+    if (!m) return false;
+    return /(^|\b)(credit|credits|token|tokens|balance|buy tokens)(\b|$)/i.test(m);
+  }
 
-  function extractChatError(payload) {
-    var p = payload && typeof payload === 'object' ? payload : null;
-    if (!p) return 'Support chat failed.';
-    if (p.error) {
-      if (typeof p.error === 'string') return p.error;
-      if (p.error && typeof p.error === 'object') return p.error.message || p.error.code || 'Support chat failed.';
-    }
-    if (p.message) return toSafeStr(p.message);
-    if (p.data && p.data.error) return toSafeStr(p.data.error);
-    return 'Support chat failed.';
+  function tokensFlowMessage() {
+    return "Okay, I see you’re asking about credits (tokens).\nPick one below:";
+  }
+
+  function tokensFlowActions() {
+    return [
+      { id: 'buy_tokens', label: 'Buy Tokens' },
+      { id: 'check_token_balance', label: 'Check My Token Balance' },
+      { id: 'something_looks_wrong', label: 'Something Looks Wrong' }
+    ];
+  }
+
+  function focusTokenUsage() {
+    // Try a few known anchors; scroll the closest card into view.
+    var anchor = $('ppa-tokens-used') || $('ppa-tokens-bar') || $('ppa-tokens-period') || $('ppa-tokens-remaining') || null;
+    if (!anchor) return;
+    var card = anchor.closest('.ppa-card') || anchor.closest('.ppa-card__body') || anchor;
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+  }
+
+  function parseChatReplyPayload(payload) {
+    // Expected envelope from WP proxy: { ok:true, data:{ reply:"...", thread_id:"...", suggested_actions:[...] } }
+    if (!payload || typeof payload !== 'object') return null;
+
+    var core = (payload.data && typeof payload.data === 'object') ? payload.data :
+               (payload.result && typeof payload.result === 'object') ? payload.result :
+               payload;
+
+    var reply = core.reply || core.response || core.message || core.text || null;
+    reply = toSafeStr(reply).trim();
+
+    var tid = core.thread_id || core.threadId || core.thread || null;
+    tid = toSafeStr(tid).trim();
+
+    var acts = Array.isArray(core.suggested_actions) ? core.suggested_actions : [];
+    return { reply: reply || '', threadId: tid || '', actions: acts };
   }
 
   async function sendSupportChatMessage(message) {
     var msg = toSafeStr(message).trim();
     if (!msg) return;
 
-    // Browser sends ONLY: message + thread_id (optional). No shared secret ever leaves the server.
+    // Local routing first (tokens).
+    if (looksLikeTokensIntent(msg)) {
+      yukiaRespond(tokensFlowMessage(), tokensFlowActions(), false);
+      return;
+    }
+
+    setChatBusy(true);
+    var startAt = Date.now();
+    showTyping();
+
     var params = { message: msg };
     if (chatState.threadId) params.thread_id = chatState.threadId;
 
-    setChatBusy(true);
-
-    // IMPORTANT: This must hit WP admin-ajax.php with action=ppa_support_chat
     var payload = await postAjax(params, false, 'ppa_support_chat');
 
-    if (!payload) {
-      // If the WP AJAX handler is not installed yet, admin-ajax.php returns "0".
-      var missing = false;
-      try { missing = !!(window.__ppaMissingActions && window.__ppaMissingActions['ppa_support_chat']); } catch (e0) { missing = false; }
-      if (missing) {
-        appendChatLine('system', 'Support chat handler missing on this install. Next step: add wp_ajax_ppa_support_chat (PHP proxy).');
-      } else {
-        appendChatLine('system', 'Could not send. Reload this page, then try again.');
+    afterMinDelay(startAt, function () {
+      hideTyping();
+
+      if (!payload || (payload.ok === false)) {
+        appendChatLine('agent', YUKIA_NET_FAIL, null);
+        setChatBusy(false);
+        return;
       }
+
+      var parsed = parseChatReplyPayload(payload) || null;
+      if (!parsed) {
+        appendChatLine('agent', YUKIA_NET_FAIL, null);
+        setChatBusy(false);
+        return;
+      }
+
+      if (parsed.threadId) chatState.threadId = parsed.threadId;
+
+      if (parsed.reply) appendChatLine('agent', parsed.reply, parsed.actions || null);
+      else appendChatLine('agent', YUKIA_NET_FAIL, null);
+
       setChatBusy(false);
-      return;
-    }
-
-    var core = extractChatCore(payload);
-
-    // If it returns an ok/envelope shape, respect it.
-    var ok = (typeof payload.ok === 'boolean') ? payload.ok : ((typeof core.ok === 'boolean') ? core.ok : null);
-    if (ok === false) {
-      appendChatLine('system', extractChatError(payload) || 'Support chat failed.');
-      setChatBusy(false);
-      return;
-    }
-
-    // Thread tracking
-    var tid = extractChatThreadId(core);
-    if (tid) {
-      chatState.threadId = tid;
-      saveChatMemory();
-    }
-
-    var reply = extractChatReply(core);
-    if (!reply) {
-      // fallback: some handlers may return {ok:true,data:{reply:""}} or raw envelope
-      var core2 = extractChatCore(core);
-      reply = extractChatReply(core2);
-    }
-
-    if (reply) {
-      var acts = extractSuggestedActions(core);
-      appendChatLine('agent', reply, acts);
-    }
-    else appendChatLine('system', 'Sent. (No reply payload returned.)');
-
-    setChatBusy(false);
-  }
-  function hrefForChatIntent(intent) {
-    var it = toSafeStr(intent).trim().toLowerCase();
-    if (!it) return '';
-    if (it === 'upgrade') {
-      var up = $('ppa-account-upgrade');
-      return getHref(up);
-    }
-    if (it === 'buy_tokens') {
-      var bt = $('ppa-account-buy-tokens');
-      return getHref(bt);
-    }
-    if (it === 'billing_portal') {
-      var bp = $('ppa-account-billing-portal');
-      return getHref(bp);
-    }
-    return '';
+    });
   }
 
-  function handleSupportChatUserSend(rawVal) {
-    var val = toSafeStr(rawVal).trim();
-    if (!val) return;
+  function handleSuggestedAction(actionId) {
+    var id = toSafeStr(actionId).trim();
 
-    // User line
-    appendChatLine('user', val);
-
-    // If Yukia asked a clarifying question and we're waiting on the answer:
-    if (pendingActive()) {
-      clearPending();
-      appendChatLine('agent', yukiaOfferUpgradeCta(), [
-        { id: 'open_upgrade_plan', label: 'Open Upgrade Plan', kind: 'cta', intent: 'upgrade' }
-      ]);
+    if (id === 'buy_tokens') {
+      // Open the same popup as the Account "Buy Tokens" button.
+      var popup = openSizedPopup('ppa_buy_tokens', 980, 780);
+      if (!popup) {
+        yukiaRespond("Popup blocked.\n" + YUKIA_FAIL_Q, null, false);
+        return;
+      }
+      writePopupLoading(popup, 'Opening token purchase…');
+      fetchIntent('buy_tokens').then(function (payload) {
+        var url = extractLinkFromPayload(payload || lastPayload, 'buy_tokens', hrefForChatIntent('buy_tokens'));
+        if (!url) {
+          try { popup.close(); } catch (e) {}
+          yukiaRespond("Link not available yet.\n" + YUKIA_FAIL_Q, null, false);
+          return;
+        }
+        try { popup.location.href = url; popup.focus(); } catch (e2) {
+          yukiaRespond("Could not open popup.\n" + YUKIA_FAIL_Q, null, false);
+        }
+      });
       return;
     }
 
-    // Billing / plan flow: ask ONE clarifying question first (no CTA yet).
-    if (looksLikeBilling(val)) {
-      appendChatLine('agent', yukiaAskRenewClarifier());
-      setPending('billing_renew_clarify');
+    if (id === 'check_token_balance') {
+      // Refresh Account data + focus token usage section (no extra Yukia chatter needed).
+      fetchAccount(true).then(function () { focusTokenUsage(); });
       return;
     }
 
-    // Default: send to server router
-    sendSupportChatMessage(val);
+    if (id === 'something_looks_wrong') {
+      yukiaRespond(YUKIA_FAIL_Q, null, false);
+      return;
+    }
   }
-
-
 
   function bindSupportChatEventsOnce() {
     if (document.__ppaSupportChatBound) return;
@@ -1258,7 +1203,7 @@ PostPress AI — Admin Account Screen (Isolated)
       var t = e.target;
       if (!t) return;
 
-      // Open button
+      // Open
       if (t.closest && t.closest('#ppa-support-chat-open')) {
         try { e.preventDefault(); } catch (err) {}
         ensureSupportChatUI();
@@ -1266,7 +1211,7 @@ PostPress AI — Admin Account Screen (Isolated)
         return;
       }
 
-      // Close / backdrop click
+      // Close/backdrop
       var closeEl = (t.closest && t.closest('[data-ppa-chat-close="1"]')) ? t.closest('[data-ppa-chat-close="1"]') : null;
       if (closeEl) {
         try { e.preventDefault(); } catch (err2) {}
@@ -1274,24 +1219,22 @@ PostPress AI — Admin Account Screen (Isolated)
         return;
       }
 
-      // CTA button inside chat bubble
-      var ctaBtn = (t.closest && t.closest('.ppa-support-chat__cta')) ? t.closest('.ppa-support-chat__cta') : null;
-      if (ctaBtn) {
-        try { e.preventDefault(); } catch (errCta) {}
-        var intent = toSafeStr(ctaBtn.getAttribute('data-ppa-chat-intent')).trim();
-        if (intent) {
-          openIntentPopup(intent, hrefForChatIntent(intent));
-        }
+      // Suggested action buttons
+      var actBtn = (t.closest && t.closest('.ppa-support-chat__action')) ? t.closest('.ppa-support-chat__action') : null;
+      if (actBtn) {
+        try { e.preventDefault(); } catch (errA) {}
+        handleSuggestedAction(actBtn.getAttribute('data-ppa-action-id'));
         return;
       }
 
-      // Send button
+      // Send
       if (t.closest && t.closest('#ppa-support-chat-send')) {
         try { e.preventDefault(); } catch (err3) {}
         var input = $('ppa-support-chat-input');
         var val = input ? input.value : '';
         if (input) input.value = '';
-        handleSupportChatUserSend(val);
+        appendChatLine('user', val);
+        sendSupportChatMessage(val);
         return;
       }
     }, true);
@@ -1299,34 +1242,28 @@ PostPress AI — Admin Account Screen (Isolated)
     document.addEventListener('keydown', function (e) {
       if (!chatState.open) return;
 
-      // ESC closes
       if (e.key === 'Escape') {
         showSupportChat(false);
         return;
       }
 
-      // Enter to send (Shift+Enter = newline)
       if (e.key === 'Enter' && !e.shiftKey) {
         var input = e.target && e.target.id === 'ppa-support-chat-input' ? e.target : null;
         if (!input) return;
-        try { e.preventDefault(); } catch (err) {}
 
+        try { e.preventDefault(); } catch (err) {}
         var val = toSafeStr(input.value);
         input.value = '';
-        handleSupportChatUserSend(val);
+        appendChatLine('user', val);
+        sendSupportChatMessage(val);
       }
     }, true);
   }
 
-  // ----------------------------
+// ----------------------------
   // Bind
   // ----------------------------
   function bind() {
-    // Restore short-lived chat state (thread id / pending question) for up to 30 minutes.
-    var mem = loadChatMemory();
-    if (mem && mem.threadId) chatState.threadId = mem.threadId;
-    if (mem && mem.pending) chatState.pending = mem.pending;
-
     bindDelegatedPopupsOnce();
     bindSupportChatEventsOnce();
     ensureSupportChatUI();

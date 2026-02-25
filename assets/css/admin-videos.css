@@ -7,6 +7,7 @@
  * 2026-02-23 • FIX: Show + style the “Add Video” UI form (was present in DOM but not visible).  # CHANGED:
  * 2026-02-23 • ADD: Cinematic spacing + card grid styling for Videos admin page.               # CHANGED:
  * 2026-02-23 • SCOPE: Only affects body.postpress-ai_page_postpress-ai-videos.                 # CHANGED:
+ * 2026-02-24 • FIX: Force true 3-column video grid (desktop), 2-col <=900px, 1-col <=640px.   # CHANGED:
  *
  * Notes:
  * - Matches the Settings page design language (dark, premium, orange accent)
@@ -258,9 +259,8 @@ body.postpress-ai_page_postpress-ai-videos .ppa-videos-grid-sub {
    5) Cards + responsive embeds
 ------------------------------ */
 body.postpress-ai_page_postpress-ai-videos .ppa-videos-cards {
-  display: grid;
-  /* auto-fit prevents “crunched 3 columns” and adapts cleanly */
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  display: grid !important; /* CHANGED: */
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important; /* CHANGED: force true 3 columns */
   gap: 16px;
   margin-top: 14px;
 }
@@ -428,6 +428,10 @@ body.postpress-ai_page_postpress-ai-videos button.button.ppa-video-watch:focus {
   body.postpress-ai_page_postpress-ai-videos .ppa-videos-layout {
     grid-template-columns: 1fr;
   }
+
+  body.postpress-ai_page_postpress-ai-videos .ppa-videos-cards { /* CHANGED: */
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important; /* CHANGED: */
+  }
 }
 
 @media (max-width: 640px) {
@@ -440,6 +444,7 @@ body.postpress-ai_page_postpress-ai-videos button.button.ppa-video-watch:focus {
   }
 
   body.postpress-ai_page_postpress-ai-videos .ppa-videos-cards {
+    grid-template-columns: 1fr !important; /* CHANGED: */
     gap: 12px;
   }
 
@@ -566,8 +571,9 @@ body.postpress-ai_page_postpress-ai-videos .ppa-videos-addform .button-primary:h
     padding: 0 0 12px;
   }
 }
+
 /* -----------------------------
-   8) YouTube thumbnail image support (per-card IDs)                                           
+   8) YouTube thumbnail image support (per-card IDs)
 ------------------------------ */
 body.postpress-ai_page_postpress-ai-videos {
   --ppa-thumb-h: 132px; /* CHANGED: */

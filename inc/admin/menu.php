@@ -16,6 +16,7 @@
  * 2026-02-24: FIX: Robust YouTube playlist parsing (yt:videoId tags + XML fallback) so cards reliably populate. // CHANGED:
  * 2026-02-24: FIX: Cache-bust playlist transient keys (v2 prefix) so fixes apply immediately. // CHANGED:
  * 2026-02-24: UX: Videos page now lists every video in a 3-column grid (per-video Watch buttons), no playlist-level buttons, no confusing disabled controls. // CHANGED:
+* 2026-02-24: FIX: Videos page now enqueues assets/css/admin-videos.css so the 3-column grid styles actually apply. // CHANGED:
  *
  * 2025-12-28: ADD: Custom SVG dashicon for PostPress AI menu; position set to 3 (high priority).  // CHANGED:
  * 2025-12-28: FIX: Remove duplicate "PostPress Composer" submenu entry.
@@ -115,6 +116,58 @@ if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {             
         }                                                                                                // CHANGED:
         add_action( 'admin_init', 'ppa_register_settings_api_bootstrap', 0 );                            // CHANGED: priority 0 = early
 }                                                                                                    // CHANGED:
+
+
+/**
+ * Videos CSS enqueue (scoped).
+ *
+ * WHY:
+ * - The Videos screen relies on assets/css/admin-videos.css for layout (including the 3-column card grid).
+ * - If that stylesheet isn't enqueued for this screen (screen-id drift / enqueue guard mismatch), the UI collapses
+ *   to a single column and looks broken.
+ *
+ * FIX:
+ * - Enqueue assets/css/admin-videos.css ONLY on the Videos admin screen.
+ * - Cache-bust using filemtime() so CSS changes show immediately without hard-refresh.
+ *
+ * NOTE:
+ * - No inline styles. Ever.
+ */
+if ( ! function_exists( 'ppa_admin_enqueue_videos_css' ) ) {                                                      // CHANGED:
+        /**
+         * @param string $hook_suffix Provided by WP, e.g. 'postpress-ai_page_postpress-ai-videos'
+         */
+        function ppa_admin_enqueue_videos_css( $hook_suffix ) {                                                    // CHANGED:
+                if ( ! is_admin() ) {                                                                               // CHANGED:
+                        return;                                                                                      // CHANGED:
+                }                                                                                                    // CHANGED:
+
+                $hook_suffix = is_string( $hook_suffix ) ? $hook_suffix : '';                                        // CHANGED:
+
+                // Primary check: hook suffix (most reliable)                                                        // CHANGED:
+                $is_videos = ( 'postpress-ai_page_postpress-ai-videos' === $hook_suffix );                           // CHANGED:
+
+                // Fallback check: query arg (covers edge cases / older WP installs)                                  // CHANGED:
+                if ( ! $is_videos && isset( $_GET['page'] ) && 'postpress-ai-videos' === (string) $_GET['page'] ) {  // CHANGED:
+                        $is_videos = true;                                                                           // CHANGED:
+                }                                                                                                    // CHANGED:
+
+                if ( ! $is_videos ) {                                                                                // CHANGED:
+                        return;                                                                                      // CHANGED:
+                }                                                                                                    // CHANGED:
+
+                $root_dir  = defined( 'PPA_PLUGIN_DIR' ) ? trailingslashit( PPA_PLUGIN_DIR ) : trailingslashit( dirname( __FILE__, 3 ) ); // CHANGED:
+                $root_file = $root_dir . 'postpress-ai.php';                                                         // CHANGED:
+
+                $rel_css  = 'assets/css/admin-videos.css';                                                           // CHANGED:
+                $css_file = $root_dir . $rel_css;                                                                    // CHANGED:
+                $css_url  = plugins_url( $rel_css, $root_file );                                                     // CHANGED:
+                $ver      = file_exists( $css_file ) ? (string) filemtime( $css_file ) : '2026-02-24';               // CHANGED:
+
+                wp_enqueue_style( 'ppa-admin-videos', $css_url, array(), $ver );                                     // CHANGED:
+        }                                                                                                            // CHANGED:
+        add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue_videos_css', 99, 1 );                                // CHANGED:
+}                                                                                                                    // CHANGED:
 
 /**
  * Register the top-level "PostPress AI" menu and route to the Composer renderer.
