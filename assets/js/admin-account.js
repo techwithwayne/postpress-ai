@@ -264,7 +264,7 @@ PostPress AI — Admin Account Screen (Isolated)
     var availH = (window.screen && window.screen.availHeight) ? window.screen.availHeight : 900;
 
     var w = Math.min(Number(preferredW) || 980, Math.max(520, availW - 60));
-    var h = Math.min(Number(preferredH) || 780, Math.max(520, availH - 120));
+    var h = Math.min(Number(preferredH) || 680, Math.max(480, availH - 180));
 
     var left = Math.max(0, Math.round((availW - w) / 2));
     var top = Math.max(0, Math.round((availH - h) / 2));
@@ -773,7 +773,7 @@ var sitesRemaining = num(firstDefined([
   }
 
   function openIntentPopup(intent, fallbackHref) {
-    var popup = openSizedPopup('ppa_' + intent, 980, 780);
+    var popup = openSizedPopup('ppa_' + intent, 840, 680);
     if (!popup) {
       setStatus('bad', 'Popup blocked. Please allow popups for this site, then try again.');
       return;
