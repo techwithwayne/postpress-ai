@@ -1,8 +1,10 @@
 <?php
 /**
  * Plugin Name: PostPress AI
- * Description: Secure server-to-server AI content preview & store via Django (PostPress AI). Adds a Composer screen and server-side AJAX proxy to your Django backend.
- * Author: Tech With Wayne
+ * Author URI: https://postpressai.com/contact
+ * Plugin URI: https://postpressai.com
+ * Description: Secure server-to-server AI content preview & store via Django (PostPress AI). Adds a Composer screen and server-side AJAX proxy to your Django backend. Support: postpressai.com/contact.
+ * Author: Wayne Hatter
  * Version: 2.1.0
  * Requires at least: 6.1
  * Requires PHP: 7.4
@@ -30,6 +32,25 @@
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
+
+
+/* === PPA Plugin Links (Settings + Support) === */
+add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), function( $links ) {
+        $url = admin_url( 'admin.php?page=postpress-ai-settings' );
+        $settings = '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Settings', 'postpress-ai' ) . '</a>';
+        array_unshift( $links, $settings );
+        return $links;
+} );
+
+add_filter( 'plugin_row_meta', function( $links, $file ) {
+        if ( $file !== plugin_basename( __FILE__ ) ) {
+                return $links;
+        }
+        $links[] = '<a href="https://postpressai.com" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Website', 'postpress-ai' ) . '</a>';
+        $links[] = '<a href="https://postpressai.com/contact" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Support', 'postpress-ai' ) . '</a>';
+        return $links;
+}, 10, 2 );
+
 
 /** ---------------------------------------------------------------------------------
  * Constants
