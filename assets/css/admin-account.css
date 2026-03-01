@@ -1,0 +1,770 @@
+/*
+PostPress AI — Admin Account Screen (Isolated)
+
+========= CHANGE LOG =========
+2026-01-15: ADD: New Account screen styling. Scoped to Account screen only.
+2026-02-22: FIX: Zebra striping for Sites list; FIX: Ghost button hover turning white;
+           ADD: Subtle brand glow around Account cards.  /* CHANGED */
+
+/* Scope hard to our screen */
+body.postpress-ai_page_postpress-ai-account {
+  --ppa-bg: #0b0b0b;
+  --ppa-card: #121212;
+  --ppa-card2: #161616;
+  --ppa-border: #242424;
+  --ppa-text: #f2f2f2;
+  --ppa-muted: #a7a7a7;
+  --ppa-accent: #ff6c00;
+  --ppa-good: #2ecc71;
+  --ppa-bad: #ff4d4d;
+  --ppa-radius: 16px;
+  --ppa-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  --ppa-glow: 0 0 0 1px rgba(255,108,0,0.20), 0 0 18px rgba(255,108,0,0.10); /* CHANGED */
+}
+
+body.postpress-ai_page_postpress-ai-account #wpcontent {
+  /* background: var(--ppa-bg); */
+}
+
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account {
+  color: var(--ppa-text);
+  max-width: 1180px;
+  margin: 18px 0 40px;
+  padding: 30px;
+  border-radius: 20px;
+  background-color: #121212;
+}
+
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a {
+  color: var(--ppa-text);
+}
+
+/* Header */
+body.postpress-ai_page_postpress-ai-account .ppa-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius);
+  background: linear-gradient(180deg, var(--ppa-card2), var(--ppa-card));
+  box-shadow: var(--ppa-shadow);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-title {
+  margin: 0;
+  font-size: 22px;
+  color: #ff6c00;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-subtitle {
+  margin: 6px 0 0;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  box-shadow: none;
+  text-decoration: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .button.button-primary.ppa-btn {
+  background: var(--ppa-accent);
+  border-color: var(--ppa-accent);
+  color: #111;
+  font-weight: 700;
+}
+
+body.postpress-ai_page_postpress-ai-account .button.button-primary.ppa-btn:hover {
+  filter: brightness(1.05);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost {
+  background: transparent;
+  border-color: var(--ppa-border);
+  color: var(--ppa-text);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost:hover {
+  border-color: var(--ppa-accent);
+}
+
+/* CHANGED: Prevent WP admin hover from turning ghost buttons white (class-based) */
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:hover,
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:active,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:hover,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:active {
+  background: rgba(255,108,0,0.12);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: none;
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn.ppa-btn--ghost:focus,
+body.postpress-ai_page_postpress-ai-account .button.ppa-btn.ppa-btn--ghost:focus {
+  box-shadow: 0 0 0 2px rgba(255,108,0,0.28);
+  outline: none;
+}
+
+/* CHANGED: Prevent WP admin hover from turning buttons white (structure-based safety net)
+   Covers buttons that do NOT carry .ppa-btn--ghost (ex: Buy Tokens / Billing Portal / Open Settings). */
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary),
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary) {
+  background: transparent;
+  border-color: var(--ppa-border);
+  color: var(--ppa-text);
+  box-shadow: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):hover,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):focus,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):hover,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):focus {
+  background: rgba(255,108,0,0.12);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: 0 0 0 2px rgba(255,108,0,0.22);
+  outline: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card .button:not(.button-primary):active,
+body.postpress-ai_page_postpress-ai-account .wp-core-ui .ppa-card a.button:not(.button-primary):active {
+  background: rgba(255,108,0,0.16);
+  border-color: var(--ppa-accent);
+  color: var(--ppa-text);
+  box-shadow: none;
+}
+
+/* Status */
+body.postpress-ai_page_postpress-ai-account .ppa-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--ppa-border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-good .ppa-status__dot { background: var(--ppa-good); }
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-bad  .ppa-status__dot { background: var(--ppa-bad); }
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__text {
+  color: var(--ppa-muted);
+}
+
+/* Grid */
+body.postpress-ai_page_postpress-ai-account .ppa-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 980px) {
+  body.postpress-ai_page_postpress-ai-account .ppa-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Card */
+body.postpress-ai_page_postpress-ai-account .ppa-card {
+  background: var(--ppa-card);
+  border: 1px solid var(--ppa-border);
+  border-radius: var(--ppa-radius);
+  padding: 14px;
+  box-shadow: var(--ppa-shadow), var(--ppa-glow); /* CHANGED */
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-card__title {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-muted {
+  color: var(--ppa-muted);
+  font-size: 13px;
+}
+
+/* Pill */
+body.postpress-ai_page_postpress-ai-account .ppa-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ppa-border);
+  font-size: 12px;
+  color: var(--ppa-muted);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-pill[data-state="active"] {
+  border-color: rgba(46,204,113,0.45);
+  color: var(--ppa-good);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-pill[data-state="inactive"] {
+  border-color: rgba(255,77,77,0.45);
+  color: var(--ppa-bad);
+}
+
+/* Key/Value rows */
+body.postpress-ai_page_postpress-ai-account .ppa-kv {
+  margin: 0;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv__row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ppa-border);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv__row:first-child {
+  border-top: none;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv dt {
+  color: var(--ppa-muted);
+  font-weight: 600;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-kv dd {
+  margin: 0;
+  color: var(--ppa-text);
+  word-break: break-word;
+}
+
+/* Meter */
+body.postpress-ai_page_postpress-ai-account .ppa-meter {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--ppa-border);
+  overflow: hidden;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-meter__bar {
+  height: 100%;
+  background: var(--ppa-accent);
+  width: 0%;
+  transition: width 220ms ease;
+}
+
+/* Usage */
+body.postpress-ai_page_postpress-ai-account .ppa-usage {
+  margin-top: 12px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__big {
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__small {
+  margin-top: 6px;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-usage__sep {
+  margin: 0 6px;
+  opacity: 0.8;
+}
+
+/* Actions */
+body.postpress-ai_page_postpress-ai-account .ppa-card__actions {
+  margin-top: 12px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-note {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--ppa-muted);
+}
+
+/* Sites list */
+body.postpress-ai_page_postpress-ai-account .ppa-list {
+  margin-top: 10px;
+  border: 1px solid var(--ppa-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Legacy row class (kept for safety) */
+body.postpress-ai_page_postpress-ai-account .ppa-site {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site:first-child {
+  border-top: none;
+}
+
+/* CHANGED: Live markup row class (.ppa-list__row) — this is what your DOM actually uses */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ppa-border);
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:first-child,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:first-child {
+  border-top: none;
+}
+
+/* CHANGED: Zebra striping for "Sites on this key" rows (LIVE) */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:nth-child(odd),
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:nth-child(odd) {
+  background: rgba(255,255,255,0.02);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__row:nth-child(even),
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__row:nth-child(even) {
+  background: rgba(255,255,255,0.045);
+}
+
+/* Live row inner cells */
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__left,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__left {
+  color: var(--ppa-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-sites-list .ppa-list__right,
+body.postpress-ai_page_postpress-ai-account .ppa-list .ppa-list__right {
+  font-size: 12px;
+  color: var(--ppa-muted);
+  flex: 0 0 auto;
+}
+
+/* Zebra striping fallback for legacy .ppa-site rows */
+body.postpress-ai_page_postpress-ai-account .ppa-site:nth-child(odd) {
+  background: rgba(255,255,255,0.02);
+}
+body.postpress-ai_page_postpress-ai-account .ppa-site:nth-child(even) {
+  background: rgba(255,255,255,0.045);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site__url {
+  color: var(--ppa-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-site__state {
+  font-size: 12px;
+  color: var(--ppa-muted);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-list__empty {
+  padding: 12px;
+  color: var(--ppa-muted);
+}
+/* =========================================================
+   LOCKED BUTTON KIT (matches site CTA style)
+   - Solid orange pill (primary)
+   - Dark outline pill w/ orange stroke + glow (secondary)
+   - Optional badge via data-ppa-badge="FREE"
+   ========================================================= */
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  padding: 14px 22px;
+  border-radius: 999px;
+
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1;
+
+  text-decoration: none;
+  cursor: pointer;
+
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 122, 0, 0.25);
+}
+
+/* Primary: solid orange pill */
+body.postpress-ai_page_postpress-ai-account .ppa-btn--solid {
+  background: #ff7a00;
+  color: #0b0b0b;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 10px 28px rgba(255,122,0,0.18);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--solid:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+/* Secondary: dark outline pill with orange stroke + glow */
+body.postpress-ai_page_postpress-ai-account .ppa-btn--outline,
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost {
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.92);
+  border: 2px solid rgba(255,122,0,0.65);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 0 24px rgba(255,122,0,0.16), 0 0 0 1px rgba(255,122,0,0.22) inset;
+  backdrop-filter: blur(2px);
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-btn--outline:hover,
+body.postpress-ai_page_postpress-ai-account .ppa-btn--ghost:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  border-color: rgba(255,122,0,0.78);
+}
+
+/* Optional badge: right-side orange pill */
+body.postpress-ai_page_postpress-ai-account .ppa-btn[data-ppa-badge]::after {
+  content: attr(data-ppa-badge);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  margin-left: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+
+  background: #ff7a00;
+  color: #0b0b0b;
+
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+/* Make key CTAs solid even if markup still says ghost */
+body.postpress-ai_page_postpress-ai-account a[data-ppa-link="buy_tokens"].ppa-btn.ppa-btn--solid {
+  background: #ff7a00;
+  color: #0b0b0b;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 10px 28px rgba(255,122,0,0.18);
+}
+
+/* Token Usage CTA row */
+body.postpress-ai_page_postpress-ai-account .ppa-card__actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:center;
+}
+
+/* =========================================================
+   Header buttons (Refresh / Support) — locked vibe
+   ========================================================= */
+body.postpress-ai_page_postpress-ai-account .ppa-header__right{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+/* Shared pill baseline (override WP admin button styling) */
+body.postpress-ai_page_postpress-ai-account #ppa-account-refresh,
+body.postpress-ai_page_postpress-ai-account #ppa-support-chat-open{
+  appearance:none;
+  -webkit-appearance:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  padding: 14px 22px;
+  border-radius: 999px;
+
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 500;
+
+  height:auto;
+  min-height: unset;
+  text-decoration:none;
+  text-shadow:none;
+  box-shadow:none;
+  cursor:pointer;
+
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-account-refresh:focus,
+body.postpress-ai_page_postpress-ai-account #ppa-support-chat-open:focus{
+  outline:none;
+  box-shadow: 0 0 0 3px rgba(255, 122, 0, 0.25);
+}
+
+/* Refresh = solid orange pill */
+body.postpress-ai_page_postpress-ai-account #ppa-account-refresh{
+  background:#ff7a00;
+  color:#0b0b0b;
+  border:1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 10px 28px rgba(255,122,0,0.18);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-account-refresh:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+/* Support = dark outline pill w/ orange stroke + glow */
+body.postpress-ai_page_postpress-ai-account #ppa-support-chat-open{
+  background: rgba(0,0,0,0.35);
+  color: rgba(255,255,255,0.92);
+  border: 2px solid rgba(255,122,0,0.65);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 0 24px rgba(255,122,0,0.16), 0 0 0 1px rgba(255,122,0,0.22) inset;
+  backdrop-filter: blur(2px);
+}
+
+body.postpress-ai_page_postpress-ai-account #ppa-support-chat-open:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  border-color: rgba(255,122,0,0.78);
+}
+
+
+/* =========================================================
+   Button hover/text-color lock (prevents generic <a> rules from overriding)
+   ========================================================= */
+
+/* Keep generic link color rules off buttons */
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a:not(.ppa-btn) {
+  color: var(--ppa-text);
+}
+
+/* Button anchors: never let global link hover color win */
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn:hover,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn:focus,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn:active,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn:visited {
+  text-decoration: none !important;
+}
+
+/* Solid pill: always dark text */
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--solid,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--solid:hover,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--solid:focus,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--solid:active,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--solid:visited {
+  color: #0b0b0b !important;
+}
+
+/* Outline pill: always light text */
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--outline,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--outline:hover,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--outline:focus,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--outline:active,
+body.postpress-ai_page_postpress-ai-account .wrap.ppa-admin.ppa-account a.ppa-btn.ppa-btn--outline:visited {
+  color: rgba(255,255,255,0.92) !important;
+}
+
+
+
+
+/* === PPA Unified Banner System v1 (Account) === */
+body.postpress-ai_page_postpress-ai-account .ppa-status{
+  margin: 14px 0 0 !important;
+  padding: 10px 14px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,.04) !important;
+  border: 1px solid rgba(255,255,255,.10) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+body.postpress-ai_page_postpress-ai-account .ppa-status__dot{
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 999px !important;
+  background: rgba(245,245,245,.35) !important;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.03) !important;
+}
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-good .ppa-status__dot{
+  background: var(--ppa-good) !important;
+  box-shadow: 0 0 0 3px rgba(34,197,94,.15) !important;
+}
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-bad .ppa-status__dot{
+  background: var(--ppa-bad) !important;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.16) !important;
+}
+body.postpress-ai_page_postpress-ai-account .ppa-status__text{
+  color: var(--ppa-text) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  font-weight: 600 !important;
+}
+
+
+
+/* === PPA Header Parity v1 (Shared header look) === */
+body.postpress-ai_page_postpress-ai-account .ppa-header{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+  gap:16px !important;
+
+  padding:18px 18px !important;
+  border-radius: var(--ppa-radius-xl, var(--ppa-radius, 16px)) !important;
+
+  background: linear-gradient(
+    180deg,
+    var(--ppa-panel-top, var(--ppa-card2, rgba(255,255,255,.06))),
+    var(--ppa-panel,     var(--ppa-card,  rgba(255,255,255,.03)))
+  ) !important;
+
+  border: 1px solid rgba(255,255,255,.08) !important;
+  box-shadow: var(--ppa-shadow-soft, var(--ppa-shadow, 0 10px 30px rgba(0,0,0,.35))) !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-title{
+  margin:0 !important;
+  color: var(--ppa-accent) !important;
+  font-size:24px !important;
+  line-height:1.15 !important;
+  letter-spacing:-0.02em !important;
+  font-weight:400 !important; /* REQUIRED */
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-subtitle{
+  margin:6px 0 0 !important;
+  color: var(--ppa-muted-2, var(--ppa-muted, rgba(245,245,245,.75))) !important;
+  font-size:13px !important;
+  line-height:1.4 !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-header__right{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  gap:12px !important;
+  flex-wrap:wrap !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .ppa-btn,
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .button.ppa-btn{
+  border-radius:999px !important;
+  padding:12px 18px !important;
+  font-weight:500 !important;
+  text-decoration:none !important;
+  text-shadow:none !important;
+  box-shadow:none !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .ppa-btn--solid,
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .button.button-primary.ppa-btn{
+  background: var(--ppa-accent) !important;
+  border: 1px solid rgba(255,255,255,.10) !important;
+  color: #111 !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .ppa-btn--outline,
+body.postpress-ai_page_postpress-ai-account .ppa-header__right .button:not(.button-primary).ppa-btn{
+  background: rgba(0,0,0,.35) !important;
+  border: 2px solid rgba(255,108,0,.65) !important;
+  color: rgba(255,255,255,.92) !important;
+}
+
+@media (hover:hover){
+  body.postpress-ai_page_postpress-ai-account .ppa-header__right .ppa-btn--solid:hover,
+  body.postpress-ai_page_postpress-ai-account .ppa-header__right .button.button-primary.ppa-btn:hover{
+    filter: brightness(1.03);
+  }
+  body.postpress-ai_page_postpress-ai-account .ppa-header__right .ppa-btn--outline:hover,
+  body.postpress-ai_page_postpress-ai-account .ppa-header__right .button:not(.button-primary).ppa-btn:hover{
+    border-color: rgba(255,108,0,.80) !important;
+    filter: brightness(1.03);
+  }
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status{
+  margin-top:14px !important;
+  padding:10px 14px !important;
+  border-radius:999px !important;
+  background: rgba(255,255,255,.04) !important;
+  border: 1px solid rgba(255,255,255,.10) !important;
+
+  display:flex !important;
+  align-items:center !important;
+  gap:10px !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__dot{
+  width:10px !important;
+  height:10px !important;
+  border-radius:999px !important;
+  background: rgba(245,245,245,.35) !important;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.03) !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-good .ppa-status__dot{
+  background: var(--ppa-good, #22c55e) !important;
+  box-shadow: 0 0 0 3px rgba(34,197,94,.15) !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status.is-bad .ppa-status__dot{
+  background: var(--ppa-bad, #ef4444) !important;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.16) !important;
+}
+
+body.postpress-ai_page_postpress-ai-account .ppa-status__text{
+  color: var(--ppa-text, #f2f2f2) !important;
+  font-size:13px !important;
+  line-height:1.35 !important;
+  font-weight:600 !important;
+}
+

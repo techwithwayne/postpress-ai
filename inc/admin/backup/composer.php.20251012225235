@@ -1,0 +1,163 @@
+<?php
+/**
+ * CHANGE LOG
+ * 2025-10-12 - v0.1.2
+ * - CHANGED: Added enqueue for Composer admin assets (assets/js/admin.js and assets/css/admin.css).
+ * - CHANGED: Uses conservative detection for Composer admin screen (screen id + page param).
+ * - CHANGED: Localizes window.PPA data consumed by admin.js (ajax_url, preview_action, store_action, plugin_version).
+ * - CHANGED: Adds server-side error_log entry for quick verification.
+ * - CHANGED: Added COMPATIBILITY SHIM: define ppa_render_composer_page() fallback to avoid fatal when the original callback is missing.
+ *
+ * Author: Tech With Wayne / Assistant
+ */
+
+// CHANGED: Ensure file is loaded within WP
+if ( ! defined( 'ABSPATH' ) ) {
+    exit; // CHANGED:
+}
+
+// CHANGED: Avoid redefining the function if it's already present.
+if ( ! function_exists( 'PPA\\Admin\\enqueue_composer_assets' ) ) { // CHANGED:
+
+    /**
+     * Enqueue Composer admin JS/CSS only on the Composer admin screen.
+     *
+     * @param string $hook_suffix Admin page hook suffix (provided by WP).
+     */
+    function enqueue_composer_assets( $hook_suffix ) { // CHANGED:
+        // CHANGED: Try to detect the current WP screen
+        $screen = null; // CHANGED:
+        if ( function_exists( 'get_current_screen' ) ) { // CHANGED:
+            $screen = get_current_screen(); // CHANGED:
+        }
+
+        // CHANGED: conservative default — only enqueue when true
+        $is_composer_screen = false; // CHANGED:
+
+        // CHANGED: Detect by screen id if available
+        if ( $screen && isset( $screen->id ) ) { // CHANGED:
+            $composer_ids = array( 'postpress-ai_page', 'postpress-ai_page_composer', 'postpress_ai', 'postpress-ai', 'postpress' ); // CHANGED:
+            foreach ( $composer_ids as $id_frag ) { // CHANGED:
+                if ( false !== strpos( $screen->id, $id_frag ) ) { // CHANGED:
+                    $is_composer_screen = true; // CHANGED:
+                    break; // CHANGED:
+                }
+            }
+        }
+
+        // CHANGED: Fallback detection via $_GET['page'] for plugin admin pages
+        if ( ! $is_composer_screen && isset( $_GET['page'] ) ) { // CHANGED:
+            $page = sanitize_text_field( wp_unslash( $_GET['page'] ) ); // CHANGED:
+            $composer_pages = array( 'postpress-ai-composer', 'postpress-ai_composer', 'postpress-ai', 'postpress_ai_composer' ); // CHANGED:
+            if ( in_array( $page, $composer_pages, true ) ) { // CHANGED:
+                $is_composer_screen = true; // CHANGED:
+            }
+        }
+
+        // CHANGED: If still not composer, bail early
+        if ( ! $is_composer_screen ) { // CHANGED:
+            return; // CHANGED:
+        }
+
+        // CHANGED: Build plugin base URL (safe approach from inc/admin path)
+        $plugin_base_url = plugin_dir_url( dirname( __FILE__, 2 ) . '/postpress-ai.php' ); // CHANGED:
+        if ( false === $plugin_base_url || empty( $plugin_base_url ) ) { // CHANGED:
+            $plugin_base_url = plugin_dir_url( __DIR__ . '/../../postpress-ai.php' ); // CHANGED:
+        }
+
+        // CHANGED: Determine asset versioning (prefer PPA_PLUGIN_VERSION)
+        if ( defined( 'PPA_PLUGIN_VERSION' ) ) { // CHANGED:
+            $version = PPA_PLUGIN_VERSION; // CHANGED:
+        } else { // CHANGED:
+            $js_file = WP_PLUGIN_DIR . '/postpress-ai/assets/js/admin.js'; // CHANGED:
+            $version = file_exists( $js_file ) ? (string) filemtime( $js_file ) : '1.0.0'; // CHANGED:
+        }
+
+        // CHANGED: Enqueue admin JS (footer)
+        wp_enqueue_script( // CHANGED:
+            'ppa-admin', // CHANGED:
+            $plugin_base_url . 'assets/js/admin.js', // CHANGED:
+            array( 'jquery' ), // CHANGED:
+            $version, // CHANGED:
+            true // CHANGED:
+        ); // CHANGED:
+
+        // CHANGED: Provide localized data expected by admin.js
+        wp_localize_script( // CHANGED:
+            'ppa-admin', // CHANGED:
+            'PPA', // CHANGED:
+            array( // CHANGED:
+                'ajax_url'       => admin_url( 'admin-ajax.php' ), // CHANGED:
+                'preview_action' => 'ppa_preview', // CHANGED:
+                'store_action'   => 'ppa_store', // CHANGED:
+                'plugin_version' => $version, // CHANGED:
+            ) // CHANGED:
+        ); // CHANGED:
+
+        // CHANGED: Optionally enqueue admin CSS for composer if it exists
+        wp_enqueue_style( // CHANGED:
+            'ppa-admin-css', // CHANGED:
+            $plugin_base_url . 'assets/css/admin.css', // CHANGED:
+            array(), // CHANGED:
+            $version // CHANGED:
+        ); // CHANGED:
+
+        // CHANGED: server-side debug log for verification
+        if ( function_exists( 'error_log' ) ) { // CHANGED:
+            error_log( 'PPA: composer assets enqueued (hook=' . $hook_suffix . ', screen=' . ( $screen ? $screen->id : 'unknown' ) . ')' ); // CHANGED:
+        } // CHANGED:
+    } // CHANGED:
+
+    // CHANGED: Hook the enqueue function into admin_enqueue_scripts
+    add_action( 'admin_enqueue_scripts', 'enqueue_composer_assets' ); // CHANGED:
+} // CHANGED:
+
+// CHANGED: COMPATIBILITY SHIM — define the composer page render callback if missing
+if ( ! function_exists( 'ppa_render_composer_page' ) ) { // CHANGED:
+    /**
+     * Fallback render callback for the Composer admin page.
+     *
+     * This minimal safe fallback prevents fatal errors if the original
+     * ppa_render_composer_page() callback is missing. It renders a simple
+     * placeholder and ensures the admin script is enqueued so the Composer
+     * UI (admin.js) can take over if present.
+     */
+    function ppa_render_composer_page() { // CHANGED:
+        // CHANGED: helpful debug log for server-side tracing
+        if ( function_exists( 'error_log' ) ) { // CHANGED:
+            error_log( 'PPA: fallback ppa_render_composer_page executed' ); // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: Render a minimal safe Composer container
+        echo '<div class="wrap ppa-composer-wrap">'; // CHANGED:
+        echo '<h1>PostPress AI — Composer</h1>'; // CHANGED:
+        echo '<div id="ppa-composer-root">'; // CHANGED:
+        echo '<p><em>Composer UI loading…</em></p>'; // CHANGED:
+        echo '<p>If you see this message, a safe fallback renderer is active because the original render callback was missing.</p>'; // CHANGED:
+        echo '</div>'; // CHANGED:
+        echo '</div>'; // CHANGED:
+
+        // CHANGED: Ensure admin script is present/enqueued when this page is shown.
+        // This helps client-side admin.js initialize the Composer area.
+        if ( ! wp_script_is( 'ppa-admin', 'enqueued' ) && wp_script_is( 'ppa-admin', 'registered' ) ) { // CHANGED:
+            wp_enqueue_script( 'ppa-admin' ); // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: Also ensure the localized data exists on the page by printing a JS stub
+        if ( ! wp_script_is( 'ppa-admin', 'done' ) ) { // CHANGED:
+            // When wp_localize_script ran earlier, it attached window.PPA. If it's not present
+            // for any reason, provide a minimal fallback object so admin.js won't blow up.
+            ?>
+            <script type="text/javascript">
+                if ( typeof window.PPA === 'undefined' ) {
+                    window.PPA = window.PPA || {};
+                    window.PPA.ajax_url = '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>';
+                    window.PPA.preview_action = 'ppa_preview';
+                    window.PPA.store_action = 'ppa_store';
+                }
+                console.info && console.info('PPA: composer fallback JS stub loaded');
+            </script>
+            <?php // CHANGED:
+        } // CHANGED:
+    } // CHANGED:
+} // CHANGED:

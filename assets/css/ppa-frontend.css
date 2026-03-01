@@ -1,0 +1,168 @@
+/* /home/customer/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai/assets/css/ppa-frontend.css
+ *
+ * ========= CHANGE LOG =========
+ * 2025-11-03: Button/theme hard reset + spacing polish.                                        # CHANGED:
+ *             - Force width:auto; inline-flex; appearance:none to defeat theme overrides.      # CHANGED:
+ *             - Tighter gaps, clearer grid at all breakpoints.                                 # CHANGED:
+ *             - Minor preview typography smoothing.                                            # CHANGED:
+ * 2025-11-03: Full visual refresh for shortcode UI.                                            # CHANGED:
+ *             - Proper two-column layout with tidy spacing.                                    # CHANGED:
+ *             - Button sizing fixed (no oversized pill).                                       # CHANGED:
+ *             - Compact inputs, readable labels, accessible focus states.                      # CHANGED:
+ *             - Harmonized dark theme with orange accents.                                     # CHANGED:
+ * 2025-11-03: New file. Public styles for [postpress_ai_preview] UI.                           # CHANGED:
+ *             - Brand: dark (#121212) + orange (#ff6c00).                                      # CHANGED:
+ *             - Accessible contrast, focus states, responsive stack.                           # CHANGED:
+ *             - Neutral class names to avoid theme collisions.                                 # CHANGED:
+ * =============================================================================================
+ */
+
+/* ---------- Theme tokens -------------------------------------------------------------- */
+.ppa-frontend {
+  --ppa-bg: #121212;             /* Brand dark */
+  --ppa-surface: #171717;        /* Elevated panel */
+  --ppa-border: #262626;         /* Card border */
+  --ppa-text: #e9e9e9;           /* Main text */
+  --ppa-muted: #b9b9b9;          /* Secondary text */
+  --ppa-accent: #ff6c00;         /* Brand orange */
+  --ppa-accent-on: #111111;      /* Text on accent */
+  --ppa-focus: rgba(255,108,0,.35);
+}
+
+/* ---------- Card wrapper -------------------------------------------------------------- */
+.ppa-frontend {
+  display: block;
+  background: var(--ppa-surface);
+  color: var(--ppa-text);
+  border: 1px solid var(--ppa-border);
+  border-radius: 14px;
+  padding: 18px;
+  margin: 24px 0;
+  box-shadow: 0 6px 22px rgba(0,0,0,.25);
+}
+
+/* ---------- Form layout --------------------------------------------------------------- */
+.ppa-frontend__form { margin: 0 0 14px 0; }
+
+.ppa-frontend__form-inner {
+  display: grid;
+  grid-template-columns: 1fr;          /* mobile first */
+  gap: 12px; /* CHANGED: was 14px */
+}
+
+/* labels = block rows with tight spacing */
+.ppa-frontend__form-inner label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+  color: var(--ppa-muted);
+}
+
+/* inputs + textarea */
+.ppa-frontend__form-inner input[type="text"],
+.ppa-frontend__form-inner input[type="number"],
+.ppa-frontend__form-inner textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--ppa-bg);
+  color: var(--ppa-text);
+  border: 1px solid var(--ppa-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.ppa-frontend__form-inner textarea { min-height: 120px; }
+
+.ppa-frontend__form-inner input:focus,
+.ppa-frontend__form-inner textarea:focus {
+  border-color: var(--ppa-accent);
+  box-shadow: 0 0 0 3px var(--ppa-focus);
+}
+
+/* 3-up row (Genre / Tone / Word Count) */
+.ppa-frontend__row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px; /* CHANGED: keep consistent with form gap */
+}
+
+/* ---------- Button -------------------------------------------------------------------- */
+.ppa-frontend__btn {
+  /* Theme hard reset to avoid giant full-width/orange-pill issues */                            /* CHANGED: */
+  all: unset;                 /* CHANGED: wipe theme button rules while keeping display below */ /* CHANGED: */
+  display: inline-flex;       /* CHANGED */
+  width: auto;                /* CHANGED */
+  max-width: 100%;            /* CHANGED */
+  appearance: none;           /* CHANGED */
+  -webkit-appearance: none;   /* CHANGED */
+
+  justify-self: start;
+  align-self: center;
+  align-items: center;
+  gap: 8px;
+
+  padding: 10px 16px;
+  min-width: 120px;
+  background: var(--ppa-accent);
+  color: var(--ppa-accent-on);
+  border-radius: 12px;            /* tasteful, not giant pill */
+  font-weight: 700;
+  letter-spacing: .2px;
+  line-height: 1;                 /* CHANGED: compact line-height */
+  cursor: pointer;
+  transition: transform .08s ease, filter .2s ease, box-shadow .2s ease;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 6px 18px rgba(0,0,0,.25);  /* CHANGED */
+}
+
+.ppa-frontend__btn:hover { filter: brightness(1.06); }
+.ppa-frontend__btn:active { transform: translateY(1px); }
+.ppa-frontend__btn[aria-busy="true"] { opacity: .85; cursor: progress; }
+
+/* ---------- Status line --------------------------------------------------------------- */
+.ppa-frontend__msg {
+  margin-top: 6px;
+  min-height: 1.1em;
+  font-size: .92rem;
+  color: var(--ppa-muted);
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+}
+
+.ppa-frontend__msg[data-type="success"] { color: #9be28c; border-left-color: #9be28c; }
+.ppa-frontend__msg[data-type="warn"]    { color: #ffd479; border-left-color: #ffd479; }
+.ppa-frontend__msg[data-type="error"]   { color: #ff8a8a; border-left-color: #ff8a8a; }
+
+/* ---------- Preview pane -------------------------------------------------------------- */
+.ppa-frontend__preview {
+  display: block;
+  margin-top: 10px;
+  border: 1px dashed var(--ppa-border);
+  border-radius: 12px;
+  padding: 14px;
+  background: #141414;
+  color: var(--ppa-text);
+}
+
+/* Minimal typographic reset so themes don't overwhelm the preview */
+.ppa-frontend__preview h1,
+.ppa-frontend__preview h2,
+.ppa-frontend__preview h3 { margin: .6em 0 .35em; line-height: 1.22; } /* CHANGED: .35em */
+.ppa-frontend__preview p { margin: .55em 0; }                           /* CHANGED: .55em */
+.ppa-frontend__preview ul, .ppa-frontend__preview ol { margin: .6em 1.25em; }
+
+/* ---------- Responsive ---------------------------------------------------------------- */
+@media (min-width: 680px) {
+  .ppa-frontend__form-inner {
+    grid-template-columns: 1fr 1fr;   /* Subject | Brief side-by-side */
+  }
+  .ppa-frontend__row {
+    grid-template-columns: 1fr 1fr 140px; /* Genre | Tone | Word Count */
+  }
+  .ppa-frontend__btn { margin-top: 4px; }
+}
+
+@media (min-width: 980px) {
+  .ppa-frontend { padding: 22px; }
+}

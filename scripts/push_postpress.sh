@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# push_postpress.sh
+# CHANGED: 2025-10-16 — created by assistant per Wayne's request
+# Single-script: init (if needed) → add → commit → push to git@github.com:techwithwayne/postpress-ai.git
+# Run on SiteGround as your deploy user (from shell). Use absolute paths.
+set -euo pipefail
+
+# CHANGED: safe absolute paths set
+PLUGIN_DIR="/home/customer/www/techwithwayne.com/public_html/wp-content/plugins/postpress-ai"
+REPO="git@github.com:techwithwayne/postpress-ai.git"
+TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+BRANCH="feat/ppa-deploy-${TIMESTAMP}"
+GITIGNORE_CONTENT="node_modules/\nvendor/\n.env\n*.bak\n*.orig\n*.zip\n.DS_Store\n.idea/\n.vscode/\n"
+
+echo "PPA: Starting push script at ${TIMESTAMP}"
+echo "PPA: Plugin dir: ${PLUGIN_DIR}"
+cd "${PLUGIN_DIR}"
+
+# 1) Ensure repo initialized
+if [ ! -d "${PLUGIN_DIR}/.git" ]; then
+  echo "PPA: .git missing — initializing repository"
+  git init
+fi
+
+# 2) Ensure remote origin exists and matches expected repo
+if git remote get-url origin >/dev/null 2>&1; then
+  CURRENT_REMOTE=$(git remote get-url origin)
+  echo "PPA: existing origin -> ${CURRENT_REMOTE}"
+  if [ "${CURRENT_REMOTE}" != "${REPO}" ]; then
+    echo "PPA: resetting origin to ${REPO}"
+    git remote remove origin || true
+    git remote add origin "${REPO}"
+  fi
+else
+  echo "PPA: adding origin ${REPO}"
+  git remote add origin "${REPO}"
+fi
+
+# 3) Ensure minimal .gitignore
+if [ ! -f .gitignore ]; then
+  printf "${GITIGNORE_CONTENT}" > .gitignore
+  echo "PPA: created .gitignore"
+else
+  # Ensure required patterns exist (idempotent)
+  printf "${GITIGNORE_CONTENT}" >> .gitignore.tmp
+  sort -u .gitignore.tmp .gitignore -o .gitignore || true
+  rm -f .gitignore.tmp
+  echo "PPA: ensured .gitignore contains standard ignores"
+fi
+
+# 4) Stage everything
+git add -A
+echo "PPA: staged changes"
+
+# 5) If no changes, exit gracefully
+STATUS=$(git status --porcelain)
+if [ -z "${STATUS}" ]; then
+  echo "PPA: No changes to commit. Exiting."
+  exit 0
+fi
+
+# 6) Ensure git user config (local)
+git config user.email "dev@techwithwayne.com" || true
+git config user.name "Tech With Wayne" || true
+
+# 7) Create branch and commit
+git checkout -b "${BRANCH}"
+git commit -m "deploy: snapshot ${TIMESTAMP}"
+echo "PPA: committed as ${BRANCH}"
+
+# 8) Push and capture result
+echo "PPA: pushing to origin/${BRANCH} ..."
+if git push -u origin "${BRANCH}"; then
+  echo "PPA: push succeeded → branch: ${BRANCH}"
+  echo "PPA: You can now create a PR or merge as needed."
+  exit 0
+else
+  echo "PPA: git push failed. Most common cause: SSH key / deploy-key not configured for git@github.com"
+  echo "PPA: Troubleshooting steps (copy/paste):"
+  echo ""
+  echo "1) Test SSH connection to GitHub:"
+  echo "   ssh -T git@github.com || true"
+  echo ""
+  echo "2) If you see 'Permission denied (publickey)', generate a deploy key on the server and add the public key to the repo (Settings → Deploy keys → Add deploy key with write access):"
+  echo "   ssh-keygen -t ed25519 -C 'deploy@techwithwayne' -f ~/.ssh/postpress_ai_deploy -N ''"
+  echo "   # Print the public key so you can paste it into GitHub (do NOT paste private key):"
+  echo "   cat ~/.ssh/postpress_ai_deploy.pub"
+  echo ""
+  echo "3) Add the private key to ssh-agent (optional):"
+  echo "   eval \"\$(ssh-agent -s)\""
+  echo "   ssh-add ~/.ssh/postpress_ai_deploy"
+  echo ""
+  echo "4) Re-run test:"
+  echo "   ssh -T git@github.com || true"
+  echo ""
+  echo "5) After adding the Deploy key on GitHub (write access), retry the push manually:"
+  echo "   git push -u origin ${BRANCH}"
+  echo ""
+  echo "If you prefer to use an existing SSH key (e.g., ~/.ssh/id_ed25519), ensure it is present and loaded into ssh-agent, and that the corresponding public key is added to your GitHub account or repo deploy keys."
+  exit 2
+fi
