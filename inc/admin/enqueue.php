@@ -144,6 +144,7 @@ if (!function_exists('ppa_admin_enqueue')) {
 		);
 
 		$script_handles = array(
+						'ppa-genre-select',
 			'ppa-admin-config',
 			'ppa-admin-core',
 			'ppa-admin-api',
@@ -316,6 +317,23 @@ if (!function_exists('ppa_admin_enqueue')) {
 			}
 		}
 
+
+					// Composer-only: Genre select enhancer (Search + Favorites + Recent)
+					if ($current === 'composer') {
+							$genre_rel  = 'assets/js/ppa-genre-select.js';
+							$genre_file = $asset_path($genre_rel);
+
+							if (file_exists($genre_file) && wp_script_is('ppa-admin', 'enqueued')) {
+									wp_register_script(
+											'ppa-genre-select',
+											$asset_url($genre_rel),
+											array('ppa-admin'),
+											$asset_ver($genre_file),
+											true
+									);
+									wp_enqueue_script('ppa-genre-select');
+							}
+					}
 		// Testbed-only script (optional)
 		if ($current === 'testbed') {
 			$testbed_rel  = 'inc/admin/ppa-testbed.js';
