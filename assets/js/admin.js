@@ -651,6 +651,9 @@
     var subjectEl  = $('#ppa-subject'); // CHANGED:
     var briefEl    = $('#ppa-brief');   // CHANGED:
     var genreEl    = $('#ppa-genre');   // CHANGED:
+
+    const industryEl = document.querySelector('#ppa-industry');
+    const industry = industryEl ? industryEl.value.trim() : '';
     var toneEl     = $('#ppa-tone');    // CHANGED:
     var wcEl       = $('#ppa-word-count'); // CHANGED:
     var audienceEl = $('#ppa-audience'); // CHANGED:
@@ -664,7 +667,8 @@
 
     return { // CHANGED:
       subject: subject, // CHANGED:
-      genre: genre, // CHANGED:
+      genre: genre,     industry: industry,
+// CHANGED:
       tone: tone, // CHANGED:
       word_count: wc, // CHANGED:
       audience: audience, // CHANGED:
