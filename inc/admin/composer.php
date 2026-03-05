@@ -135,7 +135,32 @@ $ppa_tone_options = array( // CHANGED:
 		<!-- Live notice region consumed by admin.js -->
 		<div id="ppa-toolbar-msg" class="ppa-notice" role="status" aria-live="polite"></div>
 
-		<div class="ppa-form-group">
+		<div class="ppa-field">
+				  <label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
+				  <input
+				    type="text"
+				    id="ppa-industry"
+				    name="ppa-industry"
+				    list="ppa-industry-list"
+				    placeholder="Fitness, Real Estate, SaaS…"
+				    autocomplete="off"
+				  / autofocus>
+				  <datalist id="ppa-industry-list">
+				    <option value="Fitness"></option>
+				    <option value="Real Estate"></option>
+				    <option value="SaaS"></option>
+				    <option value="Ecommerce"></option>
+				    <option value="Coaching / Consulting"></option>
+				    <option value="Local Services"></option>
+				    <option value="Healthcare"></option>
+				    <option value="Law"></option>
+				    <option value="Finance"></option>
+				    <option value="Education"></option>
+				    <option value="Nonprofit"></option>
+				  </datalist>
+				  <p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
+				</div>
+<div class="ppa-form-group">
 			<label for="ppa-subject"><?php echo esc_html__( 'Subject / Title', 'postpress-ai' ); ?></label>
 			<input type="text" id="ppa-subject" placeholder="<?php echo esc_attr__( 'What is this post about?', 'postpress-ai' ); ?>">
 		</div>
@@ -158,31 +183,7 @@ $ppa_tone_options = array( // CHANGED:
 					<?php endforeach; ?>
 				</select>
 			</div>
-				<div class="ppa-field">
-				  <label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
-				  <input
-				    type="text"
-				    id="ppa-industry"
-				    name="ppa-industry"
-				    list="ppa-industry-list"
-				    placeholder="Fitness, Real Estate, SaaS…"
-				    autocomplete="off"
-				  />
-				  <datalist id="ppa-industry-list">
-				    <option value="Fitness"></option>
-				    <option value="Real Estate"></option>
-				    <option value="SaaS"></option>
-				    <option value="Ecommerce"></option>
-				    <option value="Coaching / Consulting"></option>
-				    <option value="Local Services"></option>
-				    <option value="Healthcare"></option>
-				    <option value="Law"></option>
-				    <option value="Finance"></option>
-				    <option value="Education"></option>
-				    <option value="Nonprofit"></option>
-				  </datalist>
-				  <p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
-				</div>
+				
 
 
 			<div class="ppa-form-group">
