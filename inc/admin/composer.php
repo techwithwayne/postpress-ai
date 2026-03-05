@@ -158,6 +158,32 @@ $ppa_tone_options = array( // CHANGED:
 					<?php endforeach; ?>
 				</select>
 			</div>
+				<div class="ppa-field">
+				  <label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
+				  <input
+				    type="text"
+				    id="ppa-industry"
+				    name="ppa-industry"
+				    list="ppa-industry-list"
+				    placeholder="Fitness, Real Estate, SaaS…"
+				    autocomplete="off"
+				  />
+				  <datalist id="ppa-industry-list">
+				    <option value="Fitness"></option>
+				    <option value="Real Estate"></option>
+				    <option value="SaaS"></option>
+				    <option value="Ecommerce"></option>
+				    <option value="Coaching / Consulting"></option>
+				    <option value="Local Services"></option>
+				    <option value="Healthcare"></option>
+				    <option value="Law"></option>
+				    <option value="Finance"></option>
+				    <option value="Education"></option>
+				    <option value="Nonprofit"></option>
+				  </datalist>
+				  <p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
+				</div>
+
 
 			<div class="ppa-form-group">
 				<label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
