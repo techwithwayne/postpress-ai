@@ -807,3 +807,384 @@ body.toplevel_page_postpress-ai #ppa-composer .ppa-preview-panel h1{
   font-weight: 400 !important;
 }
 
+
+
+/* --- PPA Industry polish --- */
+.ppa-form-group.ppa-half{
+  width: 50%;
+  max-width: 50%;
+}
+.ppa-form-group.ppa-half #ppa-industry{
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* responsive: full width on smaller screens */
+@media (max-width: 1100px){
+  .ppa-form-group.ppa-half{
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+
+/* PPA GENRE ENHANCER PANEL (v3) */
+#ppa-genre-panel-v3{
+  background:#1c1c1c !important; /* override inline rgba() */
+  border:1px solid #333 !important;
+  box-shadow:0 12px 30px rgba(0,0,0,0.55) !important;
+}
+
+#ppa-genre-panel-v3 *{
+  color:#fff;
+}
+
+#ppa-genre-panel-v3 input{
+  background:#2b2b2b;
+  border:1px solid #444;
+  color:#fff;
+}
+#ppa-genre-panel-v3 input:focus{
+  outline:none;
+  border-color:var(--ppa-accent,#ff6c00);
+  box-shadow:0 0 0 1px var(--ppa-accent,#ff6c00);
+}
+
+
+/* PPA GENRE SELECT BUTTON (force match) */
+#ppa-genre-select-btn.ppa-btn.ppa-btn-secondary{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:10px 18px !important;
+  border-radius:6px !important;
+  font-weight:600 !important;
+  line-height:1 !important;
+  background:#2b2b2b !important;
+  color:#fff !important;
+  border:1px solid #333 !important;
+}
+#ppa-genre-select-btn.ppa-btn.ppa-btn-secondary:hover{
+  background:#3a3a3a !important;
+}
+
+/* Force Genre Select button to match "Save Draft (Store)" secondary style */
+#ppa-genre-select-btn.ppa-btn.ppa-btn-secondary{
+  appearance: none !important;
+  -webkit-appearance: none !important;
+
+  background: transparent !important;
+  border: 2px solid #FF7A00 !important;
+  color: #FF7A00 !important;
+
+  border-radius: 999px !important;
+  padding: 10px 18px !important;
+
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+
+  cursor: pointer !important;
+}
+
+#ppa-genre-select-btn.ppa-btn.ppa-btn-secondary:hover,
+#ppa-genre-select-btn.ppa-btn.ppa-btn-secondary:focus{
+  background: rgba(255, 122, 0, 0.10) !important;
+  box-shadow: 0 0 0 2px rgba(255, 122, 0, 0.25) !important;
+  outline: none !important;
+}
+
+/* --- PPA UI: click-to-open help tooltips (LAW hotfix) --- */
+.ppa-help-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  width:18px;
+  height:18px;
+  margin-left:8px;
+
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.06);
+
+  color:#ffffff;
+  font-size:12px;
+  font-weight:700;
+  line-height:1;
+
+  cursor:pointer;
+  user-select:none;
+}
+
+.ppa-help-icon:hover{
+  background: rgba(255,255,255,0.12);
+}
+
+.ppa-help-icon:focus{
+  outline: none;
+  border-color: #FF7A00;
+  box-shadow: 0 0 0 2px rgba(255,122,0,0.25);
+}
+
+#ppa-tooltip.ppa-tooltip{
+  position:absolute;
+  z-index: 999999;
+
+  display:none;
+
+  max-width: 340px;
+  padding: 10px 12px;
+
+  background: rgba(18,18,18,0.98);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 12px;
+
+  box-shadow: 0 10px 34px rgba(0,0,0,0.55);
+
+  color:#EDEDED;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#ppa-tooltip.ppa-tooltip::before{
+  content:'';
+  position:absolute;
+  top:-6px;
+  left:14px;
+
+  width:10px;
+  height:10px;
+
+  background: rgba(18,18,18,0.98);
+  border-left: 1px solid rgba(255,255,255,0.14);
+  border-top: 1px solid rgba(255,255,255,0.14);
+  transform: rotate(45deg);
+}
+
+
+/* --- PPA UI polish: tooltips + genre button layout (LAW hotfix v2) --- */
+
+/* Keep help icon aligned next to titles */
+.ppa-has-help{
+  display:flex !important;
+  align-items:center !important;
+  gap:6px !important;
+}
+
+/* Arrow position becomes dynamic via CSS var set in JS */
+#ppa-tooltip.ppa-tooltip::before{
+  left: var(--ppa-tip-arrow-left, 14px) !important;
+}
+
+/* Genre: make Select button match input width + add spacing */
+input[placeholder="Search genres..."]{
+  width:100% !important;
+  display:block !important;
+}
+
+#ppa-genre-select-btn{
+  display:block !important;
+  width:100% !important;
+  margin-top:10px !important;
+  align-self:stretch !important;
+  text-align:center !important;
+}
+
+/* --- PPA UI polish: tooltips + genre button layout (LAW hotfix v2) --- */
+
+/* Keep help icon aligned next to titles */
+.ppa-has-help{
+  display:flex !important;
+  align-items:center !important;
+  gap:6px !important;
+}
+
+/* Arrow position becomes dynamic via CSS var set in JS */
+#ppa-tooltip.ppa-tooltip::before{
+  left: var(--ppa-tip-arrow-left, 14px) !important;
+}
+
+/* Genre: make Select button match input width + add spacing */
+input[placeholder="Search genres..."]{
+  width:100% !important;
+  display:block !important;
+}
+
+#ppa-genre-select-btn{
+  display:block !important;
+  width:100% !important;
+  margin-top:10px !important;
+  align-self:stretch !important;
+  text-align:center !important;
+}
+
+/* --- PPA Prestige v3: single tooltip next to labels + clean Genre --- */
+
+/* Label + help icon alignment (works even when label wraps) */
+label.ppa-has-help,
+.ppa-field-label.ppa-has-help,
+.ppa-label.ppa-has-help,
+.ppa-field-title.ppa-has-help{
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+}
+
+/* Tooltip arrow alignment uses CSS var set in JS */
+#ppa-tooltip.ppa-tooltip::before{
+  left: var(--ppa-tip-arrow-left, 14px) !important;
+}
+
+/* Genre: Select button matches search input width + 10px spacing */
+#ppa-genre-select-btn{
+  display:block !important;
+  width:100% !important;
+  margin-top:10px !important;
+  text-align:center !important;
+}
+
+/* Clear: gone forever (CSS layer) */
+#ppa-genre-clear-btn,
+.ppa-genre-clear-btn{
+  display:none !important;
+}
+
+
+/* === PPA Prestige: zero microcopy (labels + inputs only) === */
+
+/* Kill CSS-injected header + status text blocks */
+body.toplevel_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap::before,
+body.postpress-ai_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap::before,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-composer-wrap::before,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-composer-wrap::before{
+  content: none !important;
+  display: none !important;
+}
+
+/* Remove extra grid rows that were only there to make room for the injected header/status */
+body.toplevel_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap,
+body.postpress-ai_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap{
+  grid-template-rows: none !important;
+}
+
+/* Left panel: remove *all* paragraph-based microcopy (Signed in, helper blocks, etc.) */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel p,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-form-panel p{
+  display: none !important;
+}
+
+/* Also hide common helper containers (in case they aren’t <p>) */
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel .description,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel small,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel .ppa-subhead,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-form-panel .ppa-inline-help,
+body.toplevel_page_postpress-ai #ppa-composer .ppa-note,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-form-panel .description,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-form-panel small,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-form-panel .ppa-subhead,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-form-panel .ppa-inline-help,
+body.postpress-ai_page_postpress-ai #ppa-composer .ppa-note{
+  display: none !important;
+}
+
+/* Preview panel helper text only (keep actual generated preview content) */
+body.toplevel_page_postpress-ai #ppa-output-language-help,
+body.postpress-ai_page_postpress-ai #ppa-output-language-help{
+  display: none !important;
+}
+
+/* Hide the placeholder “(Preview will appear…)” only */
+body.toplevel_page_postpress-ai #ppa-preview-pane > em,
+body.postpress-ai_page_postpress-ai #ppa-preview-pane > em{
+  display: none !important;
+}
+
+
+/* === PPA Prestige FINAL: no helper microcopy text anywhere (labels/inputs/buttons only) === */
+
+/* Kill the duplicated Genre helper blocks (your screenshot shows these exact classes) */
+.ppa-genre-help-v2,
+.ppa-genre-help-v3{
+  display:none !important;
+}
+
+/* Kill any remaining “helper” copy blocks in the left form panel */
+#ppa-composer .ppa-form-panel .description,
+#ppa-composer .ppa-form-panel small,
+#ppa-composer .ppa-form-panel .ppa-note,
+#ppa-composer .ppa-form-panel .ppa-inline-help,
+#ppa-composer .ppa-form-panel .ppa-help-text,
+#ppa-composer .ppa-form-panel .ppa-subhead,
+#ppa-composer .ppa-form-panel .ppa-hint,
+#ppa-composer .ppa-form-panel .ppa-helper,
+#ppa-composer .ppa-form-panel .help,
+#ppa-composer .ppa-form-panel em{
+  display:none !important;
+}
+
+/* Kill preview panel helper microcopy (keep actual preview content) */
+#ppa-output-language-help,
+#ppa-preview-pane > em,
+#ppa-preview-pane .description,
+#ppa-preview-pane small,
+#ppa-preview-pane .ppa-note,
+#ppa-preview-pane .ppa-inline-help,
+#ppa-preview-pane .ppa-help-text{
+  display:none !important;
+}
+
+/* Kill the top “Ready…” notice bar text if it exists */
+#ppa-toolbar-msg,
+.ppa-notice[role="status"],
+.ppa-toolbar-msg{
+  display:none !important;
+}
+
+/* Clear button: gone forever (even if JS injects it later) */
+#ppa-genre-clear-btn,
+.ppa-genre-clear-btn{
+  display:none !important;
+}
+
+
+/* === Genre Dropdown FIX (CSS-only): hide legacy list rendered in page flow === */
+/* Anything rendered after the Genre tools block inside the same form group is legacy clutter. */
+#ppa-composer .ppa-form-group .ppa-genre-tools ~ *{
+  display:none !important;
+}
+
+/* Ensure our popover is not affected (it lives INSIDE .ppa-genre-tools). */
+#ppa-composer .ppa-genre-tools .ppa-genre-popover-final{
+  display:none; /* default closed; JS toggles to block */
+}
+
+/* Keep Select button prestige: full width + 10px gap under search field */
+#ppa-composer #ppa-genre-select-btn{
+  display:block !important;
+  width:100% !important;
+  margin-top:10px !important;
+}
+
+
+/* === Genre select (native) matches other selects === */
+#ppa-composer #ppa-genre{
+  width:100% !important;
+  display:block !important;
+}
+
+
+/* === Genre optgroup headings: make section labels visible === */
+/* Optgroup headers often render on a light strip; make text dark + bold. */
+#ppa-composer #ppa-genre optgroup{
+  color: #111 !important;
+  font-weight: 800 !important;
+}
+
+/* Keep options readable on the dark dropdown style. */
+#ppa-composer #ppa-genre option{
+  color: #EDEDED !important;
+  font-weight: 500 !important;
+}
+

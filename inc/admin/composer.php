@@ -55,6 +55,145 @@ if ( function_exists( 'set_url_scheme' ) ) { // CHANGED:
 
 // CHANGED: Centralized option lists (markup-only; does NOT affect CSS).
 // Values are stable machine slugs; labels are translated display strings. // CHANGED:
+
+	// Genre options (grouped; rendered with <optgroup>) // CHANGED:
+	$ppa_genre_groups = [
+		'__ungrouped__' => [
+			'Auto' => 'Auto',
+		],
+
+		'Core' => [
+			'Blog Post' => 'Blog Post',
+			'Explainer' => 'Explainer',
+			'Overview' => 'Overview',
+			'Background' => 'Background',
+			'News' => 'News',
+			'Opinion' => 'Opinion',
+			'Editorial' => 'Editorial',
+			'Thought Leadership' => 'Thought Leadership',
+			'Commentary' => 'Commentary',
+			'Myth vs Fact' => 'Myth vs Fact',
+			'Story' => 'Story',
+			'Interview' => 'Interview',
+			'Profile' => 'Profile',
+		],
+
+		'How-to & Educational' => [
+			'How-to' => 'How-to',
+			'Guide' => 'Guide',
+			'Tutorial' => 'Tutorial',
+			'Walkthrough' => 'Walkthrough',
+			'Quickstart' => 'Quickstart',
+			'Getting Started' => 'Getting Started',
+			'Checklist' => 'Checklist',
+			'Cheat Sheet' => 'Cheat Sheet',
+			'Best Practices' => 'Best Practices',
+			'Mistakes to Avoid' => 'Mistakes to Avoid',
+			'Troubleshooting' => 'Troubleshooting',
+			'FAQ' => 'FAQ',
+			'Q&A' => 'Q&A',
+			'Glossary' => 'Glossary',
+			'Template' => 'Template',
+			'Playbook' => 'Playbook',
+			'Framework' => 'Framework',
+			'SOP' => 'SOP',
+		],
+
+		'Lists & Curated' => [
+			'Listicle' => 'Listicle',
+			'Roundup' => 'Roundup',
+			'Resource List' => 'Resource List',
+			'Tool List' => 'Tool List',
+			'Examples' => 'Examples',
+			'Ideas' => 'Ideas',
+		],
+
+		'Evaluation & Decision' => [
+			'Review' => 'Review',
+			'Comparison' => 'Comparison',
+			'Alternatives' => 'Alternatives',
+			'Pros and Cons' => 'Pros and Cons',
+			'Buying Guide' => 'Buying Guide',
+			'Decision Guide' => 'Decision Guide',
+			'Recommendations' => 'Recommendations',
+		],
+
+		'Product & Company' => [
+			'Product Overview' => 'Product Overview',
+			'Feature Spotlight' => 'Feature Spotlight',
+			'Use Case' => 'Use Case',
+			'Case Study' => 'Case Study',
+			'Customer Story' => 'Customer Story',
+			'Success Story' => 'Success Story',
+			'Testimonial Roundup' => 'Testimonial Roundup',
+			'Release Notes' => 'Release Notes',
+			'Changelog' => 'Changelog',
+			'Product Update' => 'Product Update',
+			'Company Update' => 'Company Update',
+			'Announcement' => 'Announcement',
+			'Press Release' => 'Press Release',
+			'Policy Statement' => 'Policy Statement',
+		],
+
+		'Marketing & Sales' => [
+			'Landing Page Copy' => 'Landing Page Copy',
+			'Sales Page Copy' => 'Sales Page Copy',
+			'Pricing Page Copy' => 'Pricing Page Copy',
+			'Ad Copy' => 'Ad Copy',
+			'Objection Handling' => 'Objection Handling',
+			'Competitive Teardown' => 'Competitive Teardown',
+			'Email Newsletter' => 'Email Newsletter',
+			'Welcome Email' => 'Welcome Email',
+			'Sales Email' => 'Sales Email',
+			'Cold Email' => 'Cold Email',
+			'Follow-up Email' => 'Follow-up Email',
+			'Drip Sequence' => 'Drip Sequence',
+			'Nurture Sequence' => 'Nurture Sequence',
+		],
+
+		'SEO & Strategy' => [
+			'Pillar Page' => 'Pillar Page',
+			'Cluster Post' => 'Cluster Post',
+			'Local Guide' => 'Local Guide',
+			'Beginner Guide' => 'Beginner Guide',
+			'Advanced Guide' => 'Advanced Guide',
+		],
+
+		'Research & Longform' => [
+			'Report' => 'Report',
+			'Industry Trends' => 'Industry Trends',
+			'Market Analysis' => 'Market Analysis',
+			'Benchmark Report' => 'Benchmark Report',
+			'Survey Results' => 'Survey Results',
+			'Whitepaper' => 'Whitepaper',
+			'Ebook' => 'Ebook',
+		],
+
+		'Social Media' => [
+			'Social Post' => 'Social Post',
+			'Short Social Caption' => 'Short Social Caption',
+			'Thread' => 'Thread',
+			'Carousel Copy' => 'Carousel Copy',
+		],
+
+		'Audio & Video' => [
+			'Video Script' => 'Video Script',
+			'Short Video Script' => 'Short Video Script',
+			'Podcast Outline' => 'Podcast Outline',
+			'Podcast Script' => 'Podcast Script',
+			'Webinar Outline' => 'Webinar Outline',
+			'Presentation Outline' => 'Presentation Outline',
+		],
+	];
+
+	// Keep a flattened legacy map available (safety) // CHANGED:
+	$ppa_genre_options = [];
+	foreach ( $ppa_genre_groups as $g => $opts ) {
+		foreach ( $opts as $val => $label ) {
+			$ppa_genre_options[ $val ] = $label;
+		}
+	}
+
 $ppa_genre_options = array( // CHANGED:
 	''               => __( 'Auto', 'postpress-ai' ), // CHANGED:
 	'blog_post'		 => __('Blog Post', 'postpress-ai'),
@@ -135,7 +274,62 @@ $ppa_tone_options = array( // CHANGED:
 		<!-- Live notice region consumed by admin.js -->
 		<div id="ppa-toolbar-msg" class="ppa-notice" role="status" aria-live="polite"></div>
 
-		<div class="ppa-form-group">
+		
+		
+		<div class="ppa-form-group ppa-half">
+			<label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
+			<select id="ppa-industry" name="ppa-industry">
+				<option value=""><?php echo esc_html__( 'Select an industry…', 'postpress-ai' ); ?></option>
+				<option value="Advertising & Marketing">Advertising & Marketing</option>
+				<option value="Accounting / Bookkeeping">Accounting / Bookkeeping</option>
+				<option value="Agency (Creative / Marketing)">Agency (Creative / Marketing)</option>
+				<option value="Architecture">Architecture</option>
+				<option value="Automotive">Automotive</option>
+				<option value="Beauty / Salon / Spa">Beauty / Salon / Spa</option>
+				<option value="Childcare">Childcare</option>
+				<option value="Cleaning Services">Cleaning Services</option>
+				<option value="Coaching / Consulting">Coaching / Consulting</option>
+				<option value="Construction">Construction</option>
+				<option value="Creator / Influencer">Creator / Influencer</option>
+				<option value="Dentistry">Dentistry</option>
+				<option value="Ecommerce">Ecommerce</option>
+				<option value="Education / Courses">Education / Courses</option>
+				<option value="Entertainment / Media">Entertainment / Media</option>
+				<option value="Event Planning">Event Planning</option>
+				<option value="Finance / Investing">Finance / Investing</option>
+				<option value="Fitness / Gym">Fitness / Gym</option>
+				<option value="Food & Beverage / Restaurant">Food & Beverage / Restaurant</option>
+				<option value="Healthcare / Medical">Healthcare / Medical</option>
+				<option value="Home Services (Plumbing/HVAC/Electric)">Home Services (Plumbing/HVAC/Electric)</option>
+				<option value="Hospitality / Hotels">Hospitality / Hotels</option>
+				<option value="Insurance">Insurance</option>
+				<option value="IT Services / MSP">IT Services / MSP</option>
+				<option value="Law / Legal">Law / Legal</option>
+				<option value="Local Services">Local Services</option>
+				<option value="Manufacturing">Manufacturing</option>
+				<option value="Nonprofit">Nonprofit</option>
+				<option value="Photography / Video">Photography / Video</option>
+				<option value="Professional Services">Professional Services</option>
+				<option value="Real Estate (Residential)">Real Estate (Residential)</option>
+				<option value="Real Estate (Commercial)">Real Estate (Commercial)</option>
+				<option value="Recruiting / HR">Recruiting / HR</option>
+				<option value="Retail (Brick & Mortar)">Retail (Brick & Mortar)</option>
+				<option value="SaaS / Software">SaaS / Software</option>
+				<option value="Security Services">Security Services</option>
+				<option value="Travel">Travel</option>
+				<option value="Wellness / Therapy">Wellness / Therapy</option>
+				<option value="Other">Other</option>
+				<option value="Farming">Farming</option>
+				<option value="Fashion">Fashion</option>
+				<option value="Aerospace">Aerospace</option>
+				<option value="Film & Video">Film & Video</option>
+				<option value="Software Development">Software Development</option>
+			</select>
+			<p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
+		</div>
+
+
+<div class="ppa-form-group">
 			<label for="ppa-subject"><?php echo esc_html__( 'Subject / Title', 'postpress-ai' ); ?></label>
 			<input type="text" id="ppa-subject" placeholder="<?php echo esc_attr__( 'What is this post about?', 'postpress-ai' ); ?>">
 		</div>
@@ -153,11 +347,23 @@ $ppa_tone_options = array( // CHANGED:
 			<div class="ppa-form-group">
 				<label for="ppa-genre"><?php echo esc_html__( 'Genre', 'postpress-ai' ); ?></label>
 				<select id="ppa-genre">
-					<?php foreach ( $ppa_genre_options as $val => $label ) : ?>
-						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
-					<?php endforeach; ?>
-				</select>
+					<?php foreach ( $ppa_genre_groups as $group_label => $options ) : ?>
+	<?php if ( '__ungrouped__' === $group_label ) : ?>
+		<?php foreach ( $options as $val => $label ) : ?>
+			<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+		<?php endforeach; ?>
+	<?php else : ?>
+		<optgroup label="<?php echo esc_attr( $group_label ); ?>">
+			<?php foreach ( $options as $val => $label ) : ?>
+				<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+			<?php endforeach; ?>
+		</optgroup>
+	<?php endif; ?>
+<?php endforeach; ?>
+</select>
 			</div>
+				
+
 
 			<div class="ppa-form-group">
 				<label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
@@ -169,7 +375,7 @@ $ppa_tone_options = array( // CHANGED:
 			</div>
 
 			<div class="ppa-form-group">
-				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count (Preview)', 'postpress-ai' ); ?></label>
+				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count', 'postpress-ai' ); ?></label>
 
 				<?php
 				// CHANGED: Keep this <input> as one uninterrupted tag line.

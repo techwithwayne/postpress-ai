@@ -1,0 +1,193 @@
+/* PostPress AI Composer: tooltips-only (Genre is native <select>) */
+(function(){
+  if (window.__ppaTooltipsOnlyInit) return;
+  window.__ppaTooltipsOnlyInit = true;
+
+  function ready(fn){
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+    else fn();
+  }
+
+  function cleanText(t){
+    return (t || '').replace(/\?/g,'').replace(/\s+/g,' ').trim();
+  }
+
+  function helpFor(label){
+    var k = cleanText(label).toLowerCase();
+    var map = {
+      'industry': 'Optional. Adds context so the AI uses better examples, language, and objections.',
+      'subject / title': 'What the post is about. Be specific (topic + outcome).',
+      'target audience': 'Who this is for. Helps the AI pick the right tone, examples, and level of detail.',
+      'genre': 'Optional. The content format / marketing angle.',
+      'tone': 'Optional. Leave Auto unless you need a specific vibe.',
+      'word count': 'Preview length. Default: 800. Minimum: 300. Maximum: 1,200.',
+      'word count (preview)': 'Preview length. Default: 800. Minimum: 300. Maximum: 1,200.',
+      'optional brief / extra instructions': 'Optional. Add constraints, links, and must-follow details.',
+      'advanced (optional)': 'Optional. Extra settings for power users.',
+      'language': 'Choose what language the preview should be written in.',
+      'show outline': 'When enabled, the preview includes an outline for faster scanning.'
+    };
+    return map[k] || ('Info for: ' + cleanText(label));
+  }
+
+  ready(function(){
+    
+  /* PPA: strip foreign admin notices inside #ppa-composer */
+  (function(){
+    function stripForeignNotices(){
+      var root = document.getElementById('ppa-composer');
+      if (!root) return;
+
+      // Remove any WP/plugin notices injected into our container (keep our own)
+      var bad = root.querySelectorAll(
+        '.notice, .update-nag, .astra-notice, .astra-notice-wrapper, #presto-player-optin-notice'
+      );
+      bad.forEach(function(n){
+        if (!n) return;
+        // Keep our own message region
+        if (n.id === 'ppa-toolbar-msg') return;
+        if (n.classList && n.classList.contains('ppa-notice')) return;
+        n.remove();
+      });
+    }
+
+    // Run now + keep running
+    stripForeignNotices();
+
+    var root = document.getElementById('ppa-composer');
+    if (!root) return;
+
+    var obs = new MutationObserver(function(){
+      stripForeignNotices();
+    });
+    obs.observe(root, { childList: true, subtree: true });
+  })();
+try{
+      var scope =
+        document.querySelector('#ppa-composer') ||
+        document.querySelector('.ppa-composer') ||
+        document.querySelector('#wpbody-content') ||
+        document;
+
+      // Remove legacy Genre junk if any was injected earlier
+      scope.querySelectorAll('.ppa-genre-popover-final, .ppa-genre-help-v2, .ppa-genre-help-v3').forEach(function(n){ n.remove(); });
+      scope.querySelectorAll('#ppa-genre-clear-btn, .ppa-genre-clear-btn').forEach(function(n){ n.remove(); });
+      scope.querySelectorAll('button').forEach(function(b){
+        if ((b.textContent || '').trim().toLowerCase() === 'clear') b.remove();
+      });
+
+      // Tooltip singleton
+      var tooltipEl = document.getElementById('ppa-tooltip');
+      if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.id = 'ppa-tooltip';
+        tooltipEl.className = 'ppa-tooltip';
+        tooltipEl.style.display = 'none';
+        tooltipEl.innerHTML = '<div class="ppa-tooltip-inner"></div>';
+        document.body.appendChild(tooltipEl);
+      }
+      var inner = tooltipEl.querySelector('.ppa-tooltip-inner');
+      var openFor = null;
+
+      function closeTip(){
+        tooltipEl.style.display = 'none';
+        tooltipEl.style.visibility = 'visible';
+        openFor = null;
+      }
+
+      function positionTip(anchor){
+        var rect = anchor.getBoundingClientRect();
+        var scrollX = window.scrollX || window.pageXOffset || 0;
+        var scrollY = window.scrollY || window.pageYOffset || 0;
+
+        tooltipEl.style.display = 'block';
+        tooltipEl.style.visibility = 'hidden';
+
+        var left = rect.left + scrollX;
+        var topBelow = rect.bottom + scrollY + 8;
+
+        tooltipEl.style.left = left + 'px';
+        tooltipEl.style.top = topBelow + 'px';
+
+        var ttRect = tooltipEl.getBoundingClientRect();
+        var minLeft = scrollX + 12;
+        var maxLeft = scrollX + window.innerWidth - ttRect.width - 12;
+
+        if (left > maxLeft) left = maxLeft;
+        if (left < minLeft) left = minLeft;
+
+        var viewportBottom = scrollY + window.innerHeight - 12;
+        var top = topBelow;
+        if (topBelow + ttRect.height > viewportBottom) {
+          top = rect.top + scrollY - ttRect.height - 8;
+        }
+        if (top < scrollY + 12) top = scrollY + 12;
+
+        tooltipEl.style.left = left + 'px';
+        tooltipEl.style.top = top + 'px';
+
+        // arrow alignment via CSS var
+        var anchorCenterX = rect.left + (rect.width / 2) + scrollX;
+        var arrowLeft = anchorCenterX - left - 5;
+        if (arrowLeft < 14) arrowLeft = 14;
+        if (arrowLeft > ttRect.width - 24) arrowLeft = ttRect.width - 24;
+        tooltipEl.style.setProperty('--ppa-tip-arrow-left', arrowLeft + 'px');
+
+        tooltipEl.style.visibility = 'visible';
+      }
+
+      function attachToLabel(labelEl){
+        if (!labelEl) return;
+        if (labelEl.querySelector('.ppa-help-icon')) return;
+
+        var labelText = cleanText(labelEl.textContent);
+        if (!labelText) return;
+
+        labelEl.classList.add('ppa-has-help');
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ppa-help-icon';
+        btn.setAttribute('aria-label', labelText + ' help');
+        btn.textContent = '?';
+
+        btn.addEventListener('click', function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          if (openFor === btn) { closeTip(); return; }
+          openFor = btn;
+          inner.textContent = helpFor(labelText);
+          positionTip(btn);
+        });
+
+        labelEl.appendChild(btn);
+      }
+
+      // One tooltip icon per field label
+      scope.querySelectorAll('.ppa-form-group label').forEach(attachToLabel);
+
+      // Close behaviors
+      document.addEventListener('click', function(e){
+        if (tooltipEl.style.display === 'none') return;
+        if (tooltipEl.contains(e.target)) return;
+        if (openFor && openFor.contains && openFor.contains(e.target)) return;
+        closeTip();
+      });
+
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') closeTip();
+      });
+
+      window.addEventListener('scroll', function(){
+        if (tooltipEl.style.display !== 'none') closeTip();
+      }, true);
+
+      window.addEventListener('resize', function(){
+        if (tooltipEl.style.display !== 'none') closeTip();
+      });
+
+    } catch(err){
+      if (window.console && console.warn) console.warn('PPA tooltips-only init failed', err);
+    }
+  });
+})();
