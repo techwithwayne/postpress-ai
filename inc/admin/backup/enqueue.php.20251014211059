@@ -1,0 +1,103 @@
+<?php
+/**
+ * CHANGE LOG
+ * 2025-10-13 - v0.1.0
+ * - CHANGED: New safe include to enqueue admin assets used by the Composer UI.
+ * - CHANGED: Loads assets only when on Composer admin screens (screen id or page param).
+ * - CHANGED: Localizes window.PPA (ajax_url, preview_action, store_action, plugin_version).
+ * - CHANGED: Adds server-side error_log entries for quick verification.
+ *
+ * Author: Tech With Wayne / Assistant
+ */
+
+// CHANGED: Ensure file is loaded within WP
+if ( ! defined( 'ABSPATH' ) ) {
+    exit; // CHANGED:
+}
+
+// CHANGED: Avoid redeclaring the function if it exists
+if ( ! function_exists( 'ppa_admin_enqueue_assets' ) ) { // CHANGED:
+
+    /**
+     * Enqueue admin JS/CSS only for Composer admin screens.
+     *
+     * @param string $hook_suffix Admin page hook suffix (provided by WP).
+     */
+    function ppa_admin_enqueue_assets( $hook_suffix ) { // CHANGED:
+        // CHANGED: Only run in admin context
+        if ( ! is_admin() ) { // CHANGED:
+            return; // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: detect current screen if available
+        $screen = null; // CHANGED:
+        if ( function_exists( 'get_current_screen' ) ) { // CHANGED:
+            $screen = get_current_screen(); // CHANGED:
+        } // CHANGED:
+
+        $is_composer_screen = false; // CHANGED:
+
+        // CHANGED: detect by screen id (preferred)
+        if ( $screen && isset( $screen->id ) ) { // CHANGED:
+            $composer_ids = array( 'postpress-ai_page', 'postpress-ai_page_composer', 'postpress_ai', 'postpress-ai', 'postpress' ); // CHANGED:
+            foreach ( $composer_ids as $frag ) { // CHANGED:
+                if ( false !== strpos( $screen->id, $frag ) ) { // CHANGED:
+                    $is_composer_screen = true; // CHANGED:
+                    break; // CHANGED:
+                }
+            } // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: fallback via query param 'page' (common plugin admin pages)
+        if ( ! $is_composer_screen && isset( $_GET['page'] ) ) { // CHANGED:
+            $page = sanitize_text_field( wp_unslash( $_GET['page'] ) ); // CHANGED:
+            $composer_pages = array( 'postpress-ai-composer', 'postpress-ai_composer', 'postpress-ai', 'postpress_ai_composer' ); // CHANGED:
+            if ( in_array( $page, $composer_pages, true ) ) { // CHANGED:
+                $is_composer_screen = true; // CHANGED:
+            } // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: if not the composer screen, bail
+        if ( ! $is_composer_screen ) { // CHANGED:
+            return; // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: determine plugin base URL pointing to plugin root so assets resolve to /postpress-ai/assets/...
+        $possible_main = dirname( __FILE__, 3 ) . '/postpress-ai.php'; // CHANGED:
+        if ( file_exists( $possible_main ) ) { // CHANGED:
+            $plugin_base_url = plugin_dir_url( $possible_main ); // CHANGED:
+        } else { // CHANGED:
+            $plugin_base_url = plugin_dir_url( __DIR__ . '/../../postpress-ai.php' ); // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: compute asset version
+        if ( defined( 'PPA_PLUGIN_VERSION' ) ) { // CHANGED:
+            $version = PPA_PLUGIN_VERSION; // CHANGED:
+        } else { // CHANGED:
+            $js_file = WP_PLUGIN_DIR . '/postpress-ai/assets/js/admin.js'; // CHANGED:
+            $version = file_exists( $js_file ) ? (string) filemtime( $js_file ) : '1.0.0'; // CHANGED:
+        } // CHANGED:
+
+        // CHANGED: register & enqueue admin script (footer)
+        wp_register_script( 'ppa-admin', $plugin_base_url . 'assets/js/admin.js', array( 'jquery' ), $version, true ); // CHANGED:
+        wp_enqueue_script( 'ppa-admin' ); // CHANGED:
+
+        // CHANGED: localize data expected by admin.js
+        wp_localize_script( 'ppa-admin', 'PPA', array( // CHANGED:
+            'ajax_url'       => admin_url( 'admin-ajax.php' ), // CHANGED:
+            'preview_action' => 'ppa_preview', // CHANGED:
+            'store_action'   => 'ppa_store', // CHANGED:
+            'plugin_version' => $version, // CHANGED:
+        ) ); // CHANGED:
+
+        // CHANGED: enqueue optional admin css
+        wp_enqueue_style( 'ppa-admin-css', $plugin_base_url . 'assets/css/admin.css', array(), $version ); // CHANGED:
+
+        // CHANGED: debug log for server-side tracing
+        if ( function_exists( 'error_log' ) ) { // CHANGED:
+            error_log( 'PPA: ppa_admin_enqueue_assets enqueued assets (base=' . $plugin_base_url . ')' ); // CHANGED:
+        } // CHANGED:
+    } // CHANGED:
+
+    add_action( 'admin_enqueue_scripts', 'ppa_admin_enqueue_assets' ); // CHANGED:
+} // CHANGED:

@@ -1,0 +1,122 @@
+(function($) {
+
+  function loadSites() {
+    if (!window.postpressAi || !window.postpressAi.restBase || !window.postpressAi.nonce) {
+      return $.Deferred().reject().promise();
+    }
+
+    return $.ajax({
+      url: window.postpressAi.restBase + 'postpress-ai/v1/sites',
+      method: 'GET',
+      beforeSend: function(xhr) {
+        xhr.setRequestHeader('X-WP-Nonce', window.postpressAi.nonce);
+      }
+    });
+  }
+
+  function saveRemoteDraft(payload, targetSiteId) {
+    if (!window.postpressAi || !window.postpressAi.restBase || !window.postpressAi.nonce) {
+      return $.Deferred().reject().promise();
+    }
+
+    return $.ajax({
+      url: window.postpressAi.restBase + 'postpress-ai/v1/remote-draft-from-composer',
+      method: 'POST',
+      beforeSend: function(xhr) {
+        xhr.setRequestHeader('X-WP-Nonce', window.postpressAi.nonce);
+      },
+      contentType: 'application/json',
+      data: JSON.stringify({
+        target_site_id: targetSiteId,
+        post_title: payload.post_title,
+        post_content: payload.post_content,
+        post_excerpt: payload.post_excerpt,
+        post_type: payload.post_type,
+        meta: payload.meta || {}
+      })
+    });
+  }
+
+  $(document).ready(function() {
+    var $targetSelect = $('#postpress-ai-target-site');
+
+    // Only run on the Composer screen
+    if (!$targetSelect.length) {
+      return;
+    }
+
+    // 1) Populate dropdown with connected sites for this license.
+    loadSites()
+      .done(function(sites) {
+        if (!Array.isArray(sites)) {
+          return;
+        }
+        sites.forEach(function(site) {
+          if (site.site_id === 'current') {
+            return; // "This site" already in markup.
+          }
+          var label = site.name || site.url || site.site_id;
+          if (site.url) {
+            var cleanUrl = String(site.url).replace(/^https?:\/\//, '');
+            label += ' (' + cleanUrl + ')';
+          }
+          $('<option>')
+            .val(site.site_id)
+            .text(label)
+            .appendTo($targetSelect);
+        });
+      });
+
+    // 2) Intercept Save Draft (Store) and route based on dropdown.
+    $('#postpress-ai-save-draft, #ppa-draft').on('click', function(e) {
+      e.preventDefault();
+
+      if (typeof postpressAiCollectComposerPayload !== 'function') {
+        console.error('postpressAiCollectComposerPayload() is not defined.');
+        return;
+      }
+
+      var payload = postpressAiCollectComposerPayload();
+      var targetSiteId = $targetSelect.val() || 'current';
+
+      // Local draft (this site): use existing behavior.
+      if (targetSiteId === 'current') {
+        if (typeof postpressAiSaveLocalDraft === 'function') {
+          postpressAiSaveLocalDraft(payload);
+          return;
+        }
+        console.error('postpressAiSaveLocalDraft() is not defined.');
+        return;
+      }
+
+      // Remote draft: one specific site on this license.
+      saveRemoteDraft(payload, targetSiteId)
+        .done(function(response) {
+          var msg = 'Draft saved on remote site.';
+          if (response && response.target_site && response.target_site.url) {
+            msg = 'Draft saved on ' + response.target_site.url + '.';
+          }
+          if (typeof postpressAiShowNotice === 'function') {
+            postpressAiShowNotice(msg, 'success');
+          }
+
+          if (response && response.remote_post && response.remote_post.edit_link && typeof postpressAiShowLinkNotice === 'function') {
+            postpressAiShowLinkNotice(
+              'Open remote draft in a new tab',
+              response.remote_post.edit_link
+            );
+          }
+        })
+        .fail(function(xhr) {
+          var msg = 'Could not save draft to the selected site.';
+          if (xhr && xhr.responseJSON && xhr.responseJSON.message) {
+            msg = xhr.responseJSON.message;
+          }
+          if (typeof postpressAiShowNotice === 'function') {
+            postpressAiShowNotice(msg, 'error');
+          }
+        });
+    });
+  });
+
+})(jQuery);

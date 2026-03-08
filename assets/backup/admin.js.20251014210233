@@ -1,0 +1,218 @@
+/**
+ * admin.js — PostPress AI Composer preview wiring
+ *
+ * LOCATION
+ * /wp-content/plugins/postpress-ai/assets/js/admin.js
+ *
+ * CHANGE LOG
+ * -----------
+ * 2025-10-12 • Add server-side preview fetch via admin-ajax and inject result into preview pane. // CHANGED:
+ * 2025-10-12 • Graceful UI states, error handling, token usage logging to console.        // CHANGED:
+ *
+ * Notes:
+ * - This script expects WP admin to expose `ajaxurl` global (standard in admin screens).
+ * - Default selectors (change below if your markup differs):
+ *     #ppa-compose-btn      -> button to trigger preview
+ *     #ppa-subject          -> input for subject / headline
+ *     #ppa-preview-pane     -> container to inject preview HTML
+ * - The server proxy returns WP JSON (success/data) — this script unwraps that.
+ */
+
+(function () {
+  "use strict";
+
+  // CONFIG: update selectors if your admin markup uses different IDs/classes
+  const SELECTORS = {
+    composeBtn: "#ppa-compose-btn",    // CHANGED: default compose button
+    subjectInput: "#ppa-subject",      // CHANGED: default subject input
+    previewPane: "#ppa-preview-pane",  // CHANGED: default preview container
+    toneInput: "#ppa-tone",            // optional tone selector (if present)
+    wordCountInput: "#ppa-wordcount"   // optional word count input (if present)
+  };
+
+  // Utility: find element safely
+  function el(sel) {
+    try {
+      return document.querySelector(sel);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Small UI helpers
+  function disable(btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.classList && btn.classList.add("ppa-disabled");
+    }
+  }
+  function enable(btn) {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList && btn.classList.remove("ppa-disabled");
+    }
+  }
+  function setLoading(pane, msg = "Generating preview…") {
+    if (!pane) return;
+    pane.setAttribute("data-ppa-loading", "1");
+    pane.innerHTML = `<div class="ppa-loading">${escapeHtml(msg)}</div>`;
+  }
+  function clearLoading(pane) {
+    if (!pane) return;
+    pane.removeAttribute("data-ppa-loading");
+  }
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // Core: call WP server-side proxy which forwards to Django preview endpoint
+  async function fetchPpaPreview(payload = {}) {
+    // payload is a plain object; we'll POST JSON to admin-ajax
+    const url = (typeof ajaxurl !== "undefined") ? `${ajaxurl}?action=ppa_preview` : "/wp-admin/admin-ajax.php?action=ppa_preview";
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        credentials: "same-origin"
+      });
+
+      // If WP returns success wrapper => { success: true, data: ... }
+      const json = await resp.json().catch(() => null);
+      if (!json) {
+        // Not a JSON response
+        return { ok: false, error: "Invalid JSON from server", raw: await resp.text() };
+      }
+
+      if (json.success === true && typeof json.data !== "undefined") {
+        // pass along the proxied Django response (json.data)
+        return { ok: true, payload: json.data };
+      }
+
+      // If WP used wp_send_json_error or different wrapper
+      if (json.success === false) {
+        return { ok: false, error: json.data || json };
+      }
+
+      // Fallback: if server returned plain django JSON directly (no wrapper)
+      return { ok: true, payload: json };
+    } catch (err) {
+      console.error("PPA preview fetch failed:", err);
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  // Render the preview into pane. Prefer html -> content -> raw
+  function renderPreview(pane, data) {
+    if (!pane || !data) return;
+    const html = (data && (data.html || data.content || data.result && (data.result.html || data.result.content))) || (data.raw || "");
+    if (!html) {
+      pane.innerHTML = `<div class="ppa-error">No preview returned.</div>`;
+      return;
+    }
+    // If payload contains wrapper like { result: { title, html, summary } } unwrap inside
+    const unwrapped = (data.result && (data.result.html || data.result.content)) ? (data.result.html || data.result.content) : null;
+    pane.innerHTML = unwrapped || html;
+  }
+
+  // Compose payload from UI controls (subject, tone, word_count)
+  function buildPayloadFromUI() {
+    const subjectEl = el(SELECTORS.subjectInput);
+    const toneEl = el(SELECTORS.toneInput);
+    const wcEl = el(SELECTORS.wordCountInput);
+
+    const subject = subjectEl ? subjectEl.value.trim() : "";
+    const payload = {
+      subject: subject || "Write me a post",
+    };
+    if (toneEl && toneEl.value) payload.tone = toneEl.value;
+    if (wcEl && wcEl.value) payload.word_count = parseInt(wcEl.value, 10) || undefined;
+    return payload;
+  }
+
+  // Main handler wired to Compose / Preview button
+  async function onComposeClick(e) {
+    e && e.preventDefault();
+    const btn = el(SELECTORS.composeBtn);
+    const pane = el(SELECTORS.previewPane);
+    if (!btn || !pane) {
+      console.warn("PPA: Compose button or preview pane not found. Selectors:", SELECTORS);
+      return;
+    }
+
+    // Build payload and show loading state
+    const payload = buildPayloadFromUI();
+    disable(btn);
+    setLoading(pane, "Generating AI preview…");
+
+    try {
+      const res = await fetchPpaPreview(payload);
+      clearLoading(pane);
+
+      if (!res.ok) {
+        pane.innerHTML = `<div class="ppa-error">Preview error: ${escapeHtml(String(res.error || "unknown"))}</div>`;
+        console.error("PPA preview error:", res.error, res);
+        return;
+      }
+
+      // res.payload contains proxied Django JSON
+      const djangoPayload = res.payload;
+      // console telemetry helpful for debugging
+      console.info("PPA preview result:", djangoPayload);
+
+      renderPreview(pane, djangoPayload);
+    } catch (err) {
+      clearLoading(pane);
+      pane.innerHTML = `<div class="ppa-error">Preview failed: ${escapeHtml(String(err))}</div>`;
+      console.error("PPA preview exception:", err);
+    } finally {
+      enable(btn);
+    }
+  }
+
+  // Bootstrap: attach events on DOM ready
+  function bootstrap() {
+    const btn = el(SELECTORS.composeBtn);
+    if (!btn) {
+      // try to auto-create a small UI for manual testing if pane exists
+      const pane = el(SELECTORS.previewPane);
+      if (pane) {
+        const fallbackBtn = document.createElement("button");
+        fallbackBtn.id = "ppa-compose-btn";
+        fallbackBtn.type = "button";
+        fallbackBtn.textContent = "Compose (PPA)";
+        fallbackBtn.style.margin = "8px 0";
+        pane.parentNode && pane.parentNode.insertBefore(fallbackBtn, pane);
+        fallbackBtn.addEventListener("click", onComposeClick);
+        console.info("PPA: Added fallback compose button for testing");
+      } else {
+        console.warn("PPA: Compose button and preview pane not found; nothing attached.");
+      }
+      return;
+    }
+    btn.addEventListener("click", onComposeClick);
+    console.info("PPA: Compose button attached");
+  }
+
+  // Init
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootstrap);
+  } else {
+    bootstrap();
+  }
+
+  // Expose for debugging
+  window.PPA_preview = {
+    fetch: fetchPpaPreview,
+    render: renderPreview,
+    compose: onComposeClick
+  };
+
+})(); // EOF
