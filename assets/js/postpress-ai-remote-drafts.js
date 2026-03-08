@@ -1,12 +1,41 @@
-(function($) {
+(function($, win, doc) {
+  'use strict';
 
   function cleanUrl(url) {
     return String(url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   }
 
+  function getWpNonce() {
+    if (win.ppaAdmin && win.ppaAdmin.wpNonce) return String(win.ppaAdmin.wpNonce).trim();
+    if (win.ppaAdmin && win.ppaAdmin.nonce) return String(win.ppaAdmin.nonce).trim();
+    if (win.PPA && win.PPA.wpNonce) return String(win.PPA.wpNonce).trim();
+    if (win.PPA && win.PPA.nonce) return String(win.PPA.nonce).trim();
+
+    var composer = doc.querySelector('[data-ppa-nonce]');
+    if (composer) {
+      var n = composer.getAttribute('data-ppa-nonce');
+      if (n) return String(n).trim();
+    }
+
+    var hidden = doc.getElementById('ppa-nonce');
+    if (hidden && hidden.value) return String(hidden.value).trim();
+
+    return '';
+  }
+
+  function getRestBase() {
+    if (win.wpApiSettings && win.wpApiSettings.root) return String(win.wpApiSettings.root);
+    if (win.ppaAdmin && win.ppaAdmin.restUrl) return String(win.ppaAdmin.restUrl).replace(/\/?$/, '/');
+    if (win.PPA && win.PPA.restUrl) return String(win.PPA.restUrl).replace(/\/?$/, '/');
+    return '/wp-json/';
+  }
+
+  function isComposerScreen() {
+    return !!doc.getElementById('ppa-composer');
+  }
+
   function normalizeSite(site) {
     site = site || {};
-
     return {
       site_id: site.site_id || site.id || 'current',
       name: site.name || '',
@@ -32,14 +61,14 @@
     site = normalizeSite(site);
 
     var $link = $('#ppa-target-site-link');
-    var $url = $('#ppa-target-site-url');
+    var $url  = $('#ppa-target-site-url');
 
     if (!$link.length || !$url.length) {
       return;
     }
 
     var siteName = site.name || site.url || 'This site';
-    var siteUrl = cleanUrl(site.url || '');
+    var siteUrl  = cleanUrl(site.url || '');
     var siteLink = site.link || '';
 
     $link.text(siteName);
@@ -66,29 +95,50 @@
   }
 
   function loadSites() {
-    if (!window.postpressAi || !window.postpressAi.restBase || !window.postpressAi.nonce) {
-      return $.Deferred().reject().promise();
-    }
+    var restBase = getRestBase();
+    var nonce    = getWpNonce();
 
     return $.ajax({
-      url: window.postpressAi.restBase + 'postpress-ai/v1/sites',
+      url: restBase.replace(/\/?$/, '/') + 'postpress-ai/v1/sites',
       method: 'GET',
       beforeSend: function(xhr) {
-        xhr.setRequestHeader('X-WP-Nonce', window.postpressAi.nonce);
+        if (nonce) xhr.setRequestHeader('X-WP-Nonce', nonce);
+        if (nonce) xhr.setRequestHeader('X-PPA-Nonce', nonce);
       }
     });
   }
 
-  function saveRemoteDraft(payload, targetSiteId) {
-    if (!window.postpressAi || !window.postpressAi.restBase || !window.postpressAi.nonce) {
-      return $.Deferred().reject().promise();
+  function collectComposerPayload() {
+    var subject = $('#ppa-subject').val() || '';
+    var title   = $('#ppa-title').val() || subject;
+    var excerpt = $('#ppa-excerpt').val() || '';
+    var slug    = $('#ppa-slug').val() || '';
+
+    var previewHtml = '';
+    var previewPane = doc.getElementById('ppa-preview-pane');
+    if (previewPane) {
+      previewHtml = previewPane.innerHTML || '';
     }
 
+    return {
+      post_title: title,
+      post_content: previewHtml,
+      post_excerpt: excerpt,
+      post_type: 'post',
+      meta: slug ? { ppa_slug: slug } : {}
+    };
+  }
+
+  function sendRemoteDraft(payload, targetSiteId) {
+    var restBase = getRestBase();
+    var nonce    = getWpNonce();
+
     return $.ajax({
-      url: window.postpressAi.restBase + 'postpress-ai/v1/remote-draft-from-composer',
+      url: restBase.replace(/\/?$/, '/') + 'postpress-ai/v1/remote-draft-from-composer',
       method: 'POST',
       beforeSend: function(xhr) {
-        xhr.setRequestHeader('X-WP-Nonce', window.postpressAi.nonce);
+        if (nonce) xhr.setRequestHeader('X-WP-Nonce', nonce);
+        if (nonce) xhr.setRequestHeader('X-PPA-Nonce', nonce);
       },
       contentType: 'application/json',
       data: JSON.stringify({
@@ -102,12 +152,21 @@
     });
   }
 
-  $(document).ready(function() {
-    var $targetSelect = $('#postpress-ai-target-site');
+  function showNotice(message, type) {
+    var $msg = $('#ppa-toolbar-msg');
+    if (!$msg.length) return;
 
-    if (!$targetSelect.length) {
-      return;
-    }
+    $msg
+      .removeClass('is-error is-success is-warning')
+      .addClass(type === 'error' ? 'is-error' : 'is-success')
+      .text(message || '');
+  }
+
+  $(function() {
+    if (!isComposerScreen()) return;
+
+    var $targetSelect = $('#postpress-ai-target-site');
+    if (!$targetSelect.length) return;
 
     var currentSite = normalizeSite({
       site_id: 'current',
@@ -119,24 +178,19 @@
     updateDestinationDisplay(currentSite);
 
     $targetSelect.on('change', function() {
-      var selectedSite = siteFromOption($(this).find('option:selected'), currentSite);
-      updateDestinationDisplay(selectedSite);
+      updateDestinationDisplay(siteFromOption($(this).find('option:selected'), currentSite));
     });
 
     loadSites()
       .done(function(sites) {
-        if (!Array.isArray(sites)) {
-          return;
-        }
+        if (!Array.isArray(sites)) return;
 
         sites.forEach(function(site) {
-          if (!site || site.site_id === 'current') {
-            return;
-          }
+          if (!site || site.site_id === 'current') return;
 
           var normalized = normalizeSite({
-            site_id: site.site_id,
-            name: site.name || site.url || site.site_id,
+            site_id: site.site_id || site.id,
+            name: site.name || site.url || site.site_id || site.id,
             url: site.url || '',
             link: site.url || ''
           });
@@ -155,73 +209,55 @@
             .appendTo($targetSelect);
         });
 
-        updateDestinationDisplay(
-          siteFromOption($targetSelect.find('option:selected'), currentSite)
-        );
+        updateDestinationDisplay(siteFromOption($targetSelect.find('option:selected'), currentSite));
       })
-      .fail(function() {
-        updateDestinationDisplay(
-          siteFromOption($targetSelect.find('option:selected'), currentSite)
-        );
+      .fail(function(xhr) {
+        console.warn('PPA remote drafts: could not load sites.', xhr);
       });
 
-    $('#postpress-ai-save-draft, #ppa-draft').on('click', function(e) {
-      e.preventDefault();
-
-      if (typeof postpressAiCollectComposerPayload !== 'function') {
-        console.error('postpressAiCollectComposerPayload() is not defined.');
-        return;
-      }
-
-      var payload = postpressAiCollectComposerPayload();
+    $('#ppa-draft').on('click.postpressRemoteDrafts', function(e) {
       var targetSiteId = $targetSelect.val() || 'current';
 
+      // Let existing local draft flow keep working untouched.
       if (targetSiteId === 'current') {
-        if (typeof postpressAiSaveLocalDraft === 'function') {
-          postpressAiSaveLocalDraft(payload);
-          return;
-        }
-
-        console.error('postpressAiSaveLocalDraft() is not defined.');
         return;
       }
 
-      saveRemoteDraft(payload, targetSiteId)
+      // Remote target selected: stop the normal local draft flow and send remote instead.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      var payload = collectComposerPayload();
+
+      if (!payload.post_title && !payload.post_content) {
+        showNotice('Generate Preview first, then save to the selected site.', 'error');
+        return false;
+      }
+
+      showNotice('Saving draft to selected site…', 'success');
+
+      sendRemoteDraft(payload, targetSiteId)
         .done(function(response) {
           var msg = 'Draft saved on remote site.';
-
           if (response && response.target_site && response.target_site.url) {
             msg = 'Draft saved on ' + response.target_site.url + '.';
           }
+          showNotice(msg, 'success');
 
-          if (typeof postpressAiShowNotice === 'function') {
-            postpressAiShowNotice(msg, 'success');
-          }
-
-          if (
-            response &&
-            response.remote_post &&
-            response.remote_post.edit_link &&
-            typeof postpressAiShowLinkNotice === 'function'
-          ) {
-            postpressAiShowLinkNotice(
-              'Open remote draft in a new tab',
-              response.remote_post.edit_link
-            );
+          if (response && response.remote_post && response.remote_post.edit_link) {
+            win.open(response.remote_post.edit_link, '_blank', 'noopener');
           }
         })
         .fail(function(xhr) {
           var msg = 'Could not save draft to the selected site.';
-
           if (xhr && xhr.responseJSON && xhr.responseJSON.message) {
             msg = xhr.responseJSON.message;
           }
-
-          if (typeof postpressAiShowNotice === 'function') {
-            postpressAiShowNotice(msg, 'error');
-          }
+          showNotice(msg, 'error');
         });
+
+      return false;
     });
   });
 
-})(jQuery);
+})(jQuery, window, document);
