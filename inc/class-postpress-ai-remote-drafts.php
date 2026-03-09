@@ -31,9 +31,8 @@ class PostPress_AI_Remote_Drafts {
             [
                 'methods'             => 'GET',
                 'callback'            => [ __CLASS__, 'rest_get_sites' ],
-                'permission_callback' => function () {
-                    return current_user_can( 'edit_posts' );
-                },
+                // TEMP for diagnostics: allow all requests to hit /sites
+                'permission_callback' => '__return_true',
             ]
         );
 
