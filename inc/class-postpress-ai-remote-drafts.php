@@ -101,8 +101,19 @@ class PostPress_AI_Remote_Drafts {
             );
         }
 
-        $body  = json_decode( wp_remote_retrieve_body( $backend_response ), true );
-        $sites = is_array( $body ) ? $body : [];
+        $body = json_decode( wp_remote_retrieve_body( $backend_response ), true );
+
+        // Backend returns: {"ok": true, "data": {"license_key": "...", "sites": [...]}, ...}
+        $sites = [];
+        if (
+            is_array( $body ) &&
+            isset( $body['data'] ) &&
+            is_array( $body['data'] ) &&
+            isset( $body['data']['sites'] ) &&
+            is_array( $body['data']['sites'] )
+        ) {
+            $sites = $body['data']['sites'];
+        }
 
         $current_site_url = home_url();
         $current_site_id  = get_option( 'postpress_ai_site_id' );
@@ -144,14 +155,14 @@ class PostPress_AI_Remote_Drafts {
      * Browser → plugin → backend → remote site.
      */
     public static function rest_remote_draft_from_composer( WP_REST_Request $request ) {
-        $params        = $request->get_json_params();
+        $params         = $request->get_json_params();
         $target_site_id = isset( $params['target_site_id'] ) ? sanitize_text_field( $params['target_site_id'] ) : '';
 
         if ( empty( $target_site_id ) || 'current' === $target_site_id ) {
             return new WP_Error( 'bad_target', __( 'Invalid target site selected.', 'postpress-ai' ), [ 'status' => 400 ] );
         }
 
-        $payload = [
+        $post = [
             'post_title'   => isset( $params['post_title'] ) ? (string) $params['post_title'] : '',
             'post_content' => isset( $params['post_content'] ) ? (string) $params['post_content'] : '',
             'post_excerpt' => isset( $params['post_excerpt'] ) ? (string) $params['post_excerpt'] : '',
@@ -177,7 +188,8 @@ class PostPress_AI_Remote_Drafts {
                 'license_key'    => $license_key,
                 'source_site_id' => $source_site_id,
                 'target_site_id' => $target_site_id,
-                'payload'        => $payload,
+                // Backend expects "post", not "payload".
+                'post'           => $post,
             ]
         );
 
@@ -222,7 +234,7 @@ class PostPress_AI_Remote_Drafts {
             return new WP_Error(
                 'bad_request',
                 __( 'Missing site_id or site_token.', 'postpress-ai' ),
-                [ 'status' => 400 ]
+                [ 'status' => 400 ] 
             );
         }
 
@@ -230,6 +242,8 @@ class PostPress_AI_Remote_Drafts {
         update_option( 'postpress_ai_site_token', $site_token );
 
         return [
+            // Add "ok" flag so Django's resp_json.get("ok") passes.
+            'ok'       => true,
             'status'   => 'ok',
             'site_id'  => $site_id,
             'version'  => defined( 'POSTPRESS_AI_PLUGIN_VERSION' ) ? POSTPRESS_AI_PLUGIN_VERSION : '',
