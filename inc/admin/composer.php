@@ -67,199 +67,225 @@ if ( function_exists( 'set_url_scheme' ) ) {
 }
 
 // CHANGED: Centralized option lists (markup-only; does NOT affect CSS).
-// Values are stable machine slugs; labels are translated display strings. // CHANGED:
+// Values are stable machine slugs; labels are translated display strings.
 
-	// Genre options (grouped; rendered with <optgroup>) // CHANGED:
-	$ppa_genre_groups = [
-		'__ungrouped__' => [
-			'Auto' => 'Auto',
-		],
+// =====================================================
+// GENRE OPTIONS
+// =====================================================
 
-		'Core' => [
-			'Blog Post' => 'Blog Post',
-			'Explainer' => 'Explainer',
-			'Overview' => 'Overview',
-			'Background' => 'Background',
-			'News' => 'News',
-			'Opinion' => 'Opinion',
-			'Editorial' => 'Editorial',
-			'Thought Leadership' => 'Thought Leadership',
-			'Commentary' => 'Commentary',
-			'Myth vs Fact' => 'Myth vs Fact',
-			'Story' => 'Story',
-			'Interview' => 'Interview',
-			'Profile' => 'Profile',
-		],
+// Genre options (grouped; rendered with <optgroup>)
+$ppa_genre_groups = [
+	'__ungrouped__' => [
+		'Auto' => 'Auto',
+	],
 
-		'How-to & Educational' => [
-			'How-to' => 'How-to',
-			'Guide' => 'Guide',
-			'Tutorial' => 'Tutorial',
-			'Walkthrough' => 'Walkthrough',
-			'Quickstart' => 'Quickstart',
-			'Getting Started' => 'Getting Started',
-			'Checklist' => 'Checklist',
-			'Cheat Sheet' => 'Cheat Sheet',
-			'Best Practices' => 'Best Practices',
-			'Mistakes to Avoid' => 'Mistakes to Avoid',
-			'Troubleshooting' => 'Troubleshooting',
-			'FAQ' => 'FAQ',
-			'Q&A' => 'Q&A',
-			'Glossary' => 'Glossary',
-			'Template' => 'Template',
-			'Playbook' => 'Playbook',
-			'Framework' => 'Framework',
-			'SOP' => 'SOP',
-		],
+	'Core' => [
+		'Blog Post' => 'Blog Post',
+		'Explainer' => 'Explainer',
+		'Overview' => 'Overview',
+		'Background' => 'Background',
+		'News' => 'News',
+		'Opinion' => 'Opinion',
+		'Editorial' => 'Editorial',
+		'Thought Leadership' => 'Thought Leadership',
+		'Commentary' => 'Commentary',
+		'Myth vs Fact' => 'Myth vs Fact',
+		'Story' => 'Story',
+		'Interview' => 'Interview',
+		'Profile' => 'Profile',
+	],
 
-		'Lists & Curated' => [
-			'Listicle' => 'Listicle',
-			'Roundup' => 'Roundup',
-			'Resource List' => 'Resource List',
-			'Tool List' => 'Tool List',
-			'Examples' => 'Examples',
-			'Ideas' => 'Ideas',
-		],
+	'How-to & Educational' => [
+		'How-to' => 'How-to',
+		'Guide' => 'Guide',
+		'Tutorial' => 'Tutorial',
+		'Walkthrough' => 'Walkthrough',
+		'Quickstart' => 'Quickstart',
+		'Getting Started' => 'Getting Started',
+		'Checklist' => 'Checklist',
+		'Cheat Sheet' => 'Cheat Sheet',
+		'Best Practices' => 'Best Practices',
+		'Mistakes to Avoid' => 'Mistakes to Avoid',
+		'Troubleshooting' => 'Troubleshooting',
+		'FAQ' => 'FAQ',
+		'Q&A' => 'Q&A',
+		'Glossary' => 'Glossary',
+		'Template' => 'Template',
+		'Playbook' => 'Playbook',
+		'Framework' => 'Framework',
+		'SOP' => 'SOP',
+	],
 
-		'Evaluation & Decision' => [
-			'Review' => 'Review',
-			'Comparison' => 'Comparison',
-			'Alternatives' => 'Alternatives',
-			'Pros and Cons' => 'Pros and Cons',
-			'Buying Guide' => 'Buying Guide',
-			'Decision Guide' => 'Decision Guide',
-			'Recommendations' => 'Recommendations',
-		],
+	'Lists & Curated' => [
+		'Examples' => 'Examples',
+		'Ideas' => 'Ideas',
+		'Listicle' => 'Listicle',
+		'Resource List' => 'Resource List',
+		'Roundup' => 'Roundup',
+		'Tool List' => 'Tool List',
+	],
 
-		'Product & Company' => [
-			'Product Overview' => 'Product Overview',
-			'Feature Spotlight' => 'Feature Spotlight',
-			'Use Case' => 'Use Case',
-			'Case Study' => 'Case Study',
-			'Customer Story' => 'Customer Story',
-			'Success Story' => 'Success Story',
-			'Testimonial Roundup' => 'Testimonial Roundup',
-			'Release Notes' => 'Release Notes',
-			'Changelog' => 'Changelog',
-			'Product Update' => 'Product Update',
-			'Company Update' => 'Company Update',
-			'Announcement' => 'Announcement',
-			'Press Release' => 'Press Release',
-			'Policy Statement' => 'Policy Statement',
-		],
+	'Evaluation & Decision' => [
+		'Alternatives' => 'Alternatives',
+		'Buying Guide' => 'Buying Guide',
+		'Comparison' => 'Comparison',
+		'Decision Guide' => 'Decision Guide',
+		'Pros and Cons' => 'Pros and Cons',
+		'Recommendations' => 'Recommendations',
+		'Review' => 'Review',
+	],
 
-		'Marketing & Sales' => [
-			'Landing Page Copy' => 'Landing Page Copy',
-			'Sales Page Copy' => 'Sales Page Copy',
-			'Pricing Page Copy' => 'Pricing Page Copy',
-			'Ad Copy' => 'Ad Copy',
-			'Objection Handling' => 'Objection Handling',
-			'Competitive Teardown' => 'Competitive Teardown',
-			'Email Newsletter' => 'Email Newsletter',
-			'Welcome Email' => 'Welcome Email',
-			'Sales Email' => 'Sales Email',
-			'Cold Email' => 'Cold Email',
-			'Follow-up Email' => 'Follow-up Email',
-			'Drip Sequence' => 'Drip Sequence',
-			'Nurture Sequence' => 'Nurture Sequence',
-		],
+	'Product & Company' => [
+		'Announcement' => 'Announcement',
+		'Case Study' => 'Case Study',
+		'Changelog' => 'Changelog',
+		'Company Update' => 'Company Update',
+		'Customer Story' => 'Customer Story',
+		'Feature Spotlight' => 'Feature Spotlight',
+		'Press Release' => 'Press Release',
+		'Product Overview' => 'Product Overview',
+		'Product Update' => 'Product Update',
+		'Policy Statement' => 'Policy Statement',
+		'Release Notes' => 'Release Notes',
+		'Success Story' => 'Success Story',
+		'Testimonial Roundup' => 'Testimonial Roundup',
+		'Use Case' => 'Use Case',
+	],
 
-		'SEO & Strategy' => [
-			'Pillar Page' => 'Pillar Page',
-			'Cluster Post' => 'Cluster Post',
-			'Local Guide' => 'Local Guide',
-			'Beginner Guide' => 'Beginner Guide',
-			'Advanced Guide' => 'Advanced Guide',
-		],
+	'Marketing & Sales' => [
+		'Ad Copy' => 'Ad Copy',
+		'Cold Email' => 'Cold Email',
+		'Competitive Teardown' => 'Competitive Teardown',
+		'Drip Sequence' => 'Drip Sequence',
+		'Email Newsletter' => 'Email Newsletter',
+		'Follow-up Email' => 'Follow-up Email',
+		'Landing Page Copy' => 'Landing Page Copy',
+		'Nurture Sequence' => 'Nurture Sequence',
+		'Objection Handling' => 'Objection Handling',
+		'Pricing Page Copy' => 'Pricing Page Copy',
+		'Sales Email' => 'Sales Email',
+		'Sales Page Copy' => 'Sales Page Copy',
+		'Welcome Email' => 'Welcome Email',
+	],
 
-		'Research & Longform' => [
-			'Report' => 'Report',
-			'Industry Trends' => 'Industry Trends',
-			'Market Analysis' => 'Market Analysis',
-			'Benchmark Report' => 'Benchmark Report',
-			'Survey Results' => 'Survey Results',
-			'Whitepaper' => 'Whitepaper',
-			'Ebook' => 'Ebook',
-		],
+	'SEO & Strategy' => [
+		'Advanced Guide' => 'Advanced Guide',
+		'Beginner Guide' => 'Beginner Guide',
+		'Cluster Post' => 'Cluster Post',
+		'Local Guide' => 'Local Guide',
+		'Pillar Page' => 'Pillar Page',
+	],
 
-		'Social Media' => [
-			'Social Post' => 'Social Post',
-			'Short Social Caption' => 'Short Social Caption',
-			'Thread' => 'Thread',
-			'Carousel Copy' => 'Carousel Copy',
-		],
+	'Research & Longform' => [
+		'Benchmark Report' => 'Benchmark Report',
+		'Ebook' => 'Ebook',
+		'Industry Trends' => 'Industry Trends',
+		'Market Analysis' => 'Market Analysis',
+		'Report' => 'Report',
+		'Survey Results' => 'Survey Results',
+		'Whitepaper' => 'Whitepaper',
+	],
 
-		'Audio & Video' => [
-			'Video Script' => 'Video Script',
-			'Short Video Script' => 'Short Video Script',
-			'Podcast Outline' => 'Podcast Outline',
-			'Podcast Script' => 'Podcast Script',
-			'Webinar Outline' => 'Webinar Outline',
-			'Presentation Outline' => 'Presentation Outline',
-		],
-	];
+	'Social Media' => [
+		'Carousel Copy' => 'Carousel Copy',
+		'Short Social Caption' => 'Short Social Caption',
+		'Social Post' => 'Social Post',
+		'Thread' => 'Thread',
+	],
 
-	// Keep a flattened legacy map available (safety) // CHANGED:
-	$ppa_genre_options = [];
-	foreach ( $ppa_genre_groups as $g => $opts ) {
-		foreach ( $opts as $val => $label ) {
-			$ppa_genre_options[ $val ] = $label;
-		}
+	'Audio & Video' => [
+		'Podcast Outline' => 'Podcast Outline',
+		'Podcast Script' => 'Podcast Script',
+		'Presentation Outline' => 'Presentation Outline',
+		'Short Video Script' => 'Short Video Script',
+		'Video Script' => 'Video Script',
+		'Webinar Outline' => 'Webinar Outline',
+	],
+];
+
+// Flattened legacy map (safety)
+$ppa_genre_options = [];
+foreach ($ppa_genre_groups as $g => $opts) {
+	foreach ($opts as $val => $label) {
+		$ppa_genre_options[$val] = $label;
 	}
+}
 
-$ppa_genre_options = array( // CHANGED:
-	''               => __( 'Auto', 'postpress-ai' ), // CHANGED:
-	'blog_post'		 => __('Blog Post', 'postpress-ai'),
-	'howto'          => __( 'How-to', 'postpress-ai' ), // CHANGED:
-	'listicle'       => __( 'Listicle', 'postpress-ai' ), // CHANGED:
-	'news'           => __( 'News', 'postpress-ai' ), // CHANGED:
-	'review'         => __( 'Review', 'postpress-ai' ), // CHANGED:
-	'background'     => __( 'Background', 'postpress-ai' ), // CHANGED:
-	'opinion'        => __( 'Opinion', 'postpress-ai' ), // CHANGED:
-	'comparison'     => __( 'Comparison', 'postpress-ai' ), // CHANGED:
-	'case_study'     => __( 'Case Study', 'postpress-ai' ), // CHANGED:
-	'faq'            => __( 'FAQ', 'postpress-ai' ), // CHANGED:
-	'tutorial'       => __( 'Tutorial', 'postpress-ai' ), // CHANGED:
-	'guide'          => __( 'Guide', 'postpress-ai' ), // CHANGED:
-	'checklist'      => __( 'Checklist', 'postpress-ai' ), // CHANGED:
-	'troubleshoot'   => __( 'Troubleshooting', 'postpress-ai' ), // CHANGED:
-	'announcement'   => __( 'Announcement', 'postpress-ai' ), // CHANGED:
-	'product_update' => __( 'Product Update', 'postpress-ai' ), // CHANGED:
-	'newsletter'     => __( 'Email Newsletter', 'postpress-ai' ), // CHANGED:
-	'landing_page'   => __( 'Landing Page Copy', 'postpress-ai' ), // CHANGED:
-	'social_post'    => __( 'Social Post', 'postpress-ai' ), // CHANGED:
-	'video_script'   => __( 'Video Script', 'postpress-ai' ), // CHANGED:
-	'podcast_outline'=> __( 'Podcast Outline', 'postpress-ai' ), // CHANGED:
-); // CHANGED:
 
-$ppa_tone_options = array( // CHANGED:
-	''               => __( 'Auto', 'postpress-ai' ), // CHANGED:
-	'casual'         => __( 'Casual', 'postpress-ai' ), // CHANGED:
-	'friendly'       => __( 'Friendly', 'postpress-ai' ), // CHANGED:
-	'professional'   => __( 'Professional', 'postpress-ai' ), // CHANGED:
-	'technical'      => __( 'Technical', 'postpress-ai' ), // CHANGED:
-	'confident'      => __( 'Confident', 'postpress-ai' ), // CHANGED:
-	'calm'           => __( 'Calm', 'postpress-ai' ), // CHANGED:
-	'clear'          => __( 'Clear', 'postpress-ai' ), // CHANGED:
-	'direct'         => __( 'Direct', 'postpress-ai' ), // CHANGED:
-	'conversational' => __( 'Conversational', 'postpress-ai' ), // CHANGED:
-	'helpful'        => __( 'Helpful', 'postpress-ai' ), // CHANGED:
-	'empathetic'     => __( 'Empathetic', 'postpress-ai' ), // CHANGED:
-	'encouraging'    => __( 'Encouraging', 'postpress-ai' ), // CHANGED:
-	'authoritative'  => __( 'Authoritative', 'postpress-ai' ), // CHANGED:
-	'educational'    => __( 'Educational', 'postpress-ai' ), // CHANGED:
-	'persuasive'     => __( 'Persuasive', 'postpress-ai' ), // CHANGED:
-	'storytelling'   => __( 'Storytelling', 'postpress-ai' ), // CHANGED:
-	'inspirational'  => __( 'Inspirational', 'postpress-ai' ), // CHANGED:
-	'humorous'       => __( 'Humorous', 'postpress-ai' ), // CHANGED:
-	'urgent'         => __( 'Urgent', 'postpress-ai' ), // CHANGED:
-	'cautious'       => __( 'Cautious', 'postpress-ai' ), // CHANGED:
-	'luxury'         => __( 'Luxury', 'postpress-ai' ), // CHANGED:
-	'minimal'        => __( 'Minimal', 'postpress-ai' ), // CHANGED:
-	'bold'           => __( 'Bold', 'postpress-ai' ), // CHANGED:
-	'warm'           => __( 'Warm', 'postpress-ai' ), // CHANGED:
-	'neutral'        => __( 'Neutral', 'postpress-ai' ), // CHANGED:
-); // CHANGED:
+// =====================================================
+// TONE OPTIONS
+// =====================================================
+
+// Tone options (grouped; rendered with <optgroup>)
+$ppa_tone_groups = [
+	'__ungrouped__' => [
+		'Auto' => 'Auto',
+	],
+
+	'Approach & Delivery' => [
+		'Clear' => 'Clear',
+		'Concise' => 'Concise',
+		'Conversational' => 'Conversational',
+		'Direct' => 'Direct',
+		'Minimal' => 'Minimal',
+		'Straightforward' => 'Straightforward',
+		'Structured' => 'Structured',
+	],
+
+	'Authority & Expertise' => [
+		'Analytical' => 'Analytical',
+		'Authoritative' => 'Authoritative',
+		'Expert' => 'Expert',
+		'Insightful' => 'Insightful',
+		'Professional' => 'Professional',
+		'Technical' => 'Technical',
+		'Thoughtful' => 'Thoughtful',
+	],
+
+	'Emotional Tone' => [
+		'Calm' => 'Calm',
+		'Empathetic' => 'Empathetic',
+		'Encouraging' => 'Encouraging',
+		'Inspirational' => 'Inspirational',
+		'Positive' => 'Positive',
+		'Reassuring' => 'Reassuring',
+		'Warm' => 'Warm',
+	],
+
+	'Marketing & Persuasion' => [
+		'Bold' => 'Bold',
+		'Confident' => 'Confident',
+		'Luxury' => 'Luxury',
+		'Persuasive' => 'Persuasive',
+		'Premium' => 'Premium',
+		'Urgent' => 'Urgent',
+	],
+
+	'Personality' => [
+		'Casual' => 'Casual',
+		'Friendly' => 'Friendly',
+		'Helpful' => 'Helpful',
+		'Humorous' => 'Humorous',
+		'Playful' => 'Playful',
+		'Storytelling' => 'Storytelling',
+	],
+
+	'Safety & Neutrality' => [
+		'Balanced' => 'Balanced',
+		'Cautious' => 'Cautious',
+		'Diplomatic' => 'Diplomatic',
+		'Neutral' => 'Neutral',
+		'Objective' => 'Objective',
+	],
+];
+
+// Flattened legacy map (safety)
+$ppa_tone_options = [];
+foreach ($ppa_tone_groups as $g => $opts) {
+	foreach ($opts as $val => $label) {
+		$ppa_tone_options[$val] = $label;
+	}
+}
 
 ?>
 <!-- (No inline CSS; centralized enqueue supplies admin-composer.css and admin.js) -->
@@ -340,59 +366,59 @@ $ppa_tone_options = array( // CHANGED:
 		<!-- Live notice region consumed by admin.js -->
 		<div id="ppa-toolbar-msg" class="ppa-notice" role="status" aria-live="polite"></div>
 
+<div class="ppa-form-group ppa-half">
+	<label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
+	<select id="ppa-industry" name="ppa-industry">
+		<option value=""><?php echo esc_html__( 'Select an industry…', 'postpress-ai' ); ?></option>
+		<option value="Accounting / Bookkeeping">Accounting / Bookkeeping</option>
+		<option value="Advertising & Marketing">Advertising & Marketing</option>
+		<option value="Aerospace">Aerospace</option>
+		<option value="Agency (Creative / Marketing)">Agency (Creative / Marketing)</option>
+		<option value="Architecture">Architecture</option>
+		<option value="Automotive">Automotive</option>
+		<option value="Beauty / Salon / Spa">Beauty / Salon / Spa</option>
+		<option value="Childcare">Childcare</option>
+		<option value="Cleaning Services">Cleaning Services</option>
+		<option value="Coaching / Consulting">Coaching / Consulting</option>
+		<option value="Construction">Construction</option>
+		<option value="Creator / Influencer">Creator / Influencer</option>
+		<option value="Dentistry">Dentistry</option>
+		<option value="Ecommerce">Ecommerce</option>
+		<option value="Education / Courses">Education / Courses</option>
+		<option value="Entertainment / Media">Entertainment / Media</option>
+		<option value="Event Planning">Event Planning</option>
+		<option value="Farming">Farming</option>
+		<option value="Fashion">Fashion</option>
+		<option value="Film & Video">Film & Video</option>
+		<option value="Finance / Investing">Finance / Investing</option>
+		<option value="Fitness / Gym">Fitness / Gym</option>
+		<option value="Food & Beverage / Restaurant">Food & Beverage / Restaurant</option>
+		<option value="Healthcare / Medical">Healthcare / Medical</option>
+		<option value="Home Services (Plumbing/HVAC/Electric)">Home Services (Plumbing/HVAC/Electric)</option>
+		<option value="Hospitality / Hotels">Hospitality / Hotels</option>
+		<option value="Insurance">Insurance</option>
+		<option value="IT Services / MSP">IT Services / MSP</option>
+		<option value="Law / Legal">Law / Legal</option>
+		<option value="Local Services">Local Services</option>
+		<option value="Manufacturing">Manufacturing</option>
+		<option value="Nonprofit">Nonprofit</option>
+		<option value="Photography / Video">Photography / Video</option>
+		<option value="Professional Services">Professional Services</option>
+		<option value="Real Estate (Commercial)">Real Estate (Commercial)</option>
+		<option value="Real Estate (Residential)">Real Estate (Residential)</option>
+		<option value="Recruiting / HR">Recruiting / HR</option>
+		<option value="Retail (Brick & Mortar)">Retail (Brick & Mortar)</option>
+		<option value="SaaS / Software">SaaS / Software</option>
+		<option value="Security Services">Security Services</option>
+		<option value="Software Development">Software Development</option>
+		<option value="Travel">Travel</option>
+		<option value="Wellness / Therapy">Wellness / Therapy</option>
+		<option value="Other">Other</option>		
+	</select>
+	<p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
+</div>		
 		
 		
-		<div class="ppa-form-group ppa-half">
-			<label for="ppa-industry"><?php echo esc_html__( 'Industry', 'postpress-ai' ); ?></label>
-			<select id="ppa-industry" name="ppa-industry">
-				<option value=""><?php echo esc_html__( 'Select an industry…', 'postpress-ai' ); ?></option>
-				<option value="Advertising & Marketing">Advertising & Marketing</option>
-				<option value="Accounting / Bookkeeping">Accounting / Bookkeeping</option>
-				<option value="Agency (Creative / Marketing)">Agency (Creative / Marketing)</option>
-				<option value="Architecture">Architecture</option>
-				<option value="Automotive">Automotive</option>
-				<option value="Beauty / Salon / Spa">Beauty / Salon / Spa</option>
-				<option value="Childcare">Childcare</option>
-				<option value="Cleaning Services">Cleaning Services</option>
-				<option value="Coaching / Consulting">Coaching / Consulting</option>
-				<option value="Construction">Construction</option>
-				<option value="Creator / Influencer">Creator / Influencer</option>
-				<option value="Dentistry">Dentistry</option>
-				<option value="Ecommerce">Ecommerce</option>
-				<option value="Education / Courses">Education / Courses</option>
-				<option value="Entertainment / Media">Entertainment / Media</option>
-				<option value="Event Planning">Event Planning</option>
-				<option value="Finance / Investing">Finance / Investing</option>
-				<option value="Fitness / Gym">Fitness / Gym</option>
-				<option value="Food & Beverage / Restaurant">Food & Beverage / Restaurant</option>
-				<option value="Healthcare / Medical">Healthcare / Medical</option>
-				<option value="Home Services (Plumbing/HVAC/Electric)">Home Services (Plumbing/HVAC/Electric)</option>
-				<option value="Hospitality / Hotels">Hospitality / Hotels</option>
-				<option value="Insurance">Insurance</option>
-				<option value="IT Services / MSP">IT Services / MSP</option>
-				<option value="Law / Legal">Law / Legal</option>
-				<option value="Local Services">Local Services</option>
-				<option value="Manufacturing">Manufacturing</option>
-				<option value="Nonprofit">Nonprofit</option>
-				<option value="Photography / Video">Photography / Video</option>
-				<option value="Professional Services">Professional Services</option>
-				<option value="Real Estate (Residential)">Real Estate (Residential)</option>
-				<option value="Real Estate (Commercial)">Real Estate (Commercial)</option>
-				<option value="Recruiting / HR">Recruiting / HR</option>
-				<option value="Retail (Brick & Mortar)">Retail (Brick & Mortar)</option>
-				<option value="SaaS / Software">SaaS / Software</option>
-				<option value="Security Services">Security Services</option>
-				<option value="Travel">Travel</option>
-				<option value="Wellness / Therapy">Wellness / Therapy</option>
-				<option value="Other">Other</option>
-				<option value="Farming">Farming</option>
-				<option value="Fashion">Fashion</option>
-				<option value="Aerospace">Aerospace</option>
-				<option value="Film & Video">Film & Video</option>
-				<option value="Software Development">Software Development</option>
-			</select>
-			<p class="description"><?php echo esc_html__( 'Optional. Adds context so the AI uses better examples, language, and objections.', 'postpress-ai' ); ?></p>
-		</div>
 
 
 <div class="ppa-form-group">
@@ -432,13 +458,31 @@ $ppa_tone_options = array( // CHANGED:
 
 
 			<div class="ppa-form-group">
-				<label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
-				<select id="ppa-tone">
-					<?php foreach ( $ppa_tone_options as $val => $label ) : ?>
-						<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
-					<?php endforeach; ?>
-				</select>
-			</div>
+	<label for="ppa-tone"><?php echo esc_html__( 'Tone', 'postpress-ai' ); ?></label>
+	<select id="ppa-tone">
+
+	<?php foreach ( $ppa_tone_groups as $group_label => $options ) : ?>
+
+		<?php if ( '__ungrouped__' === $group_label ) : ?>
+
+			<?php foreach ( $options as $val => $label ) : ?>
+				<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+			<?php endforeach; ?>
+
+		<?php else : ?>
+
+			<optgroup label="<?php echo esc_attr( $group_label ); ?>">
+				<?php foreach ( $options as $val => $label ) : ?>
+					<option value="<?php echo esc_attr( $val ); ?>"><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+			</optgroup>
+
+		<?php endif; ?>
+
+	<?php endforeach; ?>
+
+	</select>
+</div>
 
 			<div class="ppa-form-group">
 				<label for="ppa-word-count"><?php echo esc_html__( 'Word Count', 'postpress-ai' ); ?></label>

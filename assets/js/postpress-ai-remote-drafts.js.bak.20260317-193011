@@ -190,7 +190,7 @@
       });
 
     // Remote save interception (keeps local flow untouched)
-    $(doc).off('click.ppaRemoteDrafts').on('click.ppaRemoteDrafts', '#ppa-draft, #postpress-ai-save-draft, #ppa-store', function(e){
+    $(doc).off('click.ppaRemoteDrafts').on('click.ppaRemoteDrafts', '#ppa-draft, #postpress-ai-save-draft', function(e){
       var target = String($select.val() || 'current');
 
       if(target === 'current'){

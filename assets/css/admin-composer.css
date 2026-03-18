@@ -1177,9 +1177,11 @@ body.postpress-ai_page_postpress-ai #ppa-preview-pane > em{
 
 /* === Genre optgroup headings: make section labels visible === */
 /* Optgroup headers often render on a light strip; make text dark + bold. */
-#ppa-composer #ppa-genre optgroup{
-  color: #111 !important;
-  font-weight: 800 !important;
+#ppa-composer #ppa-genre optgroup,
+#ppa-composer #ppa-tone optgroup{
+  color: #ff7a00 !important;
+  font-weight: 500 !important;
+  background-color: #121212;
 }
 
 /* Keep options readable on the dark dropdown style. */
@@ -1277,7 +1279,7 @@ body.postpress-ai_page_postpress-ai .ppa-composer-top-target__url{
   border: 1px solid rgba(255,255,255,.07);
   background: rgba(255,255,255,.04);
   color: rgba(245,245,245,.72);
-  font-size: 13px;
+  font-size: 32px;
   line-height: 1.2;
   letter-spacing: .01em;
   word-break: break-word;
@@ -1374,4 +1376,86 @@ body.postpress-ai_page_postpress-ai .ppa-composer-top-target{
   width: 100% !important;
   max-width: none !important;
   box-sizing: border-box !important;
+}
+
+/* --- PostPress Composer: Draft-to block centered + stacked --- */
+.ppa-composer-top-target{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  gap:12px;
+  width:100%;
+  margin:0 auto 18px;
+}
+
+.ppa-composer-top-target__copy{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  gap:8px;
+}
+
+.ppa-composer-top-target__control{
+  width:100%;
+  display:flex;
+  justify-content:center;
+}
+
+#postpress-ai-target-site{
+  width:min(520px, 100%);
+  text-align:center;
+}
+
+/* --- Draft-to: stacked + centered (force off right-rail layout) --- */
+#ppa-composer-top-target{
+  display:flex !important;
+  flex-direction:column !important;
+  align-items:center !important;
+  justify-content:center !important;
+  text-align:center !important;
+  gap:14px !important;
+  position:relative !important;
+}
+
+#ppa-composer-top-target .ppa-composer-top-target__copy{
+  position:static !important;
+  left:auto !important;
+  right:auto !important;
+  top:auto !important;
+  bottom:auto !important;
+  transform:none !important;
+
+  width:100% !important;
+  display:flex !important;
+  flex-direction:column !important;
+  align-items:center !important;
+  justify-content:center !important;
+  text-align:center !important;
+}
+
+#ppa-composer-top-target .ppa-composer-top-target__control{
+  position:static !important;
+  left:auto !important;
+  right:auto !important;
+  top:auto !important;
+  bottom:auto !important;
+  transform:none !important;
+  float:none !important;
+
+  width:100% !important;
+  display:flex !important;
+  justify-content:center !important;
+  align-items:center !important;
+  margin:0 !important;
+}
+
+#ppa-composer-top-target #postpress-ai-target-site{
+  width:min(520px, 100%) !important;
+  max-width:100% !important;
+  margin:0 auto !important;
+  text-align:center !important;
 }

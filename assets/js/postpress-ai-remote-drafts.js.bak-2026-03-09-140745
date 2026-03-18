@@ -1,0 +1,167 @@
+(function($, win, doc) {
+'use strict';
+
+var didInit = false;
+
+function getWpNonce() {
+  if (win.wpApiSettings && win.wpApiSettings.nonce) return win.wpApiSettings.nonce;
+  if (win.postpressAi && win.postpressAi.nonce) return win.postpressAi.nonce;
+  return '';
+}
+
+function normalizeSite(site) {
+  site = site || {};
+  return {
+    site_id: site.site_id || site.id || 'current',
+    name: site.name || '',
+    url: site.url || '',
+    link: site.url || ''
+  };
+}
+
+function restRequest(path, method, data) {
+  method = method || 'GET';
+
+  if (win.wp && win.wp.apiFetch) {
+    var options = { path: path, method: method };
+    if (typeof data !== 'undefined') options.data = data;
+    return win.wp.apiFetch(options);
+  }
+
+  var nonce = getWpNonce();
+
+  return fetch('/wp-json' + path, {
+    method: method,
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-WP-Nonce': nonce
+    },
+    body: data ? JSON.stringify(data) : undefined
+  }).then(function(r){
+    return r.json();
+  });
+}
+
+function loadSites($select, currentSite) {
+
+  console.info('PPA remote drafts: loadSites()');
+
+  restRequest('/postpress-ai/v1/sites','GET')
+    .then(function(sites){
+
+      if (!Array.isArray(sites)) return;
+
+      $select.find('option').not('[value="current"]').remove();
+
+      sites.forEach(function(site){
+
+        if (!site || site.site_id === 'current') return;
+
+        var s = normalizeSite(site);
+
+        if (!s.site_id) return;
+
+        var label = s.name || s.url || s.site_id;
+
+        $('<option>')
+          .val(s.site_id)
+          .text(label)
+          .appendTo($select);
+
+      });
+
+    })
+    .catch(function(err){
+      console.warn('PPA remote drafts: could not load sites',err);
+    });
+
+}
+
+function sendRemoteDraft(payload,targetSiteId){
+
+  console.info('PPA remote drafts: sendRemoteDraft()',targetSiteId);
+
+  return restRequest(
+    '/postpress-ai/v1/remote-draft-from-composer',
+    'POST',
+    {
+      target_site_id: targetSiteId,
+      post_title: payload.post_title,
+      post_content: payload.post_content,
+      post_excerpt: payload.post_excerpt,
+      post_type: payload.post_type,
+      meta: payload.meta || {}
+    }
+  );
+
+}
+
+function collectComposerPayload(){
+
+  var title = $('#ppa-title').val() || '';
+  var content = $('#ppa-preview-pane').html() || '';
+
+  return {
+    post_title: title,
+    post_content: content,
+    post_excerpt: '',
+    post_type: 'post',
+    meta: {}
+  };
+
+}
+
+function bindSaveHandlers($select){
+
+  $('#postpress-ai-save-draft,#ppa-draft')
+    .off('.ppaRemote')
+    .on('click.ppaRemote',function(e){
+
+      var target = $select.val() || 'current';
+
+      if (target === 'current') return;
+
+      e.preventDefault();
+
+      var payload = collectComposerPayload();
+
+      sendRemoteDraft(payload,target)
+        .then(function(r){
+          console.log('remote draft success',r);
+        })
+        .catch(function(err){
+          console.warn('remote draft failed',err);
+        });
+
+    });
+
+}
+
+function initRemoteDrafts(){
+
+  var $select = $('#postpress-ai-target-site');
+
+  if (!$select.length) return;
+
+  if (didInit) return;
+  didInit = true;
+
+  var currentSite = normalizeSite({
+    site_id:'current',
+    name:'This site',
+    url:location.origin
+  });
+
+  loadSites($select,currentSite);
+
+  bindSaveHandlers($select);
+
+  console.info('PPA remote drafts: init complete');
+
+}
+
+initRemoteDrafts();
+$(initRemoteDrafts);
+
+})(jQuery,window,document);

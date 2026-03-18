@@ -1358,75 +1358,20 @@ body.postpress-ai_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap::before
   }
 }
 
-/* --- Draft-to header: centered + stacked --- */
-#ppa-composer-top-target.ppa-composer-top-target{
-  display:flex !important;
-  flex-direction:column !important;
-  align-items:center !important;
-  justify-content:center !important;
-  text-align:center !important;
-  gap:14px !important;
+/* === PPA full width target bar final pass === */
+body.toplevel_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap > .ppa-composer-top-target,
+body.postpress-ai_page_postpress-ai #ppa-composer.wrap.ppa-composer-wrap > .ppa-composer-top-target{
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  max-width: none !important;
+  justify-self: stretch !important;
+  align-self: stretch !important;
+  box-sizing: border-box !important;
 }
 
-#ppa-composer-top-target .ppa-composer-top-target__copy{
-  display:flex !important;
-  flex-direction:column !important;
-  align-items:center !important;
-  justify-content:center !important;
-  text-align:center !important;
-  gap:10px !important;
-}
-
-#ppa-composer-top-target .ppa-composer-top-target__control{
-  width:100% !important;
-  display:flex !important;
-  justify-content:center !important;
-}
-
-#ppa-composer-top-target #postpress-ai-target-site{
-  width:min(520px, 100%) !important;
-  text-align:center !important;
-}
-
-/* --- FORCE Draft-to dropdown below header (stacked + centered) --- */
-#ppa-composer-top-target{
-  display:flex !important;
-  flex-direction:column !important;
-  align-items:center !important;
-  justify-content:center !important;
-  text-align:center !important;
-  gap:14px !important;
-}
-
-#ppa-composer-top-target .ppa-composer-top-target__copy{
-  display:flex !important;
-  flex-direction:column !important;
-  align-items:center !important;
-  justify-content:center !important;
-  text-align:center !important;
-}
-
-#ppa-composer-top-target .ppa-composer-top-target__control{
-  position:static !important;
-  float:none !important;
-  right:auto !important;
-  left:auto !important;
-  top:auto !important;
-  bottom:auto !important;
-  transform:none !important;
-
-  width:100% !important;
-  display:flex !important;
-  justify-content:center !important;
-  align-items:center !important;
-  margin:0 !important;
-}
-
-#ppa-composer-top-target #postpress-ai-target-site{
-  position:static !important;
-  float:none !important;
-  margin:0 auto !important;
-  width:min(520px, 100%) !important;
-  max-width:100% !important;
-  text-align:center !important;
+body.toplevel_page_postpress-ai .ppa-composer-top-target,
+body.postpress-ai_page_postpress-ai .ppa-composer-top-target{
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
 }

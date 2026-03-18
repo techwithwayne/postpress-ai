@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  var PPA_JS_VER = 'admin.v2026-03-17.8'; // CHANGED: one-file remote Save Draft branch in admin.js // CHANGED: clearer Target Audience required notice + focus // CHANGED: add Guide genre title guard (avoid outline item as title) // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
+  var PPA_JS_VER = 'admin.v2026-03-17.5'; // CHANGED: remote draft browser call moved from REST to admin-ajax // CHANGED: prefer wpApiSettings REST nonce for remote draft route // CHANGED: clearer Target Audience required notice + focus // CHANGED: add Guide genre title guard (avoid outline item as title) // CHANGED: fix Output Language Original restore + translation loader prepn selection after translation
 
   // Abort if composer root is missing (defensive).
   // CHANGED: Make root lookup more robust so admin.js doesn't go idle if the ID differs.
@@ -90,6 +90,7 @@
 
   function getNonce() {
     // LOCKED ORDER: window.PPA.nonce -> window.ppaAdmin.nonce -> #ppa-nonce -> [data-ppa-nonce] -> '' // CHANGED:
+    if (window.wpApiSettings && window.wpApiSettings.nonce) return String(window.wpApiSettings.nonce); // CHANGED:
     if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce); // CHANGED:
     if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce); // CHANGED:
     var el = $('#ppa-nonce');
@@ -136,7 +137,7 @@
     // - ppa_store MUST ALSO be JSON body because PHP proxy reads php://input expecting JSON,
     //   and forwards that raw string to Django. Form-encoded breaks Django object-root.  // CHANGED:
     var act = String(action || '');
-    var useJsonBody = (act === 'ppa_generate' || act === 'ppa_store' || act === 'ppa_remote_draft_from_composer'); // CHANGED:
+    var useJsonBody = (act === 'ppa_generate' || act === 'ppa_store'); // CHANGED:
 
     // Build endpoint robustly (supports ajaxUrl already containing a '?').
     var endpoint = ajaxUrl + (ajaxUrl.indexOf('?') === -1 ? '?' : '&') + 'action=' + encodeURIComponent(act);
@@ -814,6 +815,125 @@
     };
 
     return payload;
+  }
+
+
+  function getSelectedTargetSiteId() {
+    var el = $('#postpress-ai-target-site');
+    var val = el ? String(el.value || '').trim() : 'current';
+    return val || 'current';
+  }
+
+  function isRemoteTargetSiteSelected() {
+    var target = getSelectedTargetSiteId();
+    return !!target && target !== 'current';
+  }
+
+  function buildRemoteDraftPayload() {
+    var payload = buildStorePayload('draft');
+    return {
+      target_site_id: getSelectedTargetSiteId(),
+      post_title: String(payload.title || payload.subject || '').trim(),
+      post_content: String(payload.content || '').trim(),
+      post_excerpt: String(payload.excerpt || '').trim(),
+      post_type: 'post',
+      meta: payload.meta || {},
+      _js_ver: PPA_JS_VER
+    };
+  }
+
+  function postRemoteDraft(payload) {
+    var endpoint = 'ppa_remote_draft_from_composer';
+    var headers = {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-PPA-View': (window.ppaAdmin && window.ppaAdmin.view) ? String(window.ppaAdmin.view) : 'composer',
+      'X-PPA-JS': PPA_JS_VER
+    };
+    var nonce = getNonce();
+    if (nonce) headers['X-WP-Nonce'] = nonce;
+
+    try {
+      window.PPA_LAST_REQUEST = {
+        action: 'ppa_remote_draft_from_composer',
+        transport: 'json-body',
+        js_ver: PPA_JS_VER,
+        target_site_id: String(payload && payload.target_site_id || '')
+      };
+    } catch (e0) {}
+
+    return fetch(endpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headers,
+      body: JSON.stringify(payload || {})
+    }).then(function (resp) {
+      return resp.text().then(function (txt) {
+        var parsed = null;
+        try { parsed = JSON.parse(txt); } catch (e) {}
+        return {
+          ok: resp.ok,
+          status: resp.status,
+          bodyText: txt,
+          body: (parsed != null ? parsed : txt)
+        };
+      });
+    }).catch(function (err) {
+      return { ok: false, status: 0, error: err };
+    });
+  }
+
+  function pickRemoteDraftEditLink(body) {
+    var obj = body;
+    if (!obj || typeof obj !== 'object') return '';
+
+    var direct = [
+      obj.edit_link,
+      obj.remote_edit_link,
+      obj.link,
+      obj.url
+    ];
+    for (var i = 0; i < direct.length; i++) {
+      if (direct[i]) return String(direct[i]);
+    }
+
+    if (obj.data && typeof obj.data === 'object') {
+      var fromData = pickRemoteDraftEditLink(obj.data);
+      if (fromData) return fromData;
+    }
+    if (obj.response && typeof obj.response === 'object') {
+      var fromResponse = pickRemoteDraftEditLink(obj.response);
+      if (fromResponse) return fromResponse;
+    }
+    if (obj.remote_post && typeof obj.remote_post === 'object') {
+      var fromRemotePost = pickRemoteDraftEditLink(obj.remote_post);
+      if (fromRemotePost) return fromRemotePost;
+    }
+    return '';
+  }
+
+  function pickRemoteDraftPostId(body) {
+    var obj = body;
+    if (!obj || typeof obj !== 'object') return '';
+
+    var direct = [obj.remote_post_id, obj.post_id, obj.id];
+    for (var i = 0; i < direct.length; i++) {
+      if (direct[i]) return String(direct[i]);
+    }
+
+    if (obj.data && typeof obj.data === 'object') {
+      var fromData = pickRemoteDraftPostId(obj.data);
+      if (fromData) return fromData;
+    }
+    if (obj.response && typeof obj.response === 'object') {
+      var fromResponse = pickRemoteDraftPostId(obj.response);
+      if (fromResponse) return fromResponse;
+    }
+    if (obj.remote_post && typeof obj.remote_post === 'object') {
+      var fromRemotePost = pickRemoteDraftPostId(obj.remote_post);
+      if (fromRemotePost) return fromRemotePost;
+    }
+    return '';
   }
 
   function hasTitleOrSubject() {
@@ -1551,96 +1671,8 @@
 
 
 
-  function getSelectedTargetSiteId() {
-    var el = $('#postpress-ai-target-site') || $('#ppa-target-site');
-    if (!el) return 'current';
-    var val = String(el.value || '').trim();
-    return val || 'current';
-  }
-
-  function isRemoteTargetSiteSelected() {
-    var target = getSelectedTargetSiteId();
-    return !!target && target !== 'current';
-  }
-
-  function buildRemoteDraftPayload() {
-    var payload = buildStorePayload('draft');
-    return {
-      target_site_id: getSelectedTargetSiteId(),
-      post_title: String(payload.title || payload.subject || '').trim(),
-      post_content: String(payload.content || '').trim(),
-      post_excerpt: String(payload.excerpt || '').trim(),
-      post_type: 'post',
-      meta: payload.meta || {},
-      subject: payload.subject || '',
-      genre: payload.genre || '',
-      industry: payload.industry || '',
-      tone: payload.tone || '',
-      word_count: payload.word_count || '',
-      audience: payload.audience || '',
-      brief: payload.brief || '',
-      keywords: payload.keywords || [],
-      _js_ver: PPA_JS_VER
-    };
-  }
-
-  function postRemoteDraft(payload) {
-    return apiPost('ppa_remote_draft_from_composer', payload);
-  }
-
-  function pickRemoteDraftEditLink(body) {
-    try {
-      if (!body || typeof body !== 'object') return '';
-      if (body.edit_link) return String(body.edit_link);
-      if (body.remote_edit_link) return String(body.remote_edit_link);
-      if (body.link) return String(body.link);
-
-      if (body.data && typeof body.data === 'object') {
-        var fromData = pickRemoteDraftEditLink(body.data);
-        if (fromData) return fromData;
-      }
-
-      if (body.response && typeof body.response === 'object') {
-        var fromResp = pickRemoteDraftEditLink(body.response);
-        if (fromResp) return fromResp;
-      }
-
-      if (body.remote_post && typeof body.remote_post === 'object') {
-        var fromPost = pickRemoteDraftEditLink(body.remote_post);
-        if (fromPost) return fromPost;
-      }
-    } catch (e) {}
-    return '';
-  }
-
-  function pickRemoteDraftPostId(body) {
-    try {
-      if (!body || typeof body !== 'object') return '';
-      if (body.remote_post_id) return body.remote_post_id;
-      if (body.post_id) return body.post_id;
-      if (body.id) return body.id;
-
-      if (body.data && typeof body.data === 'object') {
-        var fromData = pickRemoteDraftPostId(body.data);
-        if (fromData) return fromData;
-      }
-
-      if (body.response && typeof body.response === 'object') {
-        var fromResp = pickRemoteDraftPostId(body.response);
-        if (fromResp) return fromResp;
-      }
-
-      if (body.remote_post && typeof body.remote_post === 'object') {
-        var fromPost = pickRemoteDraftPostId(body.remote_post);
-        if (fromPost) return fromPost;
-      }
-    } catch (e) {}
-    return '';
-  }
-
-
   function handleDraftClick(ev) {
-    btnDraft = document.getElementById('ppa-draft') || btnDraft;
+    btnDraft = document.getElementById('ppa-draft') || document.getElementById('postpress-ai-save-draft') || document.getElementById('ppa-store') || btnDraft;
     if (!btnDraft) return;
 
     stopEvent(ev);
@@ -1666,30 +1698,37 @@
       if (isRemoteTargetSiteSelected()) {
         var remotePayload = buildRemoteDraftPayload();
 
-        if (!String(remotePayload.post_content || '').trim()) {
+        if (!remotePayload.post_content) {
           if (draftTab) closeDraftTab(draftTab);
           renderNotice('warn', 'Generate Preview first, then save the remote draft.');
           return Promise.resolve();
         }
 
-        return postRemoteDraft(remotePayload).then(function (res) {
-          var wp = unwrapWpAjax(res.body);
-          var data = wp.hasEnvelope ? wp.data : res.body;
-          var msg = pickMessage(data) || pickMessage(res.body) || 'Remote draft request sent.';
+        try {
+          console.info('PPA: remote draft start ->', {
+            target_site_id: remotePayload.target_site_id,
+            route: 'ppa_remote_draft_from_composer',
+            js_ver: PPA_JS_VER
+          });
+        } catch (eRD0) {}
 
-          if (!res.ok || (wp.hasEnvelope && !wp.success)) {
+        return postRemoteDraft(remotePayload).then(function (res) {
+          var body = (res && res.body && typeof res.body === 'object') ? res.body : {};
+          var msg = pickMessage(body) || 'Remote draft request sent.';
+
+          if (!res.ok) {
             if (draftTab) closeDraftTab(draftTab);
             renderNotice('error', 'Remote save draft failed (' + res.status + '): ' + msg);
-            try { console.info('PPA: remote draft failed', res); } catch (e0) {}
+            try { console.info('PPA: remote draft failed', res); } catch (eRD1) {}
             return;
           }
 
-          var edit = pickRemoteDraftEditLink(data) || pickRemoteDraftEditLink(res.body);
-          var pid  = pickRemoteDraftPostId(data) || pickRemoteDraftPostId(res.body);
+          var edit = pickRemoteDraftEditLink(body);
+          var pid  = pickRemoteDraftPostId(body);
           var url = absolutizeUrl(edit || '');
 
           try {
-            console.info('PPA: remote draft ok →', {
+            console.info('PPA: remote draft ok ->', {
               edit_link: edit,
               post_id: pid,
               final_url: url,
@@ -1697,7 +1736,7 @@
               popup_name: draftName,
               target_site_id: remotePayload.target_site_id
             });
-          } catch (eR) {}
+          } catch (eRD2) {}
 
           if (!draftTab) {
             if (url) {
@@ -1746,7 +1785,7 @@
         var url = absolutizeUrl(edit || fallbackEdit || view);
 
         try {
-          console.info('PPA: draft store ok →', {
+          console.info('PPA: draft store ok ->', {
             edit_link: edit,
             post_id: pid,
             view_link: view,
@@ -1892,7 +1931,7 @@
         try { gen = (t.id === 'ppa-generate') ? t : (t.closest ? t.closest('#ppa-generate') : null); } catch (e0) { gen = null; }
         if (gen) { handleGenerateClick(ev); return; }
 
-        try { dra = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e1) { dra = null; }
+        try { dra = (t.id === 'ppa-draft' || t.id === 'postpress-ai-save-draft' || t.id === 'ppa-store') ? t : (t.closest ? t.closest('#ppa-draft, #postpress-ai-save-draft, #ppa-store') : null); } catch (e1) { dra = null; }
         if (dra) { handleDraftClick(ev); return; }
 
         try { pub = (t.id === 'ppa-publish') ? t : (t.closest ? t.closest('#ppa-publish') : null); } catch (e2) { pub = null; }
@@ -2046,6 +2085,7 @@
   // -------------------------------------------------------------------------
   function getNonce() {
     try {
+      if (window.wpApiSettings && window.wpApiSettings.nonce) return String(window.wpApiSettings.nonce);
       if (window.PPA && window.PPA.nonce) return String(window.PPA.nonce);
       if (window.ppaAdmin && window.ppaAdmin.nonce) return String(window.ppaAdmin.nonce);
       var el = byId("ppa-nonce");

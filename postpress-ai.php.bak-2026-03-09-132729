@@ -5,7 +5,7 @@
  * Plugin URI: https://postpressai.com
  * Description: Secure server-to-server AI content preview & store via Django (PostPress AI). Adds a Composer screen and server-side AJAX proxy to your Django backend. Support: postpressai.com/contact.
  * Author: Wayne Hatter
- * Version: 2.1.4
+ * Version: 2.1.0
  * Requires at least: 6.1
  * Requires PHP: 7.4
  * Text Domain: postpress-ai
@@ -65,7 +65,7 @@ if ( ! defined( 'PPA_PLUGIN_URL' ) ) {
 	define( 'PPA_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 }
 if ( ! defined( 'PPA_PLUGIN_VER' ) ) {
-	define( 'PPA_PLUGIN_VER', '2.1.4' );
+	define( 'PPA_PLUGIN_VER', '2.1.0' );
 }
 if ( ! defined( 'PPA_VERSION' ) ) {                          // CHANGED:
 	define( 'PPA_VERSION', PPA_PLUGIN_VER );                 // CHANGED:

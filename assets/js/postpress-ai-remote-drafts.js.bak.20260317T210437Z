@@ -49,6 +49,13 @@
     return '';
   }
 
+  function getAdminAjaxUrl(){
+    if(win.ppaAdmin && win.ppaAdmin.ajaxurl) return String(win.ppaAdmin.ajaxurl);
+    if(win.PPA && win.PPA.ajaxUrl) return String(win.PPA.ajaxUrl);
+    if(win.ajaxurl) return String(win.ajaxurl);
+    return '/wp-admin/admin-ajax.php';
+  }
+
   function apiGetSites(){
     if(win.wp && win.wp.apiFetch){
       return win.wp.apiFetch({ path: '/postpress-ai/v1/sites' });
@@ -62,27 +69,16 @@
   }
 
   function apiRemoteDraft(payload, targetSiteId){
-    if(win.wp && win.wp.apiFetch){
-      return win.wp.apiFetch({
-        path: '/postpress-ai/v1/remote-draft-from-composer',
-        method: 'POST',
-        data: {
-          target_site_id: targetSiteId,
-          post_title: payload.post_title,
-          post_content: payload.post_content,
-          post_excerpt: payload.post_excerpt,
-          post_type: payload.post_type,
-          meta: payload.meta || {}
-        }
-      });
-    }
+    var ajaxUrl = getAdminAjaxUrl();
+    var url = ajaxUrl + (ajaxUrl.indexOf('?') === -1 ? '?' : '&') + 'action=ppa_remote_draft_from_composer';
 
-    return fetch('/wp-json/postpress-ai/v1/remote-draft-from-composer', {
+    return fetch(url, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
-        'Content-Type': 'application/json',
-        'X-WP-Nonce': getNonce()
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-WP-Nonce': getNonce(),
+        'X-Requested-With': 'XMLHttpRequest'
       },
       body: JSON.stringify({
         target_site_id: targetSiteId,
@@ -92,7 +88,16 @@
         post_type: payload.post_type,
         meta: payload.meta || {}
       })
-    }).then(r => r.json());
+    }).then(function(r){
+      return r.text().then(function(txt){
+        var json = null;
+        try { json = JSON.parse(txt); } catch(e) {}
+        if(!r.ok){
+          throw (json || { message: (txt || ('HTTP ' + r.status)), status: r.status });
+        }
+        return (json !== null ? json : {});
+      });
+    });
   }
 
   function collectPayload(){

@@ -1,0 +1,12 @@
+[18-Mar-2026 08:43:15 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '/full/path/to/postpressai.com/public_html/wp-load.php' (include_path='.:/usr/local/php82/pear') in Command line code:1
+Stack trace:
+#0 {main}
+  thrown in Command line code on line 1
+[18-Mar-2026 08:43:37 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '/full/path/to/postpressai.com/public_html/wp-load.php' (include_path='.:/usr/local/php82/pear') in Command line code:1
+Stack trace:
+#0 {main}
+  thrown in Command line code on line 1
+[18-Mar-2026 08:46:35 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '/full/path/to/postpressai.com/public_html/wp-load.php' (include_path='.:/usr/local/php82/pear') in Command line code:1
+Stack trace:
+#0 {main}
+  thrown in Command line code on line 1

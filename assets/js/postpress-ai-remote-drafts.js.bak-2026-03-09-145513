@@ -1,0 +1,107 @@
+(function($, win, doc){
+  'use strict';
+
+  function displayUrl(url){
+    return String(url || '').replace(/^https?:\/\//,'').replace(/\/$/,'');
+  }
+
+  function updateHeaderFromOption($opt){
+    if(!$opt || !$opt.length) return;
+
+    var name = $opt.data('site-name') || $.trim($opt.text());
+    var url  = $opt.data('site-url')  || '';
+    var link = $opt.data('site-link') || '';
+
+    // Fall back for "current"
+    if(($opt.val() === 'current') && !url){
+      url = displayUrl(win.location.origin);
+      link = win.location.origin + '/';
+    }
+
+    $('#ppa-target-site-link').text(name);
+
+    if(link){
+      $('#ppa-target-site-link')
+        .attr('href', link)
+        .attr('target','_blank')
+        .attr('rel','noopener noreferrer');
+    } else {
+      $('#ppa-target-site-link').removeAttr('href');
+    }
+
+    if(url){
+      $('#ppa-target-site-url').text(url).show();
+    } else {
+      $('#ppa-target-site-url').text('').hide();
+    }
+  }
+
+  function loadSitesAndPopulate($select){
+    if(!(win.wp && win.wp.apiFetch)){
+      console.warn('PPA remote drafts: wp.apiFetch not available on this screen.');
+      return;
+    }
+
+    win.wp.apiFetch({ path: '/postpress-ai/v1/sites' })
+      .then(function(sites){
+        if(!Array.isArray(sites)) return;
+
+        // Remove old remote options
+        $select.find('option').not('[value="current"]').remove();
+
+        var currentHost = displayUrl(win.location.origin);
+
+        sites.forEach(function(site){
+          if(!site || site.site_id === 'current') return;
+
+          var siteId   = String(site.site_id || '');
+          var siteName = String(site.name || site.url || siteId);
+          var siteUrl  = displayUrl(site.url || '');
+          var siteLink = site.url || '';
+
+          // Filter out duplicates of this same WP site
+          if(siteUrl && siteUrl === currentHost) return;
+
+          // Create option with required metadata for header updates
+          $('<option/>')
+            .val(siteId)
+            .text(siteName)
+            .attr('data-site-name', siteName)
+            .attr('data-site-url', siteUrl)
+            .attr('data-site-link', siteLink)
+            .appendTo($select);
+        });
+
+        updateHeaderFromOption($select.find('option:selected'));
+      })
+      .catch(function(err){
+        console.warn('PPA remote drafts: could not load sites', err);
+      });
+  }
+
+  $(function(){
+    var $select = $('#postpress-ai-target-site');
+    if(!$select.length) return;
+
+    // Ensure the current option has metadata (from composer.php it already does, but this is safe)
+    var $current = $select.find('option[value="current"]').first();
+    $current
+      .attr('data-site-name', $current.data('site-name') || $('#ppa-target-site-link').text())
+      .attr('data-site-url',  $current.data('site-url')  || displayUrl(win.location.origin))
+      .attr('data-site-link', $current.data('site-link') || (win.location.origin + '/'));
+
+    // Bind change → update header
+    $select.on('change', function(){
+      updateHeaderFromOption($(this).find('option:selected'));
+    });
+
+    // Initial paint
+    updateHeaderFromOption($select.find('option:selected'));
+
+    // Load remote sites and append with metadata
+    loadSitesAndPopulate($select);
+
+    console.info('PPA remote drafts: header binding + site hydration ready');
+  });
+
+})(jQuery, window, document);
