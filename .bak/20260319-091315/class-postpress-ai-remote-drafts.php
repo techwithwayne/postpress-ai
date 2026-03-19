@@ -78,19 +78,133 @@ class PostPress_AI_Remote_Drafts {
 	 * Returns current site + other active sites for this license from backend.
 	 */
 	public static function rest_get_sites( WP_REST_Request $request ) {
-		$sites = self::get_connected_sites_payload();
+		$license_key = trim( (string) get_option( 'postpress_ai_license_key' ) );
 
-		if ( is_wp_error( $sites ) ) {
-			$status = 500;
-			$data   = $sites->get_error_data();
-			if ( is_array( $data ) && isset( $data['status'] ) ) {
-				$status = (int) $data['status'];
-			}
-
-			return new WP_Error( $sites->get_error_code(), $sites->get_error_message(), [ 'status' => $status ] );
+		if ( '' === $license_key ) {
+			return new WP_Error( 'no_license', 'License key not configured.', [ 'status' => 400 ] );
 		}
 
-		return rest_ensure_response( $sites );
+		// Best-effort self-heal for source site registration.
+		self::ensure_source_site_registration();
+
+		$backend_response = self::backend_request(
+			'GET',
+			'/license/sites/',
+			[ 'license_key' => $license_key ]
+		);
+
+		if ( is_wp_error( $backend_response ) ) {
+			return new WP_Error( 'backend_error', $backend_response->get_error_message(), [ 'status' => 500 ] );
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $backend_response ), true );
+
+		$sites = [];
+		if (
+			is_array( $body ) &&
+			isset( $body['data'] ) &&
+			is_array( $body['data'] ) &&
+			isset( $body['data']['sites'] ) &&
+			is_array( $body['data']['sites'] )
+		) {
+			$sites = $body['data']['sites'];
+		}
+
+		$current_site_url      = home_url();
+		$current_site_url_norm = untrailingslashit( strtolower( (string) $current_site_url ) );
+		$current_site_id       = (string) get_option( 'postpress_ai_site_id' );
+
+		$current_site_name = get_bloginfo( 'name' );
+		if ( ! is_string( $current_site_name ) || '' === trim( $current_site_name ) ) {
+			$current_site_name = preg_replace( '#^https?://#', '', (string) home_url() );
+		}
+
+		$resolve_site_title = function( $url ) {
+			$url = is_string( $url ) ? trim( $url ) : '';
+			if ( '' === $url ) {
+				return '';
+			}
+
+			$cache_key = 'ppa_site_title_' . md5( strtolower( $url ) );
+			$cached    = get_transient( $cache_key );
+			if ( is_string( $cached ) ) {
+				return ( '__none__' === $cached ) ? '' : $cached;
+			}
+
+			$endpoint = untrailingslashit( $url ) . '/wp-json';
+			$resp     = wp_remote_get(
+				$endpoint,
+				[
+					'timeout'     => 6,
+					'redirection' => 3,
+					'headers'     => [ 'Accept' => 'application/json' ],
+				]
+			);
+
+			if ( is_wp_error( $resp ) ) {
+				set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
+				return '';
+			}
+
+			$status = (int) wp_remote_retrieve_response_code( $resp );
+			if ( $status < 200 || $status >= 300 ) {
+				set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
+				return '';
+			}
+
+			$json = json_decode( wp_remote_retrieve_body( $resp ), true );
+			if ( is_array( $json ) && ! empty( $json['name'] ) ) {
+				$title = sanitize_text_field( (string) $json['name'] );
+				set_transient( $cache_key, $title, 12 * HOUR_IN_SECONDS );
+				return $title;
+			}
+
+			set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
+			return '';
+		};
+
+		$result   = [];
+		$result[] = [
+			'site_id' => 'current',
+			'name'    => $current_site_name,
+			'url'     => $current_site_url,
+		];
+
+		foreach ( $sites as $site ) {
+			$remote_id  = isset( $site['id'] ) ? (string) $site['id'] : '';
+			$remote_url = isset( $site['url'] ) ? (string) $site['url'] : '';
+
+			if ( '' === $remote_id || '' === $remote_url ) {
+				continue;
+			}
+
+			$site_url_norm = untrailingslashit( strtolower( $remote_url ) );
+
+			if ( $site_url_norm === $current_site_url_norm ) {
+				continue;
+			}
+
+			if ( '' !== $current_site_id && $remote_id === $current_site_id ) {
+				continue;
+			}
+
+			if ( isset( $site['status'] ) && 'active' !== strtolower( (string) $site['status'] ) ) {
+				continue;
+			}
+
+			$resolved_name = $resolve_site_title( $remote_url );
+			if ( '' === $resolved_name ) {
+				$resolved_name = isset( $site['name'] ) ? (string) $site['name'] : $remote_url;
+			}
+
+			$result[] = [
+				'site_id' => $remote_id,
+				'name'    => $resolved_name,
+				'url'     => $remote_url,
+			];
+		}
+
+		return rest_ensure_response( $result );
 	}
 
 	/**
@@ -122,7 +236,7 @@ class PostPress_AI_Remote_Drafts {
 	/**
 	 * POST /postpress-ai/v1/remote-draft-from-composer
 	 *
-	 * Browser -> plugin -> backend -> remote site.
+	 * Browser → plugin → backend → remote site.
 	 */
 	public static function rest_remote_draft_from_composer( WP_REST_Request $request ) {
 		$params         = self::get_request_params( $request );
@@ -131,19 +245,6 @@ class PostPress_AI_Remote_Drafts {
 		if ( '' === $target_site_id || 'current' === $target_site_id ) {
 			return new WP_Error( 'bad_target', __( 'Invalid target site selected.', 'postpress-ai' ), [ 'status' => 400 ] );
 		}
-
-		$target_site = self::get_connected_site_by_id( $target_site_id );
-		if ( is_wp_error( $target_site ) ) {
-			$status = 500;
-			$data   = $target_site->get_error_data();
-			if ( is_array( $data ) && isset( $data['status'] ) ) {
-				$status = (int) $data['status'];
-			}
-
-			return new WP_Error( $target_site->get_error_code(), $target_site->get_error_message(), [ 'status' => $status ] );
-		}
-
-		$target_label = self::get_site_identity_string( $target_site );
 
 		$post = [
 			'post_title'   => isset( $params['post_title'] ) ? (string) $params['post_title'] : '',
@@ -157,11 +258,8 @@ class PostPress_AI_Remote_Drafts {
 		if ( '' === $license_key ) {
 			return new WP_Error(
 				'missing_site_info',
-				sprintf( __( 'Remote draft to %s failed: this site is not fully registered with PostPress AI.', 'postpress-ai' ), $target_label ),
-				[
-					'status' => 400,
-					'target' => $target_site,
-				]
+				__( 'This site is not fully registered with PostPress AI.', 'postpress-ai' ),
+				[ 'status' => 400 ]
 			);
 		}
 
@@ -174,11 +272,8 @@ class PostPress_AI_Remote_Drafts {
 		if ( '' === $source_site_id ) {
 			return new WP_Error(
 				'missing_site_info',
-				sprintf( __( 'Remote draft to %s failed: this site is not fully registered with PostPress AI.', 'postpress-ai' ), $target_label ),
-				[
-					'status' => 400,
-					'target' => $target_site,
-				]
+				__( 'This site is not fully registered with PostPress AI.', 'postpress-ai' ),
+				[ 'status' => 400 ]
 			);
 		}
 
@@ -194,19 +289,10 @@ class PostPress_AI_Remote_Drafts {
 		);
 
 		if ( is_wp_error( $backend_response ) ) {
-			$status = 500;
-			$data   = $backend_response->get_error_data();
-			if ( is_array( $data ) && isset( $data['status'] ) ) {
-				$status = (int) $data['status'];
-			}
-
 			return new WP_Error(
 				'remote_draft_failed',
-				sprintf( __( 'Remote draft to %s failed: %s', 'postpress-ai' ), $target_label, $backend_response->get_error_message() ),
-				[
-					'status' => $status,
-					'target' => $target_site,
-				]
+				$backend_response->get_error_message(),
+				[ 'status' => 500 ]
 			);
 		}
 
@@ -215,34 +301,9 @@ class PostPress_AI_Remote_Drafts {
 		if ( ! is_array( $body ) ) {
 			return new WP_Error(
 				'remote_draft_failed',
-				sprintf( __( 'Remote draft to %s failed: invalid response from PostPress AI backend.', 'postpress-ai' ), $target_label ),
-				[
-					'status' => 500,
-					'target' => $target_site,
-				]
+				__( 'Invalid response from PostPress AI backend.', 'postpress-ai' ),
+				[ 'status' => 500 ]
 			);
-		}
-
-		if ( isset( $body['status'] ) && 'ok' !== strtolower( (string) $body['status'] ) ) {
-			$message = isset( $body['message'] ) ? trim( (string) $body['message'] ) : '';
-			if ( '' === $message ) {
-				$message = __( 'Unknown backend response.', 'postpress-ai' );
-			}
-
-			return new WP_Error(
-				'remote_draft_failed',
-				sprintf( __( 'Remote draft to %s failed: %s', 'postpress-ai' ), $target_label, $message ),
-				[
-					'status'  => 500,
-					'target'  => $target_site,
-					'backend' => $body,
-				]
-			);
-		}
-
-		$body['target'] = $target_site;
-		if ( empty( $body['message'] ) ) {
-			$body['message'] = sprintf( __( 'Draft sent to %s.', 'postpress-ai' ), $target_label );
 		}
 
 		return rest_ensure_response( $body );
@@ -289,47 +350,23 @@ class PostPress_AI_Remote_Drafts {
 	/**
 	 * POST /postpress-ai/v1/remote-draft
 	 *
-	 * Backend -> site: actually create the WordPress draft here.
+	 * Backend → site: actually create the WordPress draft here.
 	 */
-	protected static function extract_remote_draft_token( WP_REST_Request $request, array $payload ) {
-		$auth_header = (string) $request->get_header( 'authorization' );
-
-		if ( $auth_header && stripos( $auth_header, 'bearer ' ) === 0 ) {
-			$token = trim( substr( $auth_header, 7 ) );
-			if ( '' !== $token ) {
-				return $token;
-			}
-		}
-
-		$candidates = [
-			(string) $request->get_header( 'x-postpress-ai-remote-draft' ),
-			(string) $request->get_header( 'x-ppa-remote-draft-token' ),
-			isset( $payload['remote_draft_token'] ) ? (string) $payload['remote_draft_token'] : '',
-			isset( $payload['postpress_ai_site_token'] ) ? (string) $payload['postpress_ai_site_token'] : '',
-		];
-
-		foreach ( $candidates as $candidate ) {
-			$candidate = trim( (string) $candidate );
-			if ( '' !== $candidate ) {
-				return $candidate;
-			}
-		}
-
-		return '';
-	}
-
 	public static function rest_remote_draft( WP_REST_Request $request ) {
-		$payload      = self::get_request_params( $request );
-		$token        = self::extract_remote_draft_token( $request, $payload );
-		$stored_token = get_option( 'postpress_ai_site_token' );
+		$auth_header = $request->get_header( 'authorization' );
 
-		if ( '' === $token ) {
-			return new WP_Error( 'forbidden', __( 'Missing remote draft token.', 'postpress-ai' ), [ 'status' => 403 ] );
+		if ( ! $auth_header || stripos( $auth_header, 'bearer ' ) !== 0 ) {
+			return new WP_Error( 'forbidden', __( 'Missing authorization header.', 'postpress-ai' ), [ 'status' => 403 ] );
 		}
+
+		$token        = trim( substr( $auth_header, 7 ) );
+		$stored_token = get_option( 'postpress_ai_site_token' );
 
 		if ( ! $stored_token || ! hash_equals( (string) $stored_token, (string) $token ) ) {
 			return new WP_Error( 'forbidden', __( 'Invalid remote draft token.', 'postpress-ai' ), [ 'status' => 403 ] );
 		}
+
+		$payload = self::get_request_params( $request );
 
 		$postarr = [
 			'post_title'   => wp_strip_all_tags( isset( $payload['post_title'] ) ? $payload['post_title'] : '' ),
@@ -543,11 +580,13 @@ class PostPress_AI_Remote_Drafts {
 			return false;
 		}
 
+		// Preferred: handshake already wrote site_id/site_token locally.
 		$site_id = trim( (string) get_option( 'postpress_ai_site_id' ) );
 		if ( '' !== $site_id ) {
 			return true;
 		}
 
+		// Fallback: if backend returns the site row, store the id locally so source-site relay can proceed.
 		if (
 			isset( $body['data'] ) &&
 			is_array( $body['data'] ) &&
@@ -569,261 +608,6 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		return false;
-	}
-
-	/**
-	 * Return a normalized domain string for a site URL.
-	 */
-	protected static function get_site_domain( $url ) {
-		$url = trim( (string) $url );
-		if ( '' === $url ) {
-			return '';
-		}
-
-		$host = wp_parse_url( $url, PHP_URL_HOST );
-		if ( ! is_string( $host ) || '' === $host ) {
-			$host = preg_replace( '#^https?://#i', '', $url );
-			$host = preg_replace( '#/.*$#', '', (string) $host );
-		}
-
-		return strtolower( trim( (string) $host ) );
-	}
-
-	/**
-	 * Build a human-safe identity string for UI and errors.
-	 */
-	protected static function get_site_identity_string( array $site ) {
-		$label = isset( $site['label'] ) ? trim( (string) $site['label'] ) : '';
-		if ( '' !== $label ) {
-			return $label;
-		}
-
-		$name    = isset( $site['name'] ) ? trim( (string) $site['name'] ) : '';
-		$domain  = isset( $site['domain'] ) ? trim( (string) $site['domain'] ) : '';
-		$site_id = isset( $site['site_id'] ) ? trim( (string) $site['site_id'] ) : '';
-
-		$parts = [];
-		if ( '' !== $name ) {
-			$parts[] = $name;
-		}
-		if ( '' !== $domain ) {
-			$parts[] = $domain;
-		}
-
-		$identity = implode( ' - ', array_slice( $parts, 0, 2 ) );
-		if ( '' === $identity ) {
-			$identity = __( 'selected site', 'postpress-ai' );
-		}
-
-		if ( '' !== $site_id ) {
-			$identity .= sprintf( ' (Site ID %s)', $site_id );
-		}
-
-		return $identity;
-	}
-
-	/**
-	 * Normalize one site row for UI consumption.
-	 */
-	protected static function normalize_site_record( array $site, $is_current = false ) {
-		$site_id = isset( $site['site_id'] ) ? trim( (string) $site['site_id'] ) : '';
-		$name    = isset( $site['name'] ) ? sanitize_text_field( (string) $site['name'] ) : '';
-		$url     = isset( $site['url'] ) ? esc_url_raw( (string) $site['url'] ) : '';
-		$domain  = self::get_site_domain( $url );
-		$status  = isset( $site['status'] ) ? strtolower( trim( (string) $site['status'] ) ) : 'active';
-
-		if ( '' === $name ) {
-			$name = ( '' !== $domain ) ? $domain : $url;
-		}
-
-		$label = $name;
-		if ( '' !== $domain ) {
-			$label .= ' - ' . $domain;
-		}
-		if ( '' !== $site_id ) {
-			$label .= sprintf( ' (Site ID %s)', $site_id );
-		}
-
-		return [
-			'site_id'    => $site_id,
-			'name'       => $name,
-			'url'        => $url,
-			'domain'     => $domain,
-			'status'     => ( '' !== $status ) ? $status : 'active',
-			'label'      => $label,
-			'is_current' => (bool) $is_current,
-		];
-	}
-
-	/**
-	 * Resolve the full connected-sites payload for the composer.
-	 */
-	protected static function get_connected_sites_payload() {
-		$license_key = trim( (string) get_option( 'postpress_ai_license_key' ) );
-
-		if ( '' === $license_key ) {
-			return new WP_Error( 'no_license', 'License key not configured.', [ 'status' => 400 ] );
-		}
-
-		self::ensure_source_site_registration();
-
-		$backend_response = self::backend_request(
-			'GET',
-			'/license/sites/',
-			[ 'license_key' => $license_key ]
-		);
-
-		if ( is_wp_error( $backend_response ) ) {
-			return new WP_Error( 'backend_error', $backend_response->get_error_message(), [ 'status' => 500 ] );
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $backend_response ), true );
-
-		$sites = [];
-		if (
-			is_array( $body ) &&
-			isset( $body['data'] ) &&
-			is_array( $body['data'] ) &&
-			isset( $body['data']['sites'] ) &&
-			is_array( $body['data']['sites'] )
-		) {
-			$sites = $body['data']['sites'];
-		}
-
-		$current_site_url      = home_url();
-		$current_site_url_norm = untrailingslashit( strtolower( (string) $current_site_url ) );
-		$current_site_id       = trim( (string) get_option( 'postpress_ai_site_id' ) );
-
-		$current_site_name = get_bloginfo( 'name' );
-		if ( ! is_string( $current_site_name ) || '' === trim( $current_site_name ) ) {
-			$current_site_name = preg_replace( '#^https?://#', '', (string) home_url() );
-		}
-
-		$resolve_site_title = function( $url ) {
-			$url = is_string( $url ) ? trim( $url ) : '';
-			if ( '' === $url ) {
-				return '';
-			}
-
-			$cache_key = 'ppa_site_title_' . md5( strtolower( $url ) );
-			$cached    = get_transient( $cache_key );
-			if ( is_string( $cached ) ) {
-				return ( '__none__' === $cached ) ? '' : $cached;
-			}
-
-			$endpoint = untrailingslashit( $url ) . '/wp-json';
-			$resp     = wp_remote_get(
-				$endpoint,
-				[
-					'timeout'     => 6,
-					'redirection' => 3,
-					'headers'     => [ 'Accept' => 'application/json' ],
-				]
-			);
-
-			if ( is_wp_error( $resp ) ) {
-				set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
-				return '';
-			}
-
-			$status = (int) wp_remote_retrieve_response_code( $resp );
-			if ( $status < 200 || $status >= 300 ) {
-				set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
-				return '';
-			}
-
-			$json = json_decode( wp_remote_retrieve_body( $resp ), true );
-			if ( is_array( $json ) && ! empty( $json['name'] ) ) {
-				$title = sanitize_text_field( (string) $json['name'] );
-				set_transient( $cache_key, $title, 12 * HOUR_IN_SECONDS );
-				return $title;
-			}
-
-			set_transient( $cache_key, '__none__', HOUR_IN_SECONDS );
-			return '';
-		};
-
-		$result   = [];
-		$result[] = self::normalize_site_record(
-			[
-				'site_id' => $current_site_id,
-				'name'    => $current_site_name,
-				'url'     => $current_site_url,
-				'status'  => 'active',
-			],
-			true
-		);
-
-		foreach ( $sites as $site ) {
-			$remote_id  = isset( $site['id'] ) ? trim( (string) $site['id'] ) : '';
-			$remote_url = isset( $site['url'] ) ? (string) $site['url'] : '';
-
-			if ( '' === $remote_id || '' === $remote_url ) {
-				continue;
-			}
-
-			$site_url_norm = untrailingslashit( strtolower( (string) $remote_url ) );
-			if ( $site_url_norm === $current_site_url_norm ) {
-				continue;
-			}
-
-			if ( '' !== $current_site_id && $remote_id === $current_site_id ) {
-				continue;
-			}
-
-			$status = isset( $site['status'] ) ? strtolower( trim( (string) $site['status'] ) ) : 'active';
-			if ( 'active' !== $status ) {
-				continue;
-			}
-
-			$resolved_name = $resolve_site_title( $remote_url );
-			if ( '' === $resolved_name ) {
-				$resolved_name = isset( $site['name'] ) ? (string) $site['name'] : '';
-			}
-
-			$result[] = self::normalize_site_record(
-				[
-					'site_id' => $remote_id,
-					'name'    => $resolved_name,
-					'url'     => $remote_url,
-					'status'  => $status,
-				],
-				false
-			);
-		}
-
-		return array_values( $result );
-	}
-
-	/**
-	 * Resolve one connected target site by Site ID.
-	 */
-	protected static function get_connected_site_by_id( $target_site_id ) {
-		$target_site_id = trim( (string) $target_site_id );
-		if ( '' === $target_site_id ) {
-			return new WP_Error( 'bad_target', __( 'Invalid target site selected.', 'postpress-ai' ), [ 'status' => 400 ] );
-		}
-
-		$sites = self::get_connected_sites_payload();
-		if ( is_wp_error( $sites ) ) {
-			return $sites;
-		}
-
-		foreach ( $sites as $site ) {
-			if ( ! empty( $site['is_current'] ) ) {
-				continue;
-			}
-
-			if ( isset( $site['site_id'] ) && (string) $site['site_id'] === $target_site_id ) {
-				return $site;
-			}
-		}
-
-		return new WP_Error(
-			'bad_target',
-			sprintf( __( 'Selected target site could not be resolved for Site ID %s.', 'postpress-ai' ), $target_site_id ),
-			[ 'status' => 400 ]
-		);
 	}
 
 	/**
@@ -852,54 +636,6 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		return $base . $path;
-	}
-
-	/**
-	 * Reduce ugly HTML/backend junk into a human-safe message.
-	 */
-	protected static function compact_backend_error_message( $code, $body ) {
-		$code = (int) $code;
-		$body = is_string( $body ) ? trim( $body ) : '';
-
-		if ( '' !== $body ) {
-			$decoded = json_decode( $body, true );
-			if ( is_array( $decoded ) ) {
-				foreach ( [ 'message', 'detail', 'error' ] as $key ) {
-					if ( ! empty( $decoded[ $key ] ) && is_string( $decoded[ $key ] ) ) {
-						$body = $decoded[ $key ];
-						break;
-					}
-				}
-			}
-		}
-
-		$text = wp_strip_all_tags( html_entity_decode( (string) $body, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
-		$text = preg_replace( '/\s+/', ' ', (string) $text );
-		$text = trim( (string) $text );
-
-		if ( $code === 502 ) {
-			if ( '' === $text || stripos( $text, 'cloudflare' ) !== false || stripos( $text, 'bad gateway' ) !== false ) {
-				return 'PostPress AI backend is temporarily unavailable (502).';
-			}
-		}
-
-		if ( $code === 503 && '' === $text ) {
-			return 'PostPress AI backend is temporarily unavailable (503).';
-		}
-
-		if ( $code === 504 && '' === $text ) {
-			return 'PostPress AI backend timed out (504).';
-		}
-
-		if ( '' === $text ) {
-			return sprintf( 'PostPress AI backend returned HTTP %d.', $code );
-		}
-
-		if ( strlen( $text ) > 220 ) {
-			$text = substr( $text, 0, 217 ) . '...';
-		}
-
-		return sprintf( 'PostPress AI backend returned HTTP %d: %s', $code, $text );
 	}
 
 	/**
@@ -936,18 +672,13 @@ class PostPress_AI_Remote_Drafts {
 
 		if ( $code < 200 || $code >= 300 ) {
 			$body = wp_remote_retrieve_body( $response );
-			$msg  = self::compact_backend_error_message( $code, $body );
-
-			return new WP_Error(
-				'backend_http_error',
-				$msg,
-				[
-					'status'        => $code,
-					'backend_code'  => $code,
-					'backend_raw'   => $body,
-					'backend_msg'   => $msg,
-				]
+			$msg  = sprintf(
+				'Backend error (%d): %s',
+				$code,
+				$body ? $body : 'Unknown error'
 			);
+
+			return new WP_Error( 'backend_http_error', $msg );
 		}
 
 		return $response;

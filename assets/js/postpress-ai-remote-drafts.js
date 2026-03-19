@@ -2,7 +2,72 @@
   'use strict';
 
   function cleanUrl(url){
-    return String(url || '').replace(/^https?:\/\//,'').replace(/\/$/,'');
+    return String(url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  }
+
+  function getDomain(url){
+    var cleaned = cleanUrl(url);
+    return cleaned.split('/')[0] || '';
+  }
+
+  function ucFirst(value){
+    value = String(value || '').trim();
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+  }
+
+  function buildLabel(site){
+    var name   = String(site.name || '').trim() || 'Unnamed site';
+    var domain = String(site.domain || getDomain(site.url || '')).trim();
+    var siteId = String(site.site_id || '').trim();
+
+    var label = name;
+    if(domain){
+      label += ' - ' + domain;
+    }
+    if(siteId){
+      label += ' (Site ID ' + siteId + ')';
+    }
+
+    return label;
+  }
+
+  function buildMeta(site){
+    var bits   = [];
+    var domain = String(site.domain || getDomain(site.url || '')).trim();
+    var siteId = String(site.site_id || '').trim();
+    var status = ucFirst(String(site.status || 'active').toLowerCase());
+
+    if(domain) bits.push(domain);
+    if(siteId) bits.push('Site ID ' + siteId);
+    if(status) bits.push(status);
+
+    return bits.join(' · ');
+  }
+
+  function normalizeSite(raw){
+    raw = raw || {};
+
+    var url    = String(raw.url || raw.link || '').trim();
+    var domain = String(raw.domain || getDomain(url)).trim();
+
+    var site = {
+      value: raw.is_current ? 'current' : String(raw.site_id || '').trim(),
+      site_id: String(raw.site_id || '').trim(),
+      name: String(raw.name || raw.title || domain || url || 'Unnamed site').trim(),
+      url: url,
+      domain: domain,
+      status: String(raw.status || 'active').trim().toLowerCase() || 'active',
+      is_current: !!raw.is_current,
+      label: String(raw.label || '').trim(),
+      link: url || (domain ? ('https://' + domain + '/') : '')
+    };
+
+    if(!site.label){
+      site.label = buildLabel(site);
+    }
+
+    site.meta = buildMeta(site);
+    return site;
   }
 
   function isComposer(){
@@ -10,12 +75,52 @@
   }
 
   function getCurrentSite($select){
-    return {
-      site_id: 'current',
-      name: ($select.attr('data-current-name') || 'This site'),
-      url: cleanUrl($select.attr('data-current-url') || cleanUrl(win.location.origin)),
-      link: ($select.attr('data-current-link') || (win.location.origin + '/'))
-    };
+    return normalizeSite({
+      is_current: true,
+      site_id: $select.attr('data-current-site-id') || '',
+      name: $select.attr('data-current-name') || 'This site',
+      url: $select.attr('data-current-url') || win.location.origin,
+      status: 'active',
+      label: $select.attr('data-current-label') || ''
+    });
+  }
+
+  function setOptionData($opt, site){
+    if(!$opt || !$opt.length || !site) return;
+
+    $opt
+      .attr('data-site-id', site.site_id || '')
+      .attr('data-site-name', site.name || '')
+      .attr('data-site-url', site.url || '')
+      .attr('data-site-domain', site.domain || '')
+      .attr('data-site-status', site.status || 'active')
+      .attr('data-site-label', site.label || '')
+      .attr('data-site-link', site.link || '')
+      .text(site.label || site.name || site.domain || 'Site');
+  }
+
+  function siteFromOption($opt, fallbackCurrent){
+    if(!$opt || !$opt.length){
+      return fallbackCurrent || null;
+    }
+
+    var site = normalizeSite({
+      is_current: ($opt.val() || 'current') === 'current',
+      site_id: $opt.attr('data-site-id') || '',
+      name: $opt.attr('data-site-name') || '',
+      url: $opt.attr('data-site-url') || $opt.attr('data-site-link') || '',
+      domain: $opt.attr('data-site-domain') || '',
+      status: $opt.attr('data-site-status') || 'active',
+      label: $opt.attr('data-site-label') || ''
+    });
+
+    site.value = String($opt.val() || 'current');
+
+    if(site.value === 'current' && fallbackCurrent){
+      return fallbackCurrent;
+    }
+
+    return site;
   }
 
   function setHeader(site){
@@ -23,22 +128,27 @@
 
     var $link = $('#ppa-target-site-link');
     var $url  = $('#ppa-target-site-url');
+    var $meta = $('#ppa-target-site-meta');
 
     if($link.length){
-      $link.text(site.name || '');
+      $link.text(site.name || site.label || '');
       if(site.link){
-        $link.attr('href', site.link)
-             .attr('target','_blank')
-             .attr('rel','noopener noreferrer');
+        $link
+          .attr('href', site.link)
+          .attr('target', '_blank')
+          .attr('rel', 'noopener noreferrer');
       }
     }
 
-    if($url.length){
-      if(site.url){
-        $url.text(site.url).show();
-      } else {
+    var metaText = site.meta || buildMeta(site);
+
+    if($meta.length){
+      $meta.text(metaText).show();
+      if($url.length){
         $url.text('').hide();
       }
+    } else if($url.length){
+      $url.text(metaText).show();
     }
   }
 
@@ -49,31 +159,56 @@
     return '';
   }
 
+  function parseJsonResponse(resp){
+    return resp.text().then(function(text){
+      var data = {};
+
+      if(text){
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          data = { message: text };
+        }
+      }
+
+      if(!resp.ok){
+        var message = (data && data.message) ? data.message : ('HTTP ' + resp.status);
+        var error = new Error(message);
+        error.status = resp.status;
+        error.response = data;
+        throw error;
+      }
+
+      return data;
+    });
+  }
+
   function apiGetSites(){
     if(win.wp && win.wp.apiFetch){
       return win.wp.apiFetch({ path: '/postpress-ai/v1/sites' });
     }
 
-    // fallback (shouldn’t be needed now that apiFetch works)
     return fetch('/wp-json/postpress-ai/v1/sites', {
       credentials: 'same-origin',
       headers: { 'X-WP-Nonce': getNonce() }
-    }).then(r => r.json());
+    }).then(parseJsonResponse);
   }
 
   function apiRemoteDraft(payload, targetSiteId){
+    var body = {
+      target_site_id: targetSiteId,
+      post_title: payload.post_title,
+      post_content: payload.post_content,
+      post_excerpt: payload.post_excerpt,
+      post_type: payload.post_type,
+      meta: payload.meta || {}
+    };
+
     if(win.wp && win.wp.apiFetch){
       return win.wp.apiFetch({
         path: '/postpress-ai/v1/remote-draft-from-composer',
         method: 'POST',
-        data: {
-          target_site_id: targetSiteId,
-          post_title: payload.post_title,
-          post_content: payload.post_content,
-          post_excerpt: payload.post_excerpt,
-          post_type: payload.post_type,
-          meta: payload.meta || {}
-        }
+        data: body
       });
     }
 
@@ -84,15 +219,8 @@
         'Content-Type': 'application/json',
         'X-WP-Nonce': getNonce()
       },
-      body: JSON.stringify({
-        target_site_id: targetSiteId,
-        post_title: payload.post_title,
-        post_content: payload.post_content,
-        post_excerpt: payload.post_excerpt,
-        post_type: payload.post_type,
-        meta: payload.meta || {}
-      })
-    }).then(r => r.json());
+      body: JSON.stringify(body)
+    }).then(parseJsonResponse);
   }
 
   function collectPayload(){
@@ -114,7 +242,23 @@
 
   function showMsg(text){
     var $msg = $('#ppa-toolbar-msg');
-    if($msg.length) $msg.text(text || '');
+    if($msg.length){
+      $msg.text(text || '');
+    }
+  }
+
+  function extractErrorMessage(err){
+    if(!err) return 'Unknown error.';
+    if(typeof err === 'string') return err;
+    if(err.message) return err.message;
+    if(err.response && err.response.message) return err.response.message;
+    if(err.data && err.data.message) return err.data.message;
+
+    try {
+      return JSON.stringify(err);
+    } catch (e) {
+      return 'Unknown error.';
+    }
   }
 
   $(function(){
@@ -124,81 +268,64 @@
     if(!$select.length) return;
 
     var current = getCurrentSite($select);
+    var confirmedTargets = {};
 
-    // Ensure current option always carries the real site title (not the generic label)
     var $currentOpt = $select.find('option[value="current"]').first();
-    $currentOpt
-      .attr('data-site-name', current.name)
-      .attr('data-site-url', current.url)
-      .attr('data-site-link', current.link);
-
-    // Paint header immediately with real site title
+    setOptionData($currentOpt, current);
     setHeader(current);
 
-    // On change, always update header from the selected option’s data attrs
     $select.off('change.ppaRemoteDrafts').on('change.ppaRemoteDrafts', function(){
-      var $opt = $(this).find('option:selected');
-      var site = {
-        site_id: $opt.val() || 'current',
-        name: $opt.attr('data-site-name') || current.name,
-        url:  cleanUrl($opt.attr('data-site-url') || current.url),
-        link: $opt.attr('data-site-link') || current.link
-      };
-
-      if(site.site_id === 'current'){
-        site = current;
-      }
-
-      setHeader(site);
+      var site = siteFromOption($(this).find('option:selected'), current);
+      setHeader(site || current);
     });
 
-    // Hydrate remote sites with real titles + url attrs
     apiGetSites()
       .then(function(sites){
         if(!Array.isArray(sites)) return;
 
-        var currentHost = cleanUrl(win.location.origin);
+        var currentHost = getDomain(win.location.origin);
 
         $select.find('option').not('[value="current"]').remove();
 
-        sites.forEach(function(s){
-          if(!s || String(s.site_id) === 'current') return;
+        sites.forEach(function(raw){
+          var site = normalizeSite(raw);
 
-          var id   = String(s.site_id);
-          var name = String(s.name || s.url || id);
-          var url  = cleanUrl(String(s.url || ''));
-          var link = String(s.url || '');
+          if(site.is_current){
+            current = site;
+            current.value = 'current';
+            setOptionData($currentOpt, current);
+            return;
+          }
 
-          // filter duplicate of this same WP site
-          if(url && url === currentHost) return;
+          if(!site.site_id) return;
+          if(site.domain && site.domain === currentHost) return;
 
-          // dropdown label = title only (clean)
-          $('<option>')
-            .val(id)
-            .text(name)
-            .attr('data-site-name', name)
-            .attr('data-site-url', url)
-            .attr('data-site-link', link)
-            .appendTo($select);
+          var $opt = $('<option>').val(site.site_id);
+          setOptionData($opt, site);
+          $opt.appendTo($select);
         });
 
-        // refresh header after hydration
-        $select.trigger('change');
+        setHeader(siteFromOption($select.find('option:selected'), current) || current);
       })
       .catch(function(err){
         console.warn('PPA remote drafts: /sites failed', err);
       });
 
-    // Remote save interception (keeps local flow untouched)
     $(doc).off('click.ppaRemoteDrafts').on('click.ppaRemoteDrafts', '#ppa-draft, #postpress-ai-save-draft, #ppa-store', function(e){
-      var target = String($select.val() || 'current');
+      var targetValue = String($select.val() || 'current');
 
-      if(target === 'current'){
-        return; // let existing local Save Draft (Store) behavior run
+      if(targetValue === 'current'){
+        return;
       }
 
       e.preventDefault();
       e.stopImmediatePropagation();
+
+      var site = siteFromOption($select.find('option:selected'), current);
+      if(!site || !site.site_id){
+        showMsg('Remote save failed. Selected target site could not be resolved.');
+        return false;
+      }
 
       var payload = collectPayload();
 
@@ -207,24 +334,43 @@
         return false;
       }
 
-      showMsg('Saving draft to selected site…');
+      if(!confirmedTargets[targetValue]){
+        var approved = win.confirm('Save this draft to ' + site.label + '?');
+        if(!approved){
+          showMsg('Remote save canceled for ' + site.label + '.');
+          return false;
+        }
+        confirmedTargets[targetValue] = true;
+      }
 
-      apiRemoteDraft(payload, target)
+      showMsg('Saving draft to ' + site.label + '...');
+
+      apiRemoteDraft(payload, targetValue)
         .then(function(resp){
-          showMsg('Draft saved on remote site.');
+          var message = (resp && resp.message) ? resp.message : ('Draft saved to ' + site.label + '.');
+          showMsg(message);
+
+          var editLink = '';
           if(resp && resp.remote_post && resp.remote_post.edit_link){
-            win.open(resp.remote_post.edit_link, '_blank', 'noopener');
+            editLink = resp.remote_post.edit_link;
+          } else if(resp && resp.edit_link){
+            editLink = resp.edit_link;
+          }
+
+          if(editLink){
+            win.open(editLink, '_blank', 'noopener');
           }
         })
         .catch(function(err){
+          var message = extractErrorMessage(err);
           console.warn('PPA remote drafts: remote save failed', err);
-          showMsg('Remote save failed. Check Console/Network.');
+          showMsg('Remote save to ' + site.label + ' failed: ' + message);
         });
 
       return false;
     });
 
-    console.log('PPA remote drafts: titles-first hydration ready');
+    console.log('PPA remote drafts: explicit target identity ready');
   });
 
 })(jQuery, window, document);
