@@ -291,45 +291,21 @@ class PostPress_AI_Remote_Drafts {
 	 *
 	 * Backend -> site: actually create the WordPress draft here.
 	 */
-	protected static function extract_remote_draft_token( WP_REST_Request $request, array $payload ) {
-		$auth_header = (string) $request->get_header( 'authorization' );
-
-		if ( $auth_header && stripos( $auth_header, 'bearer ' ) === 0 ) {
-			$token = trim( substr( $auth_header, 7 ) );
-			if ( '' !== $token ) {
-				return $token;
-			}
-		}
-
-		$candidates = [
-			(string) $request->get_header( 'x-postpress-ai-remote-draft' ),
-			(string) $request->get_header( 'x-ppa-remote-draft-token' ),
-			isset( $payload['remote_draft_token'] ) ? (string) $payload['remote_draft_token'] : '',
-			isset( $payload['postpress_ai_site_token'] ) ? (string) $payload['postpress_ai_site_token'] : '',
-		];
-
-		foreach ( $candidates as $candidate ) {
-			$candidate = trim( (string) $candidate );
-			if ( '' !== $candidate ) {
-				return $candidate;
-			}
-		}
-
-		return '';
-	}
-
 	public static function rest_remote_draft( WP_REST_Request $request ) {
-		$payload      = self::get_request_params( $request );
-		$token        = self::extract_remote_draft_token( $request, $payload );
-		$stored_token = get_option( 'postpress_ai_site_token' );
+		$auth_header = $request->get_header( 'authorization' );
 
-		if ( '' === $token ) {
-			return new WP_Error( 'forbidden', __( 'Missing remote draft token.', 'postpress-ai' ), [ 'status' => 403 ] );
+		if ( ! $auth_header || stripos( $auth_header, 'bearer ' ) !== 0 ) {
+			return new WP_Error( 'forbidden', __( 'Missing authorization header.', 'postpress-ai' ), [ 'status' => 403 ] );
 		}
+
+		$token        = trim( substr( $auth_header, 7 ) );
+		$stored_token = get_option( 'postpress_ai_site_token' );
 
 		if ( ! $stored_token || ! hash_equals( (string) $stored_token, (string) $token ) ) {
 			return new WP_Error( 'forbidden', __( 'Invalid remote draft token.', 'postpress-ai' ), [ 'status' => 403 ] );
 		}
+
+		$payload = self::get_request_params( $request );
 
 		$postarr = [
 			'post_title'   => wp_strip_all_tags( isset( $payload['post_title'] ) ? $payload['post_title'] : '' ),
@@ -1035,4 +1011,3 @@ class PostPress_AI_Remote_Drafts {
 
 // Bootstrap.
 PostPress_AI_Remote_Drafts::init();
-
