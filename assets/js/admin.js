@@ -1893,7 +1893,13 @@
         if (gen) { handleGenerateClick(ev); return; }
 
         try { dra = (t.id === 'ppa-draft') ? t : (t.closest ? t.closest('#ppa-draft') : null); } catch (e1) { dra = null; }
-        if (dra) { handleDraftClick(ev); return; }
+if (dra) {
+  if (typeof isRemoteTargetSiteSelected === 'function' && isRemoteTargetSiteSelected()) {
+    return;
+  }
+  handleDraftClick(ev);
+  return;
+}
 
         try { pub = (t.id === 'ppa-publish') ? t : (t.closest ? t.closest('#ppa-publish') : null); } catch (e2) { pub = null; }
         if (pub) { handlePublishClick(ev); return; }
