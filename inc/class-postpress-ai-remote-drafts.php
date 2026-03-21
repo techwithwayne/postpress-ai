@@ -602,7 +602,16 @@ class PostPress_AI_Remote_Drafts {
 		$params = self::get_request_params( $request );
 		$token  = self::extract_handshake_token( $request, $params );
 
-		if ( ! self::verify_backend_token( $token ) ) {
+		$is_verified = self::verify_backend_token( $token );
+
+		// Fallback path: verify the incoming site_id against backend truth for the
+		// supplied license/site pair. This removes the need for per-site wp-config
+		// constants on normal installs while preserving backend-backed validation.
+		if ( ! $is_verified ) {
+			$is_verified = self::verify_handshake_via_backend( $params );
+		}
+
+		if ( ! $is_verified ) {
 			return new WP_Error( 'forbidden', __( 'Invalid backend token.', 'postpress-ai' ), [ 'status' => 403 ] );
 		}
 
@@ -631,9 +640,7 @@ class PostPress_AI_Remote_Drafts {
 	}
 
 	/**
-	 * POST /postpress-ai/v1/remote-draft
-	 *
-	 * Backend -> site: actually create the WordPress draft here.
+	 * Extract remote draft token from headers/body.
 	 */
 	protected static function extract_remote_draft_token( WP_REST_Request $request, array $payload ) {
 		$auth_header = (string) $request->get_header( 'authorization' );
@@ -662,6 +669,11 @@ class PostPress_AI_Remote_Drafts {
 		return '';
 	}
 
+	/**
+	 * POST /postpress-ai/v1/remote-draft
+	 *
+	 * Backend -> site: actually create the WordPress draft here.
+	 */
 	public static function rest_remote_draft( WP_REST_Request $request ) {
 		$payload      = self::get_request_params( $request );
 		$token        = self::extract_remote_draft_token( $request, $payload );
@@ -997,6 +1009,45 @@ class PostPress_AI_Remote_Drafts {
 	}
 
 	/**
+	 * Build a host+path identity key for comparing site rows to the current install.
+	 */
+	protected static function get_site_identity_key_from_url( $url ) {
+		$url  = trim( (string) $url );
+		$host = self::get_site_domain( $url );
+		$path = wp_parse_url( $url, PHP_URL_PATH );
+
+		$path = is_string( $path ) ? untrailingslashit( strtolower( trim( $path ) ) ) : '';
+
+		return $host . '|' . $path;
+	}
+
+	/**
+	 * Whether a backend site row points to this current WordPress install.
+	 */
+	protected static function backend_site_matches_current_install( array $site ) {
+		$current_url = home_url();
+		$current_key = self::get_site_identity_key_from_url( $current_url );
+
+		$row_url = isset( $site['url'] ) ? (string) $site['url'] : '';
+		$row_key = self::get_site_identity_key_from_url( $row_url );
+
+		if ( '' !== $current_key && '' !== $row_key && hash_equals( $current_key, $row_key ) ) {
+			return true;
+		}
+
+		$current_site_id = trim( (string) get_option( 'postpress_ai_site_id' ) );
+		$row_site_id     = '';
+
+		if ( isset( $site['id'] ) ) {
+			$row_site_id = trim( (string) $site['id'] );
+		} elseif ( isset( $site['site_id'] ) ) {
+			$row_site_id = trim( (string) $site['site_id'] );
+		}
+
+		return ( '' !== $current_site_id && '' !== $row_site_id && hash_equals( $current_site_id, $row_site_id ) );
+	}
+
+	/**
 	 * Build a human-safe identity string for UI and errors.
 	 */
 	protected static function get_site_identity_string( array $site ) {
@@ -1234,12 +1285,57 @@ class PostPress_AI_Remote_Drafts {
 	}
 
 	/**
-	 * Build a backend URL that works whether POSTPRESS_AI_API_BASE is root or already includes /postpress-ai.
+	 * Resolve backend base URL using the plugin's canonical contract first, then
+	 * older constants/options for backward compatibility.
+	 */
+	protected static function resolve_backend_base() {
+		$candidates = [];
+
+		if ( defined( 'POSTPRESS_AI_API_BASE' ) && is_string( POSTPRESS_AI_API_BASE ) && '' !== trim( POSTPRESS_AI_API_BASE ) ) {
+			$candidates[] = trim( POSTPRESS_AI_API_BASE );
+		}
+
+		if ( function_exists( 'apply_filters' ) ) {
+			$filtered = apply_filters( 'ppa_django_base_url', '' );
+			if ( is_string( $filtered ) && '' !== trim( $filtered ) ) {
+				$candidates[] = trim( $filtered );
+			}
+		}
+
+		if ( defined( 'PPA_DJANGO_URL' ) && is_string( PPA_DJANGO_URL ) && '' !== trim( PPA_DJANGO_URL ) ) {
+			$candidates[] = trim( PPA_DJANGO_URL );
+		}
+
+		if ( defined( 'PPA_SERVER_URL' ) && is_string( PPA_SERVER_URL ) && '' !== trim( PPA_SERVER_URL ) ) {
+			$candidates[] = trim( PPA_SERVER_URL );
+		}
+
+		foreach ( [ 'postpress_ai_api_base', 'ppa_django_url', 'ppa_server_url' ] as $option_key ) {
+			$value = get_option( $option_key, '' );
+			if ( is_string( $value ) && '' !== trim( $value ) ) {
+				$candidates[] = trim( $value );
+			}
+		}
+
+		$candidates = array_values(
+			array_unique(
+				array_filter(
+					$candidates,
+					function( $value ) {
+						return is_string( $value ) && '' !== trim( $value );
+					}
+				)
+			)
+		);
+
+		return empty( $candidates ) ? '' : rtrim( $candidates[0], '/' );
+	}
+
+	/**
+	 * Build a backend URL that works whether base is root or already includes /postpress-ai.
 	 */
 	protected static function build_backend_url( $path ) {
-		$base = defined( 'POSTPRESS_AI_API_BASE' ) ? (string) POSTPRESS_AI_API_BASE : '';
-		$base = trim( $base );
-
+		$base = self::resolve_backend_base();
 		if ( '' === $base ) {
 			return '';
 		}
@@ -1259,6 +1355,65 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		return $base . $path;
+	}
+
+	/**
+	 * Verify handshake by asking backend for the license's site registry and ensuring
+	 * the incoming site_id belongs to this current WP install.
+	 */
+	protected static function verify_handshake_via_backend( array $params ) {
+		$license_key = isset( $params['license_key'] ) ? trim( (string) $params['license_key'] ) : '';
+		$site_id     = isset( $params['site_id'] ) ? trim( (string) $params['site_id'] ) : '';
+
+		if ( '' === $license_key || '' === $site_id ) {
+			return false;
+		}
+
+		$backend_response = self::backend_request(
+			'GET',
+			'/license/sites/',
+			[
+				'license_key' => $license_key,
+			]
+		);
+
+		if ( is_wp_error( $backend_response ) ) {
+			return false;
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $backend_response ), true );
+		if (
+			! is_array( $body ) ||
+			! isset( $body['data'] ) ||
+			! is_array( $body['data'] ) ||
+			! isset( $body['data']['sites'] ) ||
+			! is_array( $body['data']['sites'] )
+		) {
+			return false;
+		}
+
+		foreach ( $body['data']['sites'] as $site ) {
+			if ( ! is_array( $site ) ) {
+				continue;
+			}
+
+			$row_site_id = '';
+			if ( isset( $site['id'] ) ) {
+				$row_site_id = trim( (string) $site['id'] );
+			} elseif ( isset( $site['site_id'] ) ) {
+				$row_site_id = trim( (string) $site['site_id'] );
+			}
+
+			if ( '' === $row_site_id || ! hash_equals( $row_site_id, $site_id ) ) {
+				continue;
+			}
+
+			if ( self::backend_site_matches_current_install( $site ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -1316,7 +1471,7 @@ class PostPress_AI_Remote_Drafts {
 		$url = self::build_backend_url( $path );
 		if ( '' === $url ) {
 			self::debug_log( 'backend_request_missing_api_base', [ 'path' => $path ] );
-			return new WP_Error( 'no_api_base', 'POSTPRESS_AI_API_BASE is not defined.' );
+			return new WP_Error( 'no_api_base', 'PostPress AI backend base URL could not be resolved.' );
 		}
 
 		$args = [
