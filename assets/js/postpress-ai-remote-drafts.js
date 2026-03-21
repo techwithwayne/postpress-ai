@@ -328,6 +328,61 @@
     }
   }
 
+  function escapeHtml(value){
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function buildFallbackEditLink(site, resp){
+    var editLink = '';
+    var postId = '';
+    var base = '';
+
+    if(resp && resp.remote_post && resp.remote_post.edit_link){
+      editLink = String(resp.remote_post.edit_link || '').trim();
+    } else if(resp && resp.edit_link){
+      editLink = String(resp.edit_link || '').trim();
+    }
+
+    if(editLink){
+      return editLink;
+    }
+
+    if(resp && resp.remote_post && resp.remote_post.id){
+      postId = String(resp.remote_post.id || '').trim();
+    } else if(resp && resp.remote_post && resp.remote_post.post_id){
+      postId = String(resp.remote_post.post_id || '').trim();
+    } else if(resp && resp.post_id){
+      postId = String(resp.post_id || '').trim();
+    } else if(resp && resp.remote_post_id){
+      postId = String(resp.remote_post_id || '').trim();
+    }
+
+    if(site){
+      base = String(site.url || site.link || '').trim();
+    }
+
+    if(!base && resp && resp.target_site && resp.target_site.url){
+      base = String(resp.target_site.url || '').trim();
+    }
+
+    if(!base && resp && resp.target && resp.target.url){
+      base = String(resp.target.url || '').trim();
+    }
+
+    base = base.replace(/\/+$/, '');
+
+    if(base && postId){
+      return base + '/wp-admin/post.php?post=' + encodeURIComponent(postId) + '&action=edit';
+    }
+
+    return '';
+  }
+
   $(function(){
     if(!isComposer()) return;
 
@@ -417,9 +472,12 @@
         remoteEditor = win.open('', 'ppaRemoteDraftEditor');
         if(remoteEditor){
           remoteEditor.document.open();
-          remoteEditor.document.write('<!doctype html><title>Opening remote draft...</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;"></body>');
+          remoteEditor.document.write('<!doctype html><title>Opening remote draft...</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;line-height:1.5;"></body>');
           remoteEditor.document.close();
-          remoteEditor.document.body.textContent = 'Creating remote draft on ' + site.label + '...';
+          remoteEditor.document.body.innerHTML =
+            '<h1 style="font-size:20px;margin:0 0 12px;">Creating remote draft...</h1>' +
+            '<p style="margin:0 0 8px;">Target: <strong>' + escapeHtml(site.label) + '</strong></p>' +
+            '<p style="margin:0;color:#666;">This page will stay open so you can edit the draft when it is ready.</p>';
         }
       } catch(openErr){
         remoteEditor = null;
@@ -430,12 +488,7 @@
           var message = (resp && resp.message) ? resp.message : ('Draft saved to ' + site.label + '.');
           showMsg(message);
 
-          var editLink = '';
-          if(resp && resp.remote_post && resp.remote_post.edit_link){
-            editLink = resp.remote_post.edit_link;
-          } else if(resp && resp.edit_link){
-            editLink = resp.edit_link;
-          }
+          var editLink = buildFallbackEditLink(site, resp);
 
           if(editLink){
             if(remoteEditor && !remoteEditor.closed){
@@ -449,8 +502,29 @@
             } else {
               win.open(editLink, 'ppaRemoteDraftEditor');
             }
-          } else if(remoteEditor && !remoteEditor.closed){
-            remoteEditor.close();
+            return;
+          }
+
+          if(remoteEditor && !remoteEditor.closed){
+            try{
+              var postId = '';
+              if(resp && resp.remote_post && resp.remote_post.id){
+                postId = String(resp.remote_post.id || '').trim();
+              } else if(resp && resp.post_id){
+                postId = String(resp.post_id || '').trim();
+              } else if(resp && resp.remote_post_id){
+                postId = String(resp.remote_post_id || '').trim();
+              }
+
+              remoteEditor.document.open();
+              remoteEditor.document.write('<!doctype html><title>Remote draft created</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;line-height:1.5;"></body>');
+              remoteEditor.document.close();
+              remoteEditor.document.body.innerHTML =
+                '<h1 style="font-size:20px;margin:0 0 12px;">Remote draft created</h1>' +
+                '<p style="margin:0 0 8px;">The draft was created on <strong>' + escapeHtml(site.label) + '</strong>.</p>' +
+                (postId ? '<p style="margin:0 0 8px;color:#666;">Post ID: ' + escapeHtml(postId) + '</p>' : '') +
+                '<p style="margin:0;color:#666;">We did not receive an edit link, so this page is staying open instead of closing.</p>';
+            } catch(renderErr){}
           }
         })
         .catch(function(err){
@@ -461,12 +535,13 @@
           if(remoteEditor && !remoteEditor.closed){
             try{
               remoteEditor.document.open();
-              remoteEditor.document.write('<!doctype html><title>Remote draft failed</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;"></body>');
+              remoteEditor.document.write('<!doctype html><title>Remote draft failed</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;line-height:1.5;"></body>');
               remoteEditor.document.close();
-              remoteEditor.document.body.textContent = 'Remote draft failed: ' + message;
-            } catch(renderErr){
-              remoteEditor.close();
-            }
+              remoteEditor.document.body.innerHTML =
+                '<h1 style="font-size:20px;margin:0 0 12px;">Remote draft failed</h1>' +
+                '<p style="margin:0 0 8px;">Target: <strong>' + escapeHtml(site.label) + '</strong></p>' +
+                '<p style="margin:0;color:#b00020;">' + escapeHtml(message) + '</p>';
+            } catch(renderErr){}
           }
         });
 
