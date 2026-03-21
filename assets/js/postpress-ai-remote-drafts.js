@@ -412,6 +412,19 @@
 
       showMsg('Saving draft to ' + site.label + '...');
 
+      var remoteEditor = null;
+      try{
+        remoteEditor = win.open('', 'ppaRemoteDraftEditor');
+        if(remoteEditor){
+          remoteEditor.document.open();
+          remoteEditor.document.write('<!doctype html><title>Opening remote draft...</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;"></body>');
+          remoteEditor.document.close();
+          remoteEditor.document.body.textContent = 'Creating remote draft on ' + site.label + '...';
+        }
+      } catch(openErr){
+        remoteEditor = null;
+      }
+
       apiRemoteDraft(payload, targetValue)
         .then(function(resp){
           var message = (resp && resp.message) ? resp.message : ('Draft saved to ' + site.label + '.');
@@ -425,13 +438,36 @@
           }
 
           if(editLink){
-            win.open(editLink, '_blank', 'noopener');
+            if(remoteEditor && !remoteEditor.closed){
+              try{
+                remoteEditor.opener = null;
+              } catch(openerErr){}
+              remoteEditor.location = editLink;
+              try{
+                remoteEditor.focus();
+              } catch(focusErr){}
+            } else {
+              win.open(editLink, 'ppaRemoteDraftEditor');
+            }
+          } else if(remoteEditor && !remoteEditor.closed){
+            remoteEditor.close();
           }
         })
         .catch(function(err){
           var message = extractErrorMessage(err);
           console.warn('PPA remote drafts: remote save failed', err);
           showMsg('Remote save to ' + site.label + ' failed: ' + message);
+
+          if(remoteEditor && !remoteEditor.closed){
+            try{
+              remoteEditor.document.open();
+              remoteEditor.document.write('<!doctype html><title>Remote draft failed</title><body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;"></body>');
+              remoteEditor.document.close();
+              remoteEditor.document.body.textContent = 'Remote draft failed: ' + message;
+            } catch(renderErr){
+              remoteEditor.close();
+            }
+          }
         });
 
       return false;
