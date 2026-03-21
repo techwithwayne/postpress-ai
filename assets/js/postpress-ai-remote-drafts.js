@@ -153,26 +153,78 @@
   }
 
   function getNonce(){
-    if(win.wpApiSettings && win.wpApiSettings.nonce) return win.wpApiSettings.nonce;
-    var el = doc.getElementById('ppa-composer');
-    if(el && el.getAttribute('data-ppa-nonce')) return el.getAttribute('data-ppa-nonce');
+    if(win.PPA && win.PPA.nonce) return String(win.PPA.nonce);
+    if(win.wpApiSettings && win.wpApiSettings.nonce) return String(win.wpApiSettings.nonce);
+    if(win.ppaAdmin && win.ppaAdmin.nonce) return String(win.ppaAdmin.nonce);
+
+    var composer = doc.getElementById('ppa-composer');
+    if(composer && composer.getAttribute('data-ppa-nonce')){
+      return String(composer.getAttribute('data-ppa-nonce'));
+    }
+
+    var nonceEl = doc.getElementById('ppa-nonce');
+    if(nonceEl && nonceEl.value){
+      return String(nonceEl.value);
+    }
+
+    var dataEl = doc.querySelector('[data-ppa-nonce]');
+    if(dataEl){
+      return String(dataEl.getAttribute('data-ppa-nonce') || '');
+    }
+
     return '';
+  }
+
+  function getAjaxUrl(){
+    if(win.PPA && win.PPA.ajaxUrl) return String(win.PPA.ajaxUrl);
+    if(win.PPA && win.PPA.ajax) return String(win.PPA.ajax);
+    if(win.ppaAdmin && win.ppaAdmin.ajaxurl) return String(win.ppaAdmin.ajaxurl);
+    if(win.ajaxurl) return String(win.ajaxurl);
+    return '/wp-admin/admin-ajax.php';
+  }
+
+  function buildAjaxActionUrl(action){
+    var base = getAjaxUrl();
+    return base + (base.indexOf('?') === -1 ? '?' : '&') + 'action=' + encodeURIComponent(String(action || ''));
+  }
+
+  function sanitizeMessage(text){
+    var s = String(text || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if(!s) return '';
+    if(s.length > 220) s = s.slice(0, 217) + '...';
+    return s;
   }
 
   function parseJsonResponse(resp){
     return resp.text().then(function(text){
+      var trimmed = String(text || '').trim();
       var data = {};
 
-      if(text){
+      if(trimmed){
         try {
-          data = JSON.parse(text);
+          data = JSON.parse(trimmed);
         } catch (e) {
-          data = { message: text };
+          data = { message: trimmed };
         }
       }
 
       if(!resp.ok){
-        var message = (data && data.message) ? data.message : ('HTTP ' + resp.status);
+        var message = '';
+
+        if(data && typeof data === 'object'){
+          if(typeof data.message === 'string' && data.message.trim()){
+            message = data.message;
+          } else if(data.data && typeof data.data.message === 'string' && data.data.message.trim()){
+            message = data.data.message;
+          }
+        }
+
+        message = sanitizeMessage(message) || ('HTTP ' + resp.status);
+
         var error = new Error(message);
         error.status = resp.status;
         error.response = data;
@@ -204,21 +256,22 @@
       meta: payload.meta || {}
     };
 
-    if(win.wp && win.wp.apiFetch){
-      return win.wp.apiFetch({
-        path: '/postpress-ai/v1/remote-draft-from-composer',
-        method: 'POST',
-        data: body
-      });
+    var nonce = getNonce();
+    var headers = {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Accept': 'application/json, text/plain, */*',
+      'X-Requested-With': 'XMLHttpRequest'
+    };
+
+    if(nonce){
+      headers['X-WP-Nonce'] = nonce;
+      headers['X-PPA-Nonce'] = nonce;
     }
 
-    return fetch('/wp-json/postpress-ai/v1/remote-draft-from-composer', {
+    return fetch(buildAjaxActionUrl('ppa_remote_draft_from_composer'), {
       method: 'POST',
       credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-WP-Nonce': getNonce()
-      },
+      headers: headers,
       body: JSON.stringify(body)
     }).then(parseJsonResponse);
   }
@@ -248,14 +301,28 @@
   }
 
   function extractErrorMessage(err){
+    var i, candidate, msg;
+
     if(!err) return 'Unknown error.';
-    if(typeof err === 'string') return err;
-    if(err.message) return err.message;
-    if(err.response && err.response.message) return err.response.message;
-    if(err.data && err.data.message) return err.data.message;
+    if(typeof err === 'string'){
+      msg = sanitizeMessage(err);
+      return msg || 'Unknown error.';
+    }
+
+    var candidates = [];
+    if(err.message) candidates.push(err.message);
+    if(err.response && err.response.message) candidates.push(err.response.message);
+    if(err.response && err.response.data && err.response.data.message) candidates.push(err.response.data.message);
+    if(err.data && err.data.message) candidates.push(err.data.message);
+
+    for(i = 0; i < candidates.length; i++){
+      candidate = sanitizeMessage(candidates[i]);
+      if(candidate) return candidate;
+    }
 
     try {
-      return JSON.stringify(err);
+      msg = sanitizeMessage(JSON.stringify(err));
+      return msg || 'Unknown error.';
     } catch (e) {
       return 'Unknown error.';
     }

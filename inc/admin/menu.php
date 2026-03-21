@@ -87,17 +87,31 @@ if ( ! function_exists( 'ppa_register_settings_api_bootstrap' ) ) {             
                         $wp_registered_settings = array();                                                      // CHANGED:
                 }                                                                                            // CHANGED:
 
-                // Most common pattern: a single option for the license key.                                 // CHANGED:
-                if ( ! isset( $wp_registered_settings['ppa_license_key'] ) ) {                              // CHANGED:
-                        register_setting(                                                                       // CHANGED:
-                                'ppa_settings',                                                                     // CHANGED: option_group (must match settings_fields('ppa_settings'))
-                                'ppa_license_key',                                                                  // CHANGED: option_name
-                                array(                                                                              // CHANGED:
-                                        'type'              => 'string',                                                // CHANGED:
-                                        'sanitize_callback' => 'ppa_sanitize_setting_value',                            // CHANGED:
-                                        'default'           => '',                                                      // CHANGED:
-                                )                                                                                   // CHANGED:
-                        );                                                                                       // CHANGED:
+                // Canonical license key option used by current connected-sites / remote-draft flows.
+                if ( ! isset( $wp_registered_settings['postpress_ai_license_key'] ) ) {
+                        register_setting(
+                                'ppa_settings',
+                                'postpress_ai_license_key',
+                                array(
+                                        'type'              => 'string',
+                                        'sanitize_callback' => 'ppa_sanitize_setting_value',
+                                        'default'           => '',
+                                )
+                        );
+                }
+
+                // Legacy license key option kept registered for back-compat only.
+                // Some older installs may still have the saved key under this name.
+                if ( ! isset( $wp_registered_settings['ppa_license_key'] ) ) {
+                        register_setting(
+                                'ppa_settings',
+                                'ppa_license_key',
+                                array(
+                                        'type'              => 'string',
+                                        'sanitize_callback' => 'ppa_sanitize_setting_value',
+                                        'default'           => '',
+                                )
+                        );
                 }                                                                                            // CHANGED:
 
                 // Alternate pattern: store settings as an array under one option named same-ish as the group.   // CHANGED:

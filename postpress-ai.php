@@ -641,11 +641,15 @@ if ( ! function_exists( 'postpress_ai_enqueue_remote_drafts_script' ) ) {
 			return;
 		}
 
+		$remote_drafts_rel  = 'assets/js/postpress-ai-remote-drafts.js';
+		$remote_drafts_file = PPA_PLUGIN_DIR . $remote_drafts_rel;
+		$remote_drafts_ver  = file_exists( $remote_drafts_file ) ? (string) filemtime( $remote_drafts_file ) : PPA_VERSION;
+
 		wp_enqueue_script(
 			'postpress-ai-remote-drafts',
-			PPA_PLUGIN_URL . 'assets/js/postpress-ai-remote-drafts.js',
+			PPA_PLUGIN_URL . $remote_drafts_rel,
 			array( 'jquery' ),
-			PPA_VERSION,
+			$remote_drafts_ver,
 			true
 		);
 	}

@@ -41,7 +41,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
         class PPA_Admin_Settings {
 
                 // ===== License option + transient (display-only) =====
-                const OPT_LICENSE_KEY      = 'ppa_license_key';
+                const OPT_LICENSE_KEY        = 'postpress_ai_license_key';
+                const OPT_LICENSE_KEY_LEGACY = 'ppa_license_key';
                 const OPT_ACTIVE_SITE      = 'ppa_license_active_site';
 
                 // Persisted state for enforcement (controller will use this next). No secrets stored.
@@ -123,7 +124,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
 
                         // Settings API registration.
                         add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
-
+                        add_action( 'admin_init', array( __CLASS__, 'maybe_migrate_legacy_license_key' ), 5 );
                         // CHANGED: Bullet-proof seeding of the last license transient so other admin screens never see "not set".
                         add_action( 'admin_init', array( __CLASS__, 'maybe_seed_last_license_transient' ), 20 ); // CHANGED:
 
@@ -131,6 +132,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                         // Register settings immediately so options.php will accept option_page=ppa_settings.
                         if ( did_action( 'admin_init' ) ) {
                                 self::register_settings();
+                                self::maybe_migrate_legacy_license_key();
                                 self::maybe_seed_last_license_transient(); // CHANGED:
                         }
 
@@ -173,6 +175,28 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                         self::seed_last_license_transient_if_missing( null ); // CHANGED:
                 } // CHANGED:
 
+                public static function maybe_migrate_legacy_license_key() {
+                        if ( ! is_admin() ) {
+                                return;
+                        }
+
+                        $canonical = (string) get_option( self::OPT_LICENSE_KEY, '' );
+                        $canonical = self::sanitize_license_key( $canonical );
+
+                        if ( '' !== $canonical ) {
+                                return;
+                        }
+
+                        $legacy = (string) get_option( self::OPT_LICENSE_KEY_LEGACY, '' );
+                        $legacy = self::sanitize_license_key( $legacy );
+
+                        if ( '' === $legacy ) {
+                                return;
+                        }
+
+                        update_option( self::OPT_LICENSE_KEY, $legacy, false );
+                }
+
                 /**
                  * Register options and fields for the settings screen.
                  *
@@ -204,6 +228,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                                 array(
                                         'type'              => 'string',
                                         'sanitize_callback' => array( __CLASS__, 'sanitize_shared_key' ),
+                                        'default'           => '',
+                                )
+                        );
+
+                        // Legacy license key option kept registered for backwards compatibility.
+                        register_setting(
+                                'ppa_settings',
+                                self::OPT_LICENSE_KEY_LEGACY,
+                                array(
+                                        'type'              => 'string',
+                                        'sanitize_callback' => array( __CLASS__, 'sanitize_license_key' ),
                                         'default'           => '',
                                 )
                         );
@@ -289,7 +324,17 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                         // CHANGED: If the field is left blank, keep the existing saved key (prevents accidental wipe).
                         if ( '' === $value ) {
                                 $existing = (string) get_option( self::OPT_LICENSE_KEY, '' );
-                                return is_string( $existing ) ? trim( $existing ) : '';
+                                $existing = is_string( $existing ) ? trim( $existing ) : '';
+
+                                if ( '' === $existing ) {
+                                        $legacy = (string) get_option( self::OPT_LICENSE_KEY_LEGACY, '' );
+                                        $legacy = is_string( $legacy ) ? trim( $legacy ) : '';
+                                        if ( '' !== $legacy ) {
+                                                return $legacy;
+                                        }
+                                }
+
+                                return $existing;
                         }
 
                         // Strip control characters (invisible paste junk) + whitespace. Keep format permissive.
@@ -766,7 +811,15 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                 private static function get_license_key() {
                         $key = (string) get_option( self::OPT_LICENSE_KEY, '' );
                         $key = self::sanitize_license_key( $key );
-                        return $key;
+
+                        if ( '' !== $key ) {
+                                return $key;
+                        }
+
+                        $legacy = (string) get_option( self::OPT_LICENSE_KEY_LEGACY, '' );
+                        $legacy = self::sanitize_license_key( $legacy );
+
+                        return $legacy;
                 }
 
                 private static function build_settings_banner( $has_key, $activation_state, $site_limit_reached ) {
@@ -974,6 +1027,7 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                         check_admin_referer( 'ppa-license-clear' );
 
                         delete_option( self::OPT_LICENSE_KEY );
+                        delete_option( self::OPT_LICENSE_KEY_LEGACY );
                         delete_option( self::OPT_ACTIVE_SITE );
                         update_option( self::OPT_LICENSE_STATE, 'unknown', false );
                         update_option( self::OPT_LICENSE_LAST_ERROR_CODE, '', false );
@@ -1006,6 +1060,8 @@ if ( ! class_exists( 'PPA_Admin_Settings' ) ) {
                         if ( (string) $old_norm === (string) $new_norm ) {
                                 return;
                         }
+
+                        update_option( self::OPT_LICENSE_KEY_LEGACY, $value, false );
 
                         // Clear ALL local activation markers so UI + enforcement can’t go stale.
                         delete_option( self::OPT_ACTIVE_SITE );

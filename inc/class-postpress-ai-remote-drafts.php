@@ -15,11 +15,304 @@ if ( ! defined( 'ABSPATH' ) ) {
 class PostPress_AI_Remote_Drafts {
 
 	/**
+	 * Per-request debug state for temporary remote draft instrumentation.
+	 *
+	 * @var array
+	 */
+	protected static $debug_request_context = [];
+
+	/**
+	 * Whether the shutdown logger has been registered for this PHP request.
+	 *
+	 * @var bool
+	 */
+	protected static $debug_shutdown_registered = false;
+
+	/**
 	 * Bootstrap.
 	 */
 	public static function init() {
 		add_action( 'rest_api_init', [ __CLASS__, 'register_routes' ] );
 		add_action( 'wp_ajax_ppa_remote_draft_from_composer', [ __CLASS__, 'ajax_remote_draft_from_composer' ] );
+	}
+
+	/**
+	 * Start request-scoped debug logging for the remote draft flow.
+	 */
+	protected static function begin_debug_request( $flow, array $context = [] ) {
+		if ( ! empty( self::$debug_request_context['active'] ) ) {
+			return self::$debug_request_context['rid'];
+		}
+
+		$rid = 'ppa-rd-' . gmdate( 'Ymd-His' ) . '-' . wp_generate_password( 6, false, false );
+
+		self::$debug_request_context = [
+			'active'     => true,
+			'flow'       => (string) $flow,
+			'rid'        => $rid,
+			'started_at' => microtime( true ),
+		];
+
+		self::register_debug_shutdown_handler();
+		self::debug_log( 'request_started', $context );
+
+		return $rid;
+	}
+
+	/**
+	 * Whether temporary remote draft debug logging is active for this request.
+	 */
+	protected static function is_debug_request_active() {
+		return ! empty( self::$debug_request_context['active'] );
+	}
+
+	/**
+	 * Register a shutdown logger once per PHP request.
+	 */
+	protected static function register_debug_shutdown_handler() {
+		if ( self::$debug_shutdown_registered ) {
+			return;
+		}
+
+		register_shutdown_function( [ __CLASS__, 'debug_shutdown_handler' ] );
+		self::$debug_shutdown_registered = true;
+	}
+
+	/**
+	 * Shutdown logger so fatal/timeout style failures still leave a breadcrumb.
+	 */
+	public static function debug_shutdown_handler() {
+		if ( ! self::is_debug_request_active() ) {
+			return;
+		}
+
+		$elapsed_ms = 0;
+		if ( isset( self::$debug_request_context['started_at'] ) ) {
+			$elapsed_ms = (int) round( ( microtime( true ) - (float) self::$debug_request_context['started_at'] ) * 1000 );
+		}
+
+		$last_error  = error_get_last();
+		$fatal_types = [ E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ];
+
+		if ( is_array( $last_error ) && isset( $last_error['type'] ) && in_array( (int) $last_error['type'], $fatal_types, true ) ) {
+			self::debug_log(
+				'shutdown_fatal',
+				[
+					'elapsed_ms'        => $elapsed_ms,
+					'error_type'        => isset( $last_error['type'] ) ? (int) $last_error['type'] : null,
+					'error_message'     => isset( $last_error['message'] ) ? (string) $last_error['message'] : '',
+					'error_file'        => isset( $last_error['file'] ) ? (string) $last_error['file'] : '',
+					'error_line'        => isset( $last_error['line'] ) ? (int) $last_error['line'] : 0,
+					'connection_status' => function_exists( 'connection_status' ) ? (int) connection_status() : null,
+				]
+			);
+		} else {
+			self::debug_log(
+				'shutdown',
+				[
+					'elapsed_ms'        => $elapsed_ms,
+					'connection_status' => function_exists( 'connection_status' ) ? (int) connection_status() : null,
+				]
+			);
+		}
+	}
+
+	/**
+	 * Write one structured debug log line.
+	 */
+	protected static function debug_log( $stage, array $context = [] ) {
+		if ( ! self::is_debug_request_active() ) {
+			return;
+		}
+
+		$payload = [
+			'flow'    => isset( self::$debug_request_context['flow'] ) ? self::$debug_request_context['flow'] : '',
+			'context' => self::debug_sanitize_for_log( $context ),
+		];
+
+		$json = wp_json_encode( $payload );
+		if ( false === $json ) {
+			$json = print_r( $payload, true );
+		}
+
+		error_log(
+			sprintf(
+				'[PostPress AI Remote Draft][%s][%s] %s',
+				isset( self::$debug_request_context['rid'] ) ? self::$debug_request_context['rid'] : 'no-rid',
+				(string) $stage,
+				(string) $json
+			)
+		);
+	}
+
+	/**
+	 * Sanitize values before they hit the PHP error log.
+	 */
+	protected static function debug_sanitize_for_log( $value, $key = '' ) {
+		$key_lower   = strtolower( (string) $key );
+		$secret_keys = [
+			'authorization',
+			'backend_token',
+			'license_key',
+			'nonce',
+			'password',
+			'ppa_shared_key',
+			'ppa_wp_shared_secret',
+			'remote_draft_token',
+			'secret',
+			'shared_secret',
+			'site_token',
+			'token',
+			'x_ppa_nonce',
+			'x_wp_nonce',
+		];
+
+		foreach ( $secret_keys as $secret_key ) {
+			if ( '' !== $key_lower && false !== strpos( $key_lower, $secret_key ) ) {
+				return '[redacted]';
+			}
+		}
+
+		if ( is_array( $value ) ) {
+			$sanitized = [];
+			foreach ( $value as $child_key => $child_value ) {
+				$sanitized[ $child_key ] = self::debug_sanitize_for_log( $child_value, (string) $child_key );
+			}
+			return $sanitized;
+		}
+
+		if ( is_object( $value ) ) {
+			return [ 'object_class' => get_class( $value ) ];
+		}
+
+		if ( is_bool( $value ) || is_null( $value ) || is_int( $value ) || is_float( $value ) ) {
+			return $value;
+		}
+
+		if ( is_string( $value ) ) {
+			return self::debug_summarize_text( $value );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Shorten long log strings and collapse whitespace.
+	 */
+	protected static function debug_summarize_text( $text, $limit = 220 ) {
+		$text = html_entity_decode( (string) $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		$text = preg_replace( '/\s+/', ' ', $text );
+		$text = trim( (string) $text );
+
+		if ( strlen( $text ) > $limit ) {
+			$text = substr( $text, 0, $limit - 3 ) . '...';
+		}
+
+		return $text;
+	}
+
+	/**
+	 * Summarize remote draft params without dumping whole HTML payloads.
+	 */
+	protected static function debug_summarize_params( array $params ) {
+		$post_content = isset( $params['post_content'] ) ? (string) $params['post_content'] : '';
+		$title        = isset( $params['post_title'] ) ? (string) $params['post_title'] : '';
+		$excerpt      = isset( $params['post_excerpt'] ) ? (string) $params['post_excerpt'] : '';
+		$meta         = ( isset( $params['meta'] ) && is_array( $params['meta'] ) ) ? $params['meta'] : [];
+
+		return [
+			'keys'                          => array_keys( $params ),
+			'target_site_id'                => isset( $params['target_site_id'] ) ? (string) $params['target_site_id'] : '',
+			'post_type'                     => isset( $params['post_type'] ) ? (string) $params['post_type'] : '',
+			'post_title_len'                => strlen( $title ),
+			'post_title_preview'            => self::debug_summarize_text( wp_strip_all_tags( $title ), 120 ),
+			'post_excerpt_len'              => strlen( $excerpt ),
+			'post_content_len'              => strlen( $post_content ),
+			'post_content_preview'          => self::debug_summarize_text( wp_strip_all_tags( $post_content ), 180 ),
+			'post_content_has_preview_wrap' => ( false !== strpos( $post_content, 'class="ppa-preview"' ) ),
+			'post_content_has_outline_label'=> ( false !== stripos( $post_content, '>Outline<' ) || false !== stripos( $post_content, 'Outline</' ) ),
+			'post_content_has_body_heading' => ( false !== stripos( $post_content, '>Body<' ) || false !== stripos( $post_content, 'Body</' ) ),
+			'post_content_has_meta_heading' => ( false !== stripos( $post_content, '>Meta<' ) || false !== stripos( $post_content, 'Meta</' ) ),
+			'meta_keys'                     => array_keys( $meta ),
+			'meta_count'                    => count( $meta ),
+		];
+	}
+
+	/**
+	 * Summarize backend relay payload for safe logging.
+	 */
+	protected static function debug_summarize_backend_payload( array $data ) {
+		$summary = [
+			'keys'                => array_keys( $data ),
+			'license_key_present' => ! empty( $data['license_key'] ),
+			'source_site_id'      => isset( $data['source_site_id'] ) ? (string) $data['source_site_id'] : '',
+			'target_site_id'      => isset( $data['target_site_id'] ) ? (string) $data['target_site_id'] : '',
+		];
+
+		if ( isset( $data['post'] ) && is_array( $data['post'] ) ) {
+			$summary['post'] = self::debug_summarize_params( $data['post'] );
+		}
+
+		return $summary;
+	}
+
+	/**
+	 * Summarize a wp_remote_request response for logs.
+	 */
+	protected static function debug_summarize_http_response( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return [
+				'type'       => 'wp_error',
+				'code'       => $response->get_error_code(),
+				'message'    => $response->get_error_message(),
+				'error_data' => self::debug_sanitize_for_log( $response->get_error_data() ),
+			];
+		}
+
+		$body = wp_remote_retrieve_body( $response );
+
+		return [
+			'type'         => is_array( $response ) ? 'http_response_array' : gettype( $response ),
+			'http_code'    => (int) wp_remote_retrieve_response_code( $response ),
+			'http_message' => wp_remote_retrieve_response_message( $response ),
+			'body_len'     => strlen( (string) $body ),
+			'body_snippet' => self::debug_summarize_text( wp_strip_all_tags( (string) $body ), 300 ),
+			'content_type' => wp_remote_retrieve_header( $response, 'content-type' ),
+		];
+	}
+
+	/**
+	 * Summarize REST/AJAX response objects for logs.
+	 */
+	protected static function debug_summarize_response_value( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return [
+				'type'       => 'wp_error',
+				'code'       => $response->get_error_code(),
+				'message'    => $response->get_error_message(),
+				'error_data' => self::debug_sanitize_for_log( $response->get_error_data() ),
+			];
+		}
+
+		if ( $response instanceof WP_REST_Response ) {
+			return [
+				'type'   => 'wp_rest_response',
+				'status' => $response->get_status(),
+				'data'   => self::debug_sanitize_for_log( $response->get_data() ),
+			];
+		}
+
+		if ( is_array( $response ) ) {
+			return [
+				'type' => 'array',
+				'data' => self::debug_sanitize_for_log( $response ),
+			];
+		}
+
+		return [
+			'type'  => gettype( $response ),
+			'value' => self::debug_sanitize_for_log( $response ),
+		];
 	}
 
 	/**
@@ -125,14 +418,21 @@ class PostPress_AI_Remote_Drafts {
 	 * Browser -> plugin -> backend -> remote site.
 	 */
 	public static function rest_remote_draft_from_composer( WP_REST_Request $request ) {
-		$params         = self::get_request_params( $request );
+		self::debug_log( 'rest_remote_draft_from_composer_enter', [ 'request_route' => $request->get_route() ] );
+
+		$params = self::get_request_params( $request );
+		self::debug_log( 'rest_remote_draft_from_composer_params', self::debug_summarize_params( $params ) );
+
 		$target_site_id = isset( $params['target_site_id'] ) ? trim( sanitize_text_field( (string) $params['target_site_id'] ) ) : '';
+		self::debug_log( 'rest_remote_draft_from_composer_target_site_id', [ 'target_site_id' => $target_site_id ] );
 
 		if ( '' === $target_site_id || 'current' === $target_site_id ) {
+			self::debug_log( 'rest_remote_draft_from_composer_invalid_target', [ 'target_site_id' => $target_site_id ] );
 			return new WP_Error( 'bad_target', __( 'Invalid target site selected.', 'postpress-ai' ), [ 'status' => 400 ] );
 		}
 
 		$target_site = self::get_connected_site_by_id( $target_site_id );
+		self::debug_log( 'rest_remote_draft_from_composer_target_site_lookup', self::debug_summarize_response_value( $target_site ) );
 		if ( is_wp_error( $target_site ) ) {
 			$status = 500;
 			$data   = $target_site->get_error_data();
@@ -144,6 +444,14 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		$target_label = self::get_site_identity_string( $target_site );
+		self::debug_log(
+			'rest_remote_draft_from_composer_target_site_resolved',
+			[
+				'target_site_id' => $target_site_id,
+				'target_label'   => $target_label,
+				'target_site'    => $target_site,
+			]
+		);
 
 		$post = [
 			'post_title'   => isset( $params['post_title'] ) ? (string) $params['post_title'] : '',
@@ -152,8 +460,10 @@ class PostPress_AI_Remote_Drafts {
 			'post_type'    => isset( $params['post_type'] ) ? (string) $params['post_type'] : 'post',
 			'meta'         => isset( $params['meta'] ) && is_array( $params['meta'] ) ? $params['meta'] : [],
 		];
+		self::debug_log( 'rest_remote_draft_from_composer_post_summary', self::debug_summarize_params( $post ) );
 
 		$license_key = trim( (string) get_option( 'postpress_ai_license_key' ) );
+		self::debug_log( 'rest_remote_draft_from_composer_license_state', [ 'license_key_present' => ( '' !== $license_key ) ] );
 		if ( '' === $license_key ) {
 			return new WP_Error(
 				'missing_site_info',
@@ -166,9 +476,12 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		$source_site_id = trim( (string) get_option( 'postpress_ai_site_id' ) );
+		self::debug_log( 'rest_remote_draft_from_composer_source_site_before_heal', [ 'source_site_id' => $source_site_id ] );
 		if ( '' === $source_site_id ) {
+			self::debug_log( 'rest_remote_draft_from_composer_source_site_self_heal_start' );
 			self::ensure_source_site_registration();
 			$source_site_id = trim( (string) get_option( 'postpress_ai_site_id' ) );
+			self::debug_log( 'rest_remote_draft_from_composer_source_site_self_heal_end', [ 'source_site_id' => $source_site_id ] );
 		}
 
 		if ( '' === $source_site_id ) {
@@ -182,6 +495,21 @@ class PostPress_AI_Remote_Drafts {
 			);
 		}
 
+		self::debug_log(
+			'rest_remote_draft_from_composer_backend_request_before',
+			[
+				'path'    => '/remote-drafts/create/',
+				'payload' => self::debug_summarize_backend_payload(
+					[
+						'license_key'    => $license_key,
+						'source_site_id' => $source_site_id,
+						'target_site_id' => $target_site_id,
+						'post'           => $post,
+					]
+				),
+			]
+		);
+
 		$backend_response = self::backend_request(
 			'POST',
 			'/remote-drafts/create/',
@@ -192,6 +520,8 @@ class PostPress_AI_Remote_Drafts {
 				'post'           => $post,
 			]
 		);
+
+		self::debug_log( 'rest_remote_draft_from_composer_backend_request_after', self::debug_summarize_response_value( $backend_response ) );
 
 		if ( is_wp_error( $backend_response ) ) {
 			$status = 500;
@@ -210,7 +540,17 @@ class PostPress_AI_Remote_Drafts {
 			);
 		}
 
-		$body = json_decode( wp_remote_retrieve_body( $backend_response ), true );
+		$backend_raw_body = wp_remote_retrieve_body( $backend_response );
+		self::debug_log(
+			'rest_remote_draft_from_composer_backend_body_before_decode',
+			[
+				'body_len'     => strlen( (string) $backend_raw_body ),
+				'body_snippet' => self::debug_summarize_text( wp_strip_all_tags( (string) $backend_raw_body ), 300 ),
+			]
+		);
+
+		$body = json_decode( $backend_raw_body, true );
+		self::debug_log( 'rest_remote_draft_from_composer_backend_body_after_decode', [ 'json_decode_success' => is_array( $body ) ] );
 
 		if ( ! is_array( $body ) ) {
 			return new WP_Error(
@@ -229,6 +569,8 @@ class PostPress_AI_Remote_Drafts {
 				$message = __( 'Unknown backend response.', 'postpress-ai' );
 			}
 
+			self::debug_log( 'rest_remote_draft_from_composer_backend_non_ok_body', [ 'body' => $body ] );
+
 			return new WP_Error(
 				'remote_draft_failed',
 				sprintf( __( 'Remote draft to %s failed: %s', 'postpress-ai' ), $target_label, $message ),
@@ -244,6 +586,8 @@ class PostPress_AI_Remote_Drafts {
 		if ( empty( $body['message'] ) ) {
 			$body['message'] = sprintf( __( 'Draft sent to %s.', 'postpress-ai' ), $target_label );
 		}
+
+		self::debug_log( 'rest_remote_draft_from_composer_success', [ 'body' => $body ] );
 
 		return rest_ensure_response( $body );
 	}
@@ -409,7 +753,7 @@ class PostPress_AI_Remote_Drafts {
 		}
 
 		$fallback = [];
-		$skip = [ 'action', 'nonce', '_wpnonce', '_ajax_nonce', '_wp_http_referer' ];
+		$skip     = [ 'action', 'nonce', '_wpnonce', '_ajax_nonce', '_wp_http_referer' ];
 
 		foreach ( $_POST as $k => $v ) {
 			$kk = (string) $k;
@@ -437,78 +781,141 @@ class PostPress_AI_Remote_Drafts {
 	 * Browser -> admin-ajax -> existing remote relay handler.
 	 */
 	public static function ajax_remote_draft_from_composer() {
-		if ( ! is_user_logged_in() || ! current_user_can( 'edit_posts' ) ) {
-			wp_send_json(
+		self::begin_debug_request(
+			'ajax_remote_draft_from_composer',
+			[
+				'action'         => isset( $_REQUEST['action'] ) ? (string) wp_unslash( $_REQUEST['action'] ) : '',
+				'request_method' => isset( $_SERVER['REQUEST_METHOD'] ) ? (string) $_SERVER['REQUEST_METHOD'] : '',
+				'uri'            => isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '',
+			]
+		);
+
+		try {
+			self::debug_log(
+				'ajax_auth_check',
 				[
-					'code'    => 'forbidden',
-					'message' => __( 'You do not have permission to do that.', 'postpress-ai' ),
-					'data'    => [ 'status' => 403 ],
-				],
-				403
+					'is_user_logged_in' => is_user_logged_in(),
+					'can_edit_posts'    => current_user_can( 'edit_posts' ),
+				]
 			);
-		}
 
-		$nonce = self::get_ajax_nonce();
-		$valid = false;
-
-		if ( '' !== $nonce ) {
-			$valid =
-				wp_verify_nonce( $nonce, 'ppa_admin_nonce' ) ||
-				wp_verify_nonce( $nonce, 'ppa-admin' ) ||
-				wp_verify_nonce( $nonce, 'wp_rest' );
-		}
-
-		if ( ! $valid ) {
-			wp_send_json(
-				[
-					'code'    => 'invalid_nonce',
-					'message' => __( 'Invalid nonce.', 'postpress-ai' ),
-					'data'    => [ 'status' => 403 ],
-				],
-				403
-			);
-		}
-
-		$params = self::get_ajax_json_params();
-
-		$request = new WP_REST_Request( 'POST', '/postpress-ai/v1/remote-draft-from-composer' );
-		$request->set_header( 'content-type', 'application/json; charset=utf-8' );
-
-		foreach ( $params as $k => $v ) {
-			$request->set_param( $k, $v );
-		}
-
-		if ( ! empty( $params ) ) {
-			$encoded = wp_json_encode( $params );
-			if ( is_string( $encoded ) && '' !== $encoded ) {
-				$request->set_body( $encoded );
-			}
-		}
-
-		$response = self::rest_remote_draft_from_composer( $request );
-
-		if ( is_wp_error( $response ) ) {
-			$status = 500;
-			$edata  = $response->get_error_data();
-			if ( is_array( $edata ) && isset( $edata['status'] ) ) {
-				$status = (int) $edata['status'];
+			if ( ! is_user_logged_in() || ! current_user_can( 'edit_posts' ) ) {
+				self::debug_log( 'ajax_forbidden' );
+				wp_send_json(
+					[
+						'code'    => 'forbidden',
+						'message' => __( 'You do not have permission to do that.', 'postpress-ai' ),
+						'data'    => [ 'status' => 403 ],
+					],
+					403
+				);
 			}
 
+			$nonce = self::get_ajax_nonce();
+			$valid = false;
+
+			if ( '' !== $nonce ) {
+				$valid =
+					wp_verify_nonce( $nonce, 'ppa_admin_nonce' ) ||
+					wp_verify_nonce( $nonce, 'ppa-admin' ) ||
+					wp_verify_nonce( $nonce, 'wp_rest' );
+			}
+
+			self::debug_log(
+				'ajax_nonce_check',
+				[
+					'nonce_present' => ( '' !== $nonce ),
+					'nonce_valid'   => (bool) $valid,
+				]
+			);
+
+			if ( ! $valid ) {
+				self::debug_log( 'ajax_invalid_nonce' );
+				wp_send_json(
+					[
+						'code'    => 'invalid_nonce',
+						'message' => __( 'Invalid nonce.', 'postpress-ai' ),
+						'data'    => [ 'status' => 403 ],
+					],
+					403
+				);
+			}
+
+			$params = self::get_ajax_json_params();
+			self::debug_log( 'ajax_params_parsed', self::debug_summarize_params( $params ) );
+
+			self::debug_log( 'ajax_before_synthetic_rest_request' );
+			$request = new WP_REST_Request( 'POST', '/postpress-ai/v1/remote-draft-from-composer' );
+			$request->set_header( 'content-type', 'application/json; charset=utf-8' );
+
+			foreach ( $params as $k => $v ) {
+				$request->set_param( $k, $v );
+			}
+
+			if ( ! empty( $params ) ) {
+				$encoded = wp_json_encode( $params );
+				if ( is_string( $encoded ) && '' !== $encoded ) {
+					$request->set_body( $encoded );
+				}
+			}
+
+			self::debug_log( 'ajax_before_rest_remote_draft_from_composer' );
+			$response = self::rest_remote_draft_from_composer( $request );
+			self::debug_log( 'ajax_after_rest_remote_draft_from_composer', self::debug_summarize_response_value( $response ) );
+
+			if ( is_wp_error( $response ) ) {
+				$status = 500;
+				$edata  = $response->get_error_data();
+				if ( is_array( $edata ) && isset( $edata['status'] ) ) {
+					$status = (int) $edata['status'];
+				}
+
+				self::debug_log(
+					'ajax_sending_error_json',
+					[
+						'status'  => $status,
+						'code'    => $response->get_error_code(),
+						'message' => $response->get_error_message(),
+						'data'    => $edata,
+					]
+				);
+
+				wp_send_json(
+					[
+						'code'    => $response->get_error_code(),
+						'message' => $response->get_error_message(),
+						'data'    => $edata,
+					],
+					$status
+				);
+			}
+
+			if ( $response instanceof WP_REST_Response ) {
+				self::debug_log( 'ajax_sending_wp_rest_response', [ 'status' => $response->get_status() ] );
+				wp_send_json( $response->get_data(), $response->get_status() );
+			}
+
+			self::debug_log( 'ajax_sending_array_response', [ 'status' => 200 ] );
+			wp_send_json( $response, 200 );
+		} catch ( Throwable $e ) {
+			self::debug_log(
+				'ajax_throwable',
+				[
+					'message' => $e->getMessage(),
+					'file'    => $e->getFile(),
+					'line'    => $e->getLine(),
+				]
+			);
+
 			wp_send_json(
 				[
-					'code'    => $response->get_error_code(),
-					'message' => $response->get_error_message(),
-					'data'    => $edata,
+					'code'    => 'remote_draft_exception',
+					'message' => __( 'Remote draft failed before WordPress could finish the request.', 'postpress-ai' ),
+					'data'    => [ 'status' => 500 ],
 				],
-				$status
+				500
 			);
 		}
-
-		if ( $response instanceof WP_REST_Response ) {
-			wp_send_json( $response->get_data(), $response->get_status() );
-		}
-
-		wp_send_json( $response, 200 );
 	}
 
 	/**
@@ -908,6 +1315,7 @@ class PostPress_AI_Remote_Drafts {
 	protected static function backend_request( $method, $path, $data = [] ) {
 		$url = self::build_backend_url( $path );
 		if ( '' === $url ) {
+			self::debug_log( 'backend_request_missing_api_base', [ 'path' => $path ] );
 			return new WP_Error( 'no_api_base', 'POSTPRESS_AI_API_BASE is not defined.' );
 		}
 
@@ -926,7 +1334,20 @@ class PostPress_AI_Remote_Drafts {
 			$args['body'] = wp_json_encode( $data );
 		}
 
+		self::debug_log(
+			'backend_request_before_wp_remote_request',
+			[
+				'method'          => $args['method'],
+				'path'            => $path,
+				'url'             => $url,
+				'timeout'         => $args['timeout'],
+				'body_len'        => isset( $args['body'] ) ? strlen( (string) $args['body'] ) : 0,
+				'payload_summary' => is_array( $data ) ? self::debug_summarize_backend_payload( $data ) : [],
+			]
+		);
+
 		$response = wp_remote_request( $url, $args );
+		self::debug_log( 'backend_request_after_wp_remote_request', self::debug_summarize_http_response( $response ) );
 
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -938,14 +1359,24 @@ class PostPress_AI_Remote_Drafts {
 			$body = wp_remote_retrieve_body( $response );
 			$msg  = self::compact_backend_error_message( $code, $body );
 
+			self::debug_log(
+				'backend_request_non_2xx',
+				[
+					'http_code'    => $code,
+					'compact_msg'  => $msg,
+					'body_len'     => strlen( (string) $body ),
+					'body_snippet' => self::debug_summarize_text( wp_strip_all_tags( (string) $body ), 300 ),
+				]
+			);
+
 			return new WP_Error(
 				'backend_http_error',
 				$msg,
 				[
-					'status'        => $code,
-					'backend_code'  => $code,
-					'backend_raw'   => $body,
-					'backend_msg'   => $msg,
+					'status'       => $code,
+					'backend_code' => $code,
+					'backend_raw'  => $body,
+					'backend_msg'  => $msg,
 				]
 			);
 		}
@@ -1035,4 +1466,3 @@ class PostPress_AI_Remote_Drafts {
 
 // Bootstrap.
 PostPress_AI_Remote_Drafts::init();
-
