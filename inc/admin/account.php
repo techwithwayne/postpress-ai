@@ -23,9 +23,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 $license_key   = get_option( 'ppa_license_key', '' );
 $license_state = get_option( 'ppa_license_state', 'unknown' );
 $site_url      = home_url( '/' );
+$installed_version = defined( 'PPA_VERSION' ) ? (string) PPA_VERSION : ''; // CHANGED:
 
 $license_key   = is_string( $license_key ) ? trim( $license_key ) : '';
 $license_state = is_string( $license_state ) ? strtolower( trim( $license_state ) ) : 'unknown';
+$installed_version = is_string( $installed_version ) ? trim( $installed_version ) : ''; // CHANGED:
 
 // Mask license key for display (keep last 6).
 $masked = '';
@@ -112,6 +114,49 @@ if ( ! function_exists( 'ppa_disabled_btn_attrs' ) ) { // CHANGED:
                     <dd id="ppa-billing-email">—</dd>
                 </div>
             </dl>
+        </section>
+
+
+        <section class="ppa-card" aria-label="Plugin updates">
+            <div class="ppa-card__head">
+                <h2 class="ppa-card__title"><?php echo esc_html__( 'Plugin Updates', 'postpress-ai' ); ?></h2>
+                <div class="ppa-pill" id="ppa-plugin-update-pill" data-state="unknown">
+                    <?php echo esc_html__( 'Not checked', 'postpress-ai' ); ?>
+                </div>
+            </div>
+
+            <dl class="ppa-kv">
+                <div class="ppa-kv__row">
+                    <dt><?php echo esc_html__( 'Installed Version', 'postpress-ai' ); ?></dt>
+                    <dd id="ppa-plugin-installed-version"><?php echo $installed_version !== '' ? esc_html( $installed_version ) : '—'; ?></dd>
+                </div>
+                <div class="ppa-kv__row">
+                    <dt><?php echo esc_html__( 'Latest Version', 'postpress-ai' ); ?></dt>
+                    <dd id="ppa-plugin-latest-version">—</dd>
+                </div>
+                <div class="ppa-kv__row">
+                    <dt><?php echo esc_html__( 'Released', 'postpress-ai' ); ?></dt>
+                    <dd id="ppa-plugin-released-at">—</dd>
+                </div>
+            </dl>
+
+            <div class="ppa-note" id="ppa-plugin-update-message">
+                <?php echo esc_html__( 'Refresh to check for the latest plugin version.', 'postpress-ai' ); ?>
+            </div>
+
+            <div class="ppa-card__actions">
+                <a
+                    id="ppa-plugin-download-latest"
+                    class="button ppa-btn ppa-btn--solid is-disabled"
+                    <?php echo ppa_disabled_btn_attrs(); // CHANGED: no class="" emitted ?>
+                >
+                    <?php echo esc_html__( 'Download Latest Version', 'postpress-ai' ); ?>
+                </a>
+            </div>
+
+            <div class="ppa-note" id="ppa-plugin-changelog">
+                <?php echo esc_html__( 'No release notes yet.', 'postpress-ai' ); ?>
+            </div>
         </section>
 
         <section class="ppa-card" aria-label="Token usage">
@@ -280,4 +325,5 @@ if ( ! function_exists( 'ppa_disabled_btn_attrs' ) ) { // CHANGED:
 
     <input type="hidden" id="ppa-account-site" value="<?php echo esc_attr( $site_url ); ?>" />
     <input type="hidden" id="ppa-account-has-license-key" value="<?php echo $license_key !== '' ? '1' : '0'; ?>" /> <!-- CHANGED: allows JS to treat missing key as disconnected -->
+    <input type="hidden" id="ppa-installed-version" value="<?php echo esc_attr( $installed_version ); ?>" /> <!-- CHANGED: safe source of truth for installed plugin version -->
 </div>

@@ -154,6 +154,189 @@ PostPress AI — Admin Account Screen (Isolated)
     return a + ' – ' + b;
   }
 
+  function parseVersionParts(v) {
+    var s = toSafeStr(v).trim();
+    if (!s) return null;
+
+    s = s.replace(/^v/i, '');
+    s = s.split('+')[0];
+    s = s.split('-')[0];
+
+    if (!/^\d+(?:\.\d+)*$/.test(s)) return null;
+
+    var parts = s.split('.');
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var n = parseInt(parts[i], 10);
+      if (!Number.isFinite(n)) return null;
+      out.push(n);
+    }
+    return out;
+  }
+
+  function compareVersions(a, b) {
+    var aa = parseVersionParts(a);
+    var bb = parseVersionParts(b);
+    if (!aa || !bb) return null;
+
+    var len = Math.max(aa.length, bb.length);
+    for (var i = 0; i < len; i++) {
+      var av = (i < aa.length) ? aa[i] : 0;
+      var bv = (i < bb.length) ? bb[i] : 0;
+      if (av > bv) return 1;
+      if (av < bv) return -1;
+    }
+    return 0;
+  }
+
+  function getInstalledVersion() {
+    var hidden = $('ppa-installed-version');
+    if (hidden && hidden.value) return String(hidden.value).trim();
+
+    var textEl = $('ppa-plugin-installed-version');
+    if (textEl && textEl.textContent) return String(textEl.textContent).trim();
+
+    var cfg = window.PPAAccount || {};
+    var maybe =
+      cfg.pluginVersion ||
+      cfg.plugin_version ||
+      (window.PPA && (window.PPA.pluginVersion || window.PPA.plugin_version)) ||
+      '';
+
+    return toSafeStr(maybe).trim();
+  }
+
+  function setPillText(id, state, label) {
+    var el = $(id);
+    if (!el) return;
+    el.setAttribute('data-state', state || 'unknown');
+    el.textContent = toSafeStr(label) || '—';
+  }
+
+  function setNoteText(id, text) {
+    var el = $(id);
+    if (!el) return;
+    el.textContent = toSafeStr(text) || '—';
+  }
+
+  function renderPluginChangelog(text) {
+    var el = $('ppa-plugin-changelog');
+    if (!el) return;
+    el.style.whiteSpace = 'pre-wrap';
+    el.textContent = toSafeStr(text).trim() || 'No release notes yet.';
+  }
+
+  function renderPluginUpdate(license, envelopeOk) {
+    var installedVersion = getInstalledVersion();
+    setText('ppa-plugin-installed-version', installedVersion || '—');
+
+    var pluginUpdate = (license && license.plugin_update && typeof license.plugin_update === 'object') ? license.plugin_update :
+      ((license && license.pluginUpdate && typeof license.pluginUpdate === 'object') ? license.pluginUpdate : {});
+
+    var latestVersion = toSafeStr(firstDefined([
+      pluginUpdate.latest_version,
+      pluginUpdate.latestVersion,
+      pluginUpdate.version
+    ])).trim();
+
+    var downloadUrl = toSafeStr(firstDefined([
+      pluginUpdate.download_url,
+      pluginUpdate.downloadUrl,
+      pluginUpdate.url
+    ])).trim();
+
+    var releasedRaw = firstDefined([
+      pluginUpdate.released_at,
+      pluginUpdate.releasedAt,
+      pluginUpdate.created_at,
+      pluginUpdate.createdAt
+    ]);
+
+    var changelog = toSafeStr(firstDefined([
+      pluginUpdate.changelog,
+      pluginUpdate.release_notes,
+      pluginUpdate.releaseNotes,
+      pluginUpdate.notes
+    ])).trim();
+
+    var available = boolish(firstDefined([
+      pluginUpdate.available,
+      pluginUpdate.is_available,
+      pluginUpdate.has_update,
+      pluginUpdate.hasUpdate
+    ]));
+    if (available === null) available = false;
+
+    var releasedLabel = '—';
+    var releasedDate = parseMaybeDate(releasedRaw);
+    if (releasedDate) {
+      releasedLabel = fmtDateShort(releasedDate);
+    } else if (typeof releasedRaw === 'string' && releasedRaw.trim()) {
+      releasedLabel = releasedRaw.trim();
+    }
+
+    setText('ppa-plugin-latest-version', latestVersion || '—');
+    setText('ppa-plugin-released-at', releasedLabel || '—');
+    renderPluginChangelog(changelog);
+
+    var badgeLabel = 'No release available';
+    var badgeState = 'inactive';
+    var message = 'No plugin release is currently published for this license.';
+    var enableDownload = false;
+
+    if (envelopeOk === false) {
+      badgeLabel = 'Unable to check';
+      badgeState = 'bad';
+      message = 'We couldn’t check for updates right now. Please try again in a minute.';
+    } else {
+      var hasReleaseData = !!(
+        available ||
+        latestVersion ||
+        downloadUrl ||
+        changelog ||
+        releasedRaw
+      );
+
+      if (!hasReleaseData) {
+        badgeLabel = 'No release available';
+        badgeState = 'inactive';
+        message = 'No plugin release is currently published for this license.';
+      } else if (!latestVersion) {
+        badgeLabel = 'Unable to compare';
+        badgeState = 'unknown';
+        message = downloadUrl
+          ? 'Release data was found, but the latest version is missing.'
+          : 'Release data was found, but it is incomplete right now.';
+        enableDownload = !!downloadUrl;
+      } else {
+        var cmp = compareVersions(installedVersion, latestVersion);
+
+        if (cmp === null) {
+          badgeLabel = 'Unable to compare';
+          badgeState = 'unknown';
+          message = 'Release data was found, but the version format could not be compared safely.';
+          enableDownload = !!downloadUrl;
+        } else if (cmp < 0) {
+          badgeLabel = 'Update available';
+          badgeState = 'update';
+          message = downloadUrl
+            ? 'A newer version is ready to download.'
+            : 'A newer version is available, but the download link is missing right now.';
+          enableDownload = !!downloadUrl;
+        } else {
+          badgeLabel = 'Up to date';
+          badgeState = 'good';
+          message = 'You’re running the latest version.';
+          enableDownload = false;
+        }
+      }
+    }
+
+    setPillText('ppa-plugin-update-pill', badgeState, badgeLabel);
+    setNoteText('ppa-plugin-update-message', message);
+    setLinkEnabled($('ppa-plugin-download-latest'), enableDownload ? downloadUrl : '');
+  }
+
   function dig(obj, path) {
     if (!obj || typeof obj !== 'object') return null;
     if (!path) return null;
@@ -601,6 +784,9 @@ PostPress AI — Admin Account Screen (Isolated)
                    dig(core, 'account.email') || dig(core, 'account.billing_email') || '';
     
       setText('ppa-billing-email', billingEmail || '—');
+
+    // Plugin Updates
+    renderPluginUpdate(license, envelopeOk);
 // Tokens
     var tokens = (license.tokens && typeof license.tokens === 'object') ? license.tokens :
                  (core.tokens && typeof core.tokens === 'object') ? core.tokens :
