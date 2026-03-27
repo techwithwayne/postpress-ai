@@ -79,7 +79,7 @@ if (!function_exists('ppa_admin_enqueue')) {
 			$is_match =
 				($page_param === $meta['page']) ||
 				($hook_str === $meta['hook']) ||
-				($screen_id === $meta['hook']); // screen_id usually matches hook ids for admin pages
+				($screen_id === $meta['hook']);
 
 			if ($is_match) {
 				$current = $key;
@@ -100,7 +100,7 @@ if (!function_exists('ppa_admin_enqueue')) {
 		// -----------------------------
 		// Resolve paths/URLs once
 		// -----------------------------
-		$plugin_root_dir  = dirname(__DIR__, 2); // .../wp-content/plugins/postpress-ai
+		$plugin_root_dir  = dirname(__DIR__, 2);
 		$plugin_main_file = $plugin_root_dir . '/postpress-ai.php';
 
 		$base_url = '';
@@ -125,7 +125,6 @@ if (!function_exists('ppa_admin_enqueue')) {
 			if ($path && file_exists($path)) {
 				return (string) filemtime($path);
 			}
-			// Prefer a stable fallback (avoid time() nuking caches)
 			if (defined('PPA_VERSION')) {
 				return (string) PPA_VERSION;
 			}
@@ -133,7 +132,7 @@ if (!function_exists('ppa_admin_enqueue')) {
 		};
 
 		// -----------------------------
-		// Handles we own (optional: hard reset)
+		// Handles we own (hard reset)
 		// -----------------------------
 		$style_handles = array(
 			'ppa-admin-settings-css',
@@ -144,7 +143,8 @@ if (!function_exists('ppa_admin_enqueue')) {
 		);
 
 		$script_handles = array(
-						'ppa-genre-select',
+			'ppa-genre-select',
+			'ppa-admin-thumbnail',
 			'ppa-admin-config',
 			'ppa-admin-core',
 			'ppa-admin-api',
@@ -184,8 +184,6 @@ if (!function_exists('ppa_admin_enqueue')) {
 		if (isset($css[$current])) {
 			$css_rel  = $css[$current];
 			$css_file = $asset_path($css_rel);
-
-			// If a screen’s CSS doesn’t exist yet, don’t fatal — just skip.
 			if (file_exists($css_file)) {
 				$css_handle = 'ppa-admin-' . $current . '-css';
 				wp_register_style($css_handle, $asset_url($css_rel), array(), $asset_ver($css_file), 'all');
@@ -205,7 +203,6 @@ if (!function_exists('ppa_admin_enqueue')) {
 
 		// Account: CSS + account JS only
 		if ($current === 'account') {
-
 			$account_js_rel  = 'assets/js/admin-account.js';
 			$account_js_file = $asset_path($account_js_rel);
 
@@ -244,7 +241,7 @@ if (!function_exists('ppa_admin_enqueue')) {
 			return;
 		}
 
-		// Config (inline-only; no data: URL nonsense)
+		// Config (inline-only)
 		$cfg = array(
 			'ajaxUrl' => admin_url('admin-ajax.php'),
 			'restUrl' => esc_url_raw(rest_url()),
@@ -264,28 +261,24 @@ if (!function_exists('ppa_admin_enqueue')) {
 
 		// Script manifest (only enqueue if file exists)
 		$scripts = array(
-			array('ppa-admin-core',            'assets/js/ppa-admin-core.js',            array('jquery','ppa-admin-config')),
-			array('ppa-admin-api',             'assets/js/ppa-admin-api.js',             array('jquery','ppa-admin-config','ppa-admin-core')),
-			array('ppa-admin-payloads',        'assets/js/ppa-admin-payloads.js',        array('jquery','ppa-admin-config','ppa-admin-core')),
-			array('ppa-admin-notices',         'assets/js/ppa-admin-notices.js',         array('jquery','ppa-admin-config','ppa-admin-core')),
-			array('ppa-admin-editor',          'assets/js/ppa-admin-editor.js',          array('jquery','ppa-admin-config','ppa-admin-core')),
-			array('ppa-admin-generate-view',   'assets/js/ppa-admin-generate-view.js',   array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
-			array('ppa-admin-composer-preview','assets/js/ppa-admin-composer-preview.js',array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
+			array('ppa-admin-core',             'assets/js/ppa-admin-core.js',             array('jquery','ppa-admin-config')),
+			array('ppa-admin-api',              'assets/js/ppa-admin-api.js',              array('jquery','ppa-admin-config','ppa-admin-core')),
+			array('ppa-admin-payloads',         'assets/js/ppa-admin-payloads.js',         array('jquery','ppa-admin-config','ppa-admin-core')),
+			array('ppa-admin-notices',          'assets/js/ppa-admin-notices.js',          array('jquery','ppa-admin-config','ppa-admin-core')),
+			array('ppa-admin-editor',           'assets/js/ppa-admin-editor.js',           array('jquery','ppa-admin-config','ppa-admin-core')),
+			array('ppa-admin-generate-view',    'assets/js/ppa-admin-generate-view.js',    array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
+			array('ppa-admin-composer-preview', 'assets/js/ppa-admin-composer-preview.js', array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
 			array('ppa-admin-composer-generate','assets/js/ppa-admin-composer-generate.js',array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
-			array('ppa-admin-composer-store',  'assets/js/ppa-admin-composer-store.js',  array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
-			array('ppa-admin',                 'assets/js/admin.js',                     array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
+			array('ppa-admin-composer-store',   'assets/js/ppa-admin-composer-store.js',   array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
+			array('ppa-admin',                  'assets/js/admin.js',                      array('jquery','ppa-admin-config','ppa-admin-core','ppa-admin-editor')),
 		);
 
 		foreach ($scripts as $row) {
-			$h   = $row[0];
-			$rel = $row[1];
-			$deps= $row[2];
-
+			$h    = $row[0];
+			$rel  = $row[1];
+			$deps = $row[2];
 			$file = $asset_path($rel);
-			if (!file_exists($file)) {
-				continue;
-			}
-
+			if (!file_exists($file)) { continue; }
 			wp_register_script($h, $asset_url($rel), $deps, $asset_ver($file), true);
 			wp_enqueue_script($h);
 		}
@@ -300,11 +293,10 @@ if (!function_exists('ppa_admin_enqueue')) {
 			));
 		}
 
-		// Composer-only spinner (optional)
+		// Composer-only: spinner + genre select + thumbnail
 		if ($current === 'composer') {
 			$spinner_rel  = 'assets/js/admin-preview-spinner.js';
 			$spinner_file = $asset_path($spinner_rel);
-
 			if (file_exists($spinner_file) && wp_script_is('ppa-admin', 'enqueued')) {
 				wp_register_script(
 					'ppa-admin-preview-spinner',
@@ -315,25 +307,35 @@ if (!function_exists('ppa_admin_enqueue')) {
 				);
 				wp_enqueue_script('ppa-admin-preview-spinner');
 			}
+
+			$genre_rel  = 'assets/js/ppa-genre-select.js';
+			$genre_file = $asset_path($genre_rel);
+			if (file_exists($genre_file) && wp_script_is('ppa-admin', 'enqueued')) {
+				wp_register_script(
+					'ppa-genre-select',
+					$asset_url($genre_rel),
+					array('ppa-admin'),
+					$asset_ver($genre_file),
+					true
+				);
+				wp_enqueue_script('ppa-genre-select');
+			}
+
+			$thumb_rel  = 'assets/js/ppa-admin-thumbnail.js';
+			$thumb_file = $asset_path($thumb_rel);
+			if (file_exists($thumb_file) && wp_script_is('ppa-admin', 'enqueued')) {
+				wp_enqueue_media();
+				wp_register_script(
+					'ppa-admin-thumbnail',
+					$asset_url($thumb_rel),
+					array('ppa-admin'),
+					$asset_ver($thumb_file),
+					true
+				);
+				wp_enqueue_script('ppa-admin-thumbnail');
+			}
 		}
 
-
-					// Composer-only: Genre select enhancer (Search + Favorites + Recent)
-					if ($current === 'composer') {
-							$genre_rel  = 'assets/js/ppa-genre-select.js';
-							$genre_file = $asset_path($genre_rel);
-
-							if (file_exists($genre_file) && wp_script_is('ppa-admin', 'enqueued')) {
-									wp_register_script(
-											'ppa-genre-select',
-											$asset_url($genre_rel),
-											array('ppa-admin'),
-											$asset_ver($genre_file),
-											true
-									);
-									wp_enqueue_script('ppa-genre-select');
-							}
-					}
 		// Testbed-only script (optional)
 		if ($current === 'testbed') {
 			$testbed_rel  = 'inc/admin/ppa-testbed.js';
