@@ -462,11 +462,13 @@ class PostPress_AI_Remote_Drafts {
 		];
 
 		// Resolve thumbnail attachment ID to a URL so the target site can sideload it.
+		// Store in meta so it survives the Django relay (top-level unknown fields get stripped).
 		$thumbnail_id = isset( $params['thumbnail_id'] ) ? (int) $params['thumbnail_id'] : 0;
 		if ( $thumbnail_id > 0 ) {
 			$thumbnail_url = wp_get_attachment_url( $thumbnail_id );
 			if ( $thumbnail_url ) {
-				$post['thumbnail_url'] = $thumbnail_url;
+				$post['thumbnail_url']              = $thumbnail_url; // best-effort top-level
+				$post['meta']['_ppa_thumbnail_url'] = $thumbnail_url; // guaranteed via meta channel
 			}
 		}
 		self::debug_log( 'rest_remote_draft_from_composer_post_summary', self::debug_summarize_params( $post ) );
@@ -729,9 +731,15 @@ class PostPress_AI_Remote_Drafts {
 			}
 		}
 
-		// Sideload featured image from source site URL if provided.
+		// Sideload featured image — check top-level and meta fallback channel.
+		$raw_thumb_url = '';
 		if ( ! empty( $payload['thumbnail_url'] ) ) {
-			$thumbnail_url = esc_url_raw( (string) $payload['thumbnail_url'] );
+			$raw_thumb_url = (string) $payload['thumbnail_url'];
+		} elseif ( ! empty( $payload['meta']['_ppa_thumbnail_url'] ) ) {
+			$raw_thumb_url = (string) $payload['meta']['_ppa_thumbnail_url'];
+		}
+		if ( $raw_thumb_url ) {
+			$thumbnail_url = esc_url_raw( $raw_thumb_url );
 			if ( $thumbnail_url ) {
 				require_once ABSPATH . 'wp-admin/includes/media.php';
 				require_once ABSPATH . 'wp-admin/includes/file.php';
