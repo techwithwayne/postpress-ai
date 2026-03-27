@@ -22,7 +22,10 @@
     var preview  = document.getElementById('ppa-thumbnail-preview');
     var img      = document.getElementById('ppa-thumbnail-img');
 
-    if (!idInput || !btn) { return; }
+    if (!idInput || !btn) {
+      try { console.warn('PPA thumbnail: required elements missing — idInput=' + !!idInput + ', btn=' + !!btn + '. Is composer.php up to date?'); } catch(e) {}
+      return;
+    }
 
     var frame;
 
