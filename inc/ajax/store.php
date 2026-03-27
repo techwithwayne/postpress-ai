@@ -248,6 +248,7 @@ function handle_store(): void {
 
         // Featured image (best-effort; only set if a valid attachment ID was provided)
         $thumbnail_id = (int) ($pack['data']['thumbnail_id'] ?? 0);
+        error_log('PPA: store thumbnail_id=' . $thumbnail_id . ' post_id=' . (int) $post_id);
         if ($thumbnail_id > 0) {
             set_post_thumbnail((int) $post_id, $thumbnail_id);
         }

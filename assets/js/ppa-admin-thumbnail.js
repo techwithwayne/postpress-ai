@@ -26,23 +26,6 @@
 
     var frame;
 
-    function setThumbnail(attachment) {
-      var id  = attachment.id || attachment.get('id');
-      var url = (attachment.sizes && attachment.sizes.thumbnail)
-        ? attachment.sizes.thumbnail.url
-        : (attachment.url || (attachment.get && attachment.get('url')) || '');
-
-      if (!url && attachment.get) {
-        var sizes = attachment.get('sizes');
-        url = (sizes && sizes.thumbnail) ? sizes.thumbnail.url : attachment.get('url');
-      }
-
-      idInput.value = String(id || '');
-      if (img && url)  { img.src = url; }
-      if (preview)     { preview.style.display = id ? '' : 'none'; }
-      if (removeBtn)   { removeBtn.style.display = id ? '' : 'none'; }
-    }
-
     function clearThumbnail() {
       idInput.value = '';
       if (img)     { img.src = ''; }
@@ -73,8 +56,18 @@
       frame.on('select', function () {
         var selection = frame.state().get('selection');
         if (!selection) { return; }
-        var attachment = selection.first().toJSON();
-        setThumbnail(attachment);
+        var model = selection.first();
+        // Read from the Backbone model directly (before toJSON strips the id)
+        var id  = model.get('id');
+        var sizes = model.get('sizes');
+        var url = (sizes && sizes.thumbnail)
+          ? sizes.thumbnail.url
+          : model.get('url') || '';
+
+        idInput.value = id ? String(id) : '';
+        if (img && url)  { img.src = url; }
+        if (preview)     { preview.style.display = id ? '' : 'none'; }
+        if (removeBtn)   { removeBtn.style.display = id ? '' : 'none'; }
       });
 
       frame.open();
