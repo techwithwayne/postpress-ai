@@ -1,0 +1,97 @@
+/* global window, document, wp */
+/**
+ * PostPress AI — Featured Image Picker (ES5-safe)
+ *
+ * Wires the WP media frame to #ppa-thumbnail-id.
+ * Depends on: wp_enqueue_media() (called by enqueue.php), ppa-admin.
+ *
+ * DOM contract:
+ *   #ppa-thumbnail-id     — hidden input that holds the attachment ID
+ *   #ppa-thumbnail-btn    — "Set Featured Image" button
+ *   #ppa-thumbnail-remove — "Remove" button
+ *   #ppa-thumbnail-preview — wrapper div shown when an image is selected
+ *   #ppa-thumbnail-img    — <img> preview element
+ */
+(function (window, document) {
+  'use strict';
+
+  function init() {
+    var idInput  = document.getElementById('ppa-thumbnail-id');
+    var btn      = document.getElementById('ppa-thumbnail-btn');
+    var removeBtn = document.getElementById('ppa-thumbnail-remove');
+    var preview  = document.getElementById('ppa-thumbnail-preview');
+    var img      = document.getElementById('ppa-thumbnail-img');
+
+    if (!idInput || !btn) { return; }
+
+    var frame;
+
+    function setThumbnail(attachment) {
+      var id  = attachment.id || attachment.get('id');
+      var url = (attachment.sizes && attachment.sizes.thumbnail)
+        ? attachment.sizes.thumbnail.url
+        : (attachment.url || (attachment.get && attachment.get('url')) || '');
+
+      if (!url && attachment.get) {
+        var sizes = attachment.get('sizes');
+        url = (sizes && sizes.thumbnail) ? sizes.thumbnail.url : attachment.get('url');
+      }
+
+      idInput.value = String(id || '');
+      if (img && url)  { img.src = url; }
+      if (preview)     { preview.style.display = id ? '' : 'none'; }
+      if (removeBtn)   { removeBtn.style.display = id ? '' : 'none'; }
+    }
+
+    function clearThumbnail() {
+      idInput.value = '';
+      if (img)     { img.src = ''; }
+      if (preview) { preview.style.display = 'none'; }
+      if (removeBtn) { removeBtn.style.display = 'none'; }
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+
+      if (!window.wp || !window.wp.media) {
+        window.alert('WordPress media library is not available.');
+        return;
+      }
+
+      if (frame) {
+        frame.open();
+        return;
+      }
+
+      frame = window.wp.media({
+        title:    'Select Featured Image',
+        button:   { text: 'Set Featured Image' },
+        multiple: false,
+        library:  { type: 'image' }
+      });
+
+      frame.on('select', function () {
+        var selection = frame.state().get('selection');
+        if (!selection) { return; }
+        var attachment = selection.first().toJSON();
+        setThumbnail(attachment);
+      });
+
+      frame.open();
+    });
+
+    if (removeBtn) {
+      removeBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        clearThumbnail();
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})(window, document);
