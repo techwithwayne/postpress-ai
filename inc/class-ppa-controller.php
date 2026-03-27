@@ -1060,6 +1060,13 @@ private static function normalize_base_candidate( $base ) {
 					wp_update_post( array( 'ID' => (int) $up['post_id'], 'post_title' => (string) $preferred_title ), true ); // CHANGED:
 				}
 
+				// Set featured image if thumbnail_id was included in the Composer payload.
+				$thumb_id = isset( $payload['thumbnail_id'] ) ? (int) $payload['thumbnail_id'] : 0;
+				if ( $thumb_id > 0 && isset( $up['post_id'] ) && (int) $up['post_id'] > 0 ) {
+					set_post_thumbnail( (int) $up['post_id'], $thumb_id );
+					error_log( 'PPA: [ajax_store] set_post_thumbnail post_id=' . (int) $up['post_id'] . ' thumbnail_id=' . $thumb_id );
+				}
+
 				// Attach post info to the response so the Composer can open it.                                           // CHANGED:
 				if ( ! isset( $json['data'] ) || ! is_array( $json['data'] ) ) { // CHANGED:
 					$json['data'] = array(); // CHANGED:
