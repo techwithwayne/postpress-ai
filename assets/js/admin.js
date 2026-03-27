@@ -817,6 +817,7 @@
     if (thumbEl && String(thumbEl.value || '').trim()) {
       payload.thumbnail_id = parseInt(thumbEl.value, 10) || 0;
     }
+    try { console.info('PPA buildStorePayload: thumbnail_id=' + (payload.thumbnail_id || 0) + ', input_found=' + !!thumbEl + ', input_value="' + (thumbEl ? thumbEl.value : 'N/A') + '"'); } catch(e) {}
 
     return payload;
   }

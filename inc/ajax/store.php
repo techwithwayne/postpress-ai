@@ -282,19 +282,21 @@ function handle_store(): void {
 
         // Success payload — include `id` for admin.js pickId()
         $resp = [
-            'ok'        => true,
-            'id'        => (int) $post_id,
-            'post_id'   => (int) $post_id, // back-compat
-            'status'    => 'draft',
-            'provider'  => 'local-fallback',
-            'edit_link' => $edit_link,                                                            // CHANGED:
-            'ver'       => '1',
-            'result'    => [
-                'id'        => (int) $post_id,
-                'status'    => 'draft',
-                'edit_link' => $edit_link,                                                        // CHANGED:
-                'slug'      => (string) ($pack['data']['slug'] ?? ''),
-                'title'     => (string) ($pack['data']['title'] ?? ''),
+            'ok'           => true,
+            'id'           => (int) $post_id,
+            'post_id'      => (int) $post_id, // back-compat
+            'thumbnail_id' => $thumbnail_id,  // debug: echo back so client can verify it arrived
+            'status'       => 'draft',
+            'provider'     => 'local-fallback',
+            'edit_link'    => $edit_link,
+            'ver'          => '1',
+            'result'       => [
+                'id'           => (int) $post_id,
+                'status'       => 'draft',
+                'edit_link'    => $edit_link,
+                'slug'         => (string) ($pack['data']['slug'] ?? ''),
+                'title'        => (string) ($pack['data']['title'] ?? ''),
+                'thumbnail_id' => $thumbnail_id,
             ],
         ];
         error_log('PPA: store mode=draft ok id=' . (int) $post_id);

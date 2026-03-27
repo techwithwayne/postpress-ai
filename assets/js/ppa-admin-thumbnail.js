@@ -65,6 +65,7 @@
           : model.get('url') || '';
 
         idInput.value = id ? String(id) : '';
+        try { console.info('PPA thumbnail selected: id=' + id + ', url=' + url + ', input_set_to="' + idInput.value + '"'); } catch(e) {}
         if (img && url)  { img.src = url; }
         if (preview)     { preview.style.display = id ? '' : 'none'; }
         if (removeBtn)   { removeBtn.style.display = id ? '' : 'none'; }
