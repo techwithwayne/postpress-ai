@@ -532,7 +532,7 @@ foreach ($ppa_tone_groups as $g => $opts) {
 				<div id="ppa-thumbnail-preview" style="display:none;margin-bottom:8px;">
 					<img id="ppa-thumbnail-img" src="" alt="" style="max-width:200px;height:auto;display:block;border-radius:3px;">
 				</div>
-				<button type="button" id="ppa-thumbnail-btn" class="button">
+				<button type="button" id="ppa-thumbnail-select" class="button">
 					<?php echo esc_html__( 'Set Featured Image', 'postpress-ai' ); ?>
 				</button>
 				<button type="button" id="ppa-thumbnail-remove" class="button" style="display:none;margin-left:6px;">

@@ -16,14 +16,14 @@
   'use strict';
 
   function init() {
-    var idInput  = document.getElementById('ppa-thumbnail-id');
-    var btn      = document.getElementById('ppa-thumbnail-btn');
+    var idInput   = document.getElementById('ppa-thumbnail-id');
+    var btn       = document.getElementById('ppa-thumbnail-select');
     var removeBtn = document.getElementById('ppa-thumbnail-remove');
-    var preview  = document.getElementById('ppa-thumbnail-preview');
-    var img      = document.getElementById('ppa-thumbnail-img');
+    var preview   = document.getElementById('ppa-thumbnail-preview');
+    var img       = document.getElementById('ppa-thumbnail-img');
 
     if (!idInput || !btn) {
-      try { console.warn('PPA thumbnail: required elements missing — idInput=' + !!idInput + ', btn=' + !!btn + '. Is composer.php up to date?'); } catch(e) {}
+      try { console.warn('PPA thumbnail: required elements missing — idInput=' + !!idInput + ', btn=' + !!btn); } catch(e) {}
       return;
     }
 
