@@ -1586,6 +1586,7 @@
       audience: payload.audience || '',
       brief: payload.brief || '',
       keywords: payload.keywords || [],
+      thumbnail_id: payload.thumbnail_id || 0,
       _js_ver: PPA_JS_VER
     };
   }

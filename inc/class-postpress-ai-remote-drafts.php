@@ -460,6 +460,15 @@ class PostPress_AI_Remote_Drafts {
 			'post_type'    => isset( $params['post_type'] ) ? (string) $params['post_type'] : 'post',
 			'meta'         => isset( $params['meta'] ) && is_array( $params['meta'] ) ? $params['meta'] : [],
 		];
+
+		// Resolve thumbnail attachment ID to a URL so the target site can sideload it.
+		$thumbnail_id = isset( $params['thumbnail_id'] ) ? (int) $params['thumbnail_id'] : 0;
+		if ( $thumbnail_id > 0 ) {
+			$thumbnail_url = wp_get_attachment_url( $thumbnail_id );
+			if ( $thumbnail_url ) {
+				$post['thumbnail_url'] = $thumbnail_url;
+			}
+		}
 		self::debug_log( 'rest_remote_draft_from_composer_post_summary', self::debug_summarize_params( $post ) );
 
 		$license_key = trim( (string) get_option( 'postpress_ai_license_key' ) );
@@ -717,6 +726,20 @@ class PostPress_AI_Remote_Drafts {
 					sanitize_key( $key ),
 					is_scalar( $value ) ? $value : wp_json_encode( $value )
 				);
+			}
+		}
+
+		// Sideload featured image from source site URL if provided.
+		if ( ! empty( $payload['thumbnail_url'] ) ) {
+			$thumbnail_url = esc_url_raw( (string) $payload['thumbnail_url'] );
+			if ( $thumbnail_url ) {
+				require_once ABSPATH . 'wp-admin/includes/media.php';
+				require_once ABSPATH . 'wp-admin/includes/file.php';
+				require_once ABSPATH . 'wp-admin/includes/image.php';
+				$attach_id = media_sideload_image( $thumbnail_url, $post_id, null, 'id' );
+				if ( ! is_wp_error( $attach_id ) ) {
+					set_post_thumbnail( $post_id, $attach_id );
+				}
 			}
 		}
 
