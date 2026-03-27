@@ -1061,7 +1061,7 @@ private static function normalize_base_candidate( $base ) {
 				}
 
 				// Set featured image if thumbnail_id was included in the Composer payload.
-				$thumb_id = isset( $payload['thumbnail_id'] ) ? (int) $payload['thumbnail_id'] : 0;
+				$thumb_id = isset( $payload['json']['thumbnail_id'] ) ? (int) $payload['json']['thumbnail_id'] : 0;
 				if ( $thumb_id > 0 && isset( $up['post_id'] ) && (int) $up['post_id'] > 0 ) {
 					set_post_thumbnail( (int) $up['post_id'], $thumb_id );
 					error_log( 'PPA: [ajax_store] set_post_thumbnail post_id=' . (int) $up['post_id'] . ' thumbnail_id=' . $thumb_id );
