@@ -60,12 +60,13 @@ function ppa_normalize_request(): array {
     }
 
     // Canonical fields
-    $title   = isset($payload['title'])   ? $payload['title']   : '';
-    $content = isset($payload['content']) ? $payload['content'] : '';
-    $excerpt = isset($payload['excerpt']) ? $payload['excerpt'] : '';
-    $status  = isset($payload['status'])  ? $payload['status']  : '';
-    $slug    = isset($payload['slug'])    ? $payload['slug']    : '';
-    $mode    = isset($payload['mode'])    ? $payload['mode']    : '';
+    $title        = isset($payload['title'])        ? $payload['title']        : '';
+    $content      = isset($payload['content'])      ? $payload['content']      : '';
+    $excerpt      = isset($payload['excerpt'])      ? $payload['excerpt']      : '';
+    $status       = isset($payload['status'])       ? $payload['status']       : '';
+    $slug         = isset($payload['slug'])         ? $payload['slug']         : '';
+    $mode         = isset($payload['mode'])         ? $payload['mode']         : '';
+    $thumbnail_id = isset($payload['thumbnail_id']) ? (int) $payload['thumbnail_id'] : 0;
 
     // Optional collections: allow array or CSV string
     $tags       = isset($payload['tags']) ? $payload['tags'] : [];
@@ -100,15 +101,16 @@ function ppa_normalize_request(): array {
     foreach ($categories as $c) { $cats_s[] = sanitize_text_field((string) $c); }
 
     $data = [
-        'title'      => $title_s,
-        'content'    => $content_s,
-        'excerpt'    => $excerpt_s,
-        'status'     => $status_s,
-        'slug'       => $slug_s,
-        'tags'       => $tags_s,
-        'categories' => $cats_s,
-        'author'     => $author_s,
-        'mode'       => $mode_s,
+        'title'        => $title_s,
+        'content'      => $content_s,
+        'excerpt'      => $excerpt_s,
+        'status'       => $status_s,
+        'slug'         => $slug_s,
+        'tags'         => $tags_s,
+        'categories'   => $cats_s,
+        'author'       => $author_s,
+        'mode'         => $mode_s,
+        'thumbnail_id' => $thumbnail_id,
     ];
 
     $meta = [
@@ -242,6 +244,12 @@ function handle_store(): void {
                 'meta'     => ['phase' => 'insert'],
             ]);
             ppa_send_error('insert_failed', 'failed to save draft', ['detail' => $msg], 500);
+        }
+
+        // Featured image (best-effort; only set if a valid attachment ID was provided)
+        $thumbnail_id = (int) ($pack['data']['thumbnail_id'] ?? 0);
+        if ($thumbnail_id > 0) {
+            set_post_thumbnail((int) $post_id, $thumbnail_id);
         }
 
         // Terms (best-effort; tolerate slugs/ids; ignore failures quietly)

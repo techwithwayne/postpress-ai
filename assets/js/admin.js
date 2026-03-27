@@ -813,6 +813,11 @@
       meta_description: metaEl2 ? String(metaEl2.value  || '').trim() : ''
     };
 
+    var thumbEl = $('#ppa-thumbnail-id');
+    if (thumbEl && String(thumbEl.value || '').trim()) {
+      payload.thumbnail_id = parseInt(thumbEl.value, 10) || 0;
+    }
+
     return payload;
   }
 

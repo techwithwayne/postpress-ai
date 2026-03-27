@@ -525,6 +525,20 @@ foreach ($ppa_tone_groups as $g => $opts) {
 				<label for="ppa-slug"><?php echo esc_html__( 'Slug (optional)', 'postpress-ai' ); ?></label>
 				<input type="text" id="ppa-slug" placeholder="<?php echo esc_attr__( 'auto-generated-from-title', 'postpress-ai' ); ?>">
 			</div>
+
+			<div class="ppa-form-group">
+				<label><?php echo esc_html__( 'Featured Image', 'postpress-ai' ); ?></label>
+				<input type="hidden" id="ppa-thumbnail-id" value="">
+				<div id="ppa-thumbnail-preview" style="display:none;margin-bottom:8px;">
+					<img id="ppa-thumbnail-img" src="" alt="" style="max-width:200px;height:auto;display:block;border-radius:3px;">
+				</div>
+				<button type="button" id="ppa-thumbnail-btn" class="button">
+					<?php echo esc_html__( 'Set Featured Image', 'postpress-ai' ); ?>
+				</button>
+				<button type="button" id="ppa-thumbnail-remove" class="button" style="display:none;margin-left:6px;">
+					<?php echo esc_html__( 'Remove', 'postpress-ai' ); ?>
+				</button>
+			</div>
 		</details>
 
 		<div class="ppa-actions" role="group" aria-label="<?php echo esc_attr__( 'Composer actions', 'postpress-ai' ); ?>">
