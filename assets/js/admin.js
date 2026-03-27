@@ -1751,6 +1751,11 @@
         var fallbackEdit = (!edit && pid) ? buildWpEditUrlFromId(pid) : '';
         var url = absolutizeUrl(edit || fallbackEdit || view);
 
+        // Best-effort: set thumbnail via dedicated call in case store.php didn't handle it
+        if (pid && payload.thumbnail_id > 0) {
+          apiPost('ppa_set_thumbnail', { post_id: pid, thumbnail_id: payload.thumbnail_id }).catch(function () {});
+        }
+
         try {
           console.info('PPA: draft store ok →', {
             edit_link: edit,

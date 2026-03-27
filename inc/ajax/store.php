@@ -315,6 +315,48 @@ function handle_store(): void {
     wp_send_json($resp, 200);
 }
 
+/**
+ * Dedicated handler: set featured image on an existing post.
+ * Accepts post_id + thumbnail_id via JSON body or POST.
+ * Logged-in only (no nopriv — requires edit_posts cap).
+ */
+function handle_set_thumbnail(): void {
+    ppa_json_headers();
+
+    if (!ppa_is_authorized()) {
+        ppa_send_error('auth_required', 'authentication required', [], 401);
+    }
+
+    $raw     = file_get_contents('php://input');
+    $ct      = isset($_SERVER['CONTENT_TYPE']) ? (string) $_SERVER['CONTENT_TYPE'] : '';
+    $is_json = stripos($ct, 'application/json') !== false;
+    $payload = [];
+
+    if ($is_json && $raw !== '') {
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $payload = $decoded;
+        }
+    }
+    if (empty($payload) && !empty($_POST)) {
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $payload = $_POST;
+    }
+
+    $post_id      = isset($payload['post_id'])      ? (int) $payload['post_id']      : 0;
+    $thumbnail_id = isset($payload['thumbnail_id']) ? (int) $payload['thumbnail_id'] : 0;
+
+    if ($post_id <= 0 || $thumbnail_id <= 0) {
+        ppa_send_error('bad_request', 'post_id and thumbnail_id are required', [], 400);
+    }
+
+    $result = set_post_thumbnail($post_id, $thumbnail_id);
+    error_log('PPA: set_thumbnail post_id=' . $post_id . ' thumbnail_id=' . $thumbnail_id . ' result=' . ($result ? 'ok' : 'fail'));
+
+    wp_send_json(['ok' => (bool) $result, 'post_id' => $post_id, 'thumbnail_id' => $thumbnail_id], 200);
+}
+
 // Hooks (both logged-in and public)
-add_action('wp_ajax_ppa_store',        __NAMESPACE__ . '\handle_store');
-add_action('wp_ajax_nopriv_ppa_store', __NAMESPACE__ . '\handle_store');
+add_action('wp_ajax_ppa_store',         __NAMESPACE__ . '\handle_store');
+add_action('wp_ajax_nopriv_ppa_store',  __NAMESPACE__ . '\handle_store');
+add_action('wp_ajax_ppa_set_thumbnail', __NAMESPACE__ . '\handle_set_thumbnail');
